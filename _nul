@@ -1,0 +1,4 @@
+dir: cannot access '/b': No such file or directory
+dir: cannot access '*.bat': No such file or directory
+dir: cannot access '*.cmd': No such file or directory
+dir: cannot access '*.ps1': No such file or directory

@@ -1,0 +1,213 @@
+#!/usr/bin/env python3
+"""Gera o index.html completo para o projeto Adri Poltronas."""
+import os
+
+HTML = r'''<!DOCTYPE html>
+<html lang="pt-BR" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Adri Poltronas</title>
+    <meta name="description" content="Sistema de gestao de clientes - Adri Poltronas">
+    <meta name="theme-color" content="#0f172a">
+    <link rel="icon" type="image/png" href="Design-sem-nome-8-1024x1024.png">
+    <link rel="manifest" href="manifest.json">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <link rel="stylesheet" href="css/style.css?v=v41">
+</head>
+<body>
+    <div id="notificacoesPanel" class="notificacoes-panel" style="display:none;">
+        <div class="notificacoes-header"><span>&#128276; Notificacoes</span><button class="notif-close" onclick="fecharNotificacoes()">&#10005;</button></div>
+        <div id="notificacoesLista" class="notificacoes-lista"></div>
+    </div>
+
+    <div class="container">
+        <header class="main-header">
+            <div class="header-left"><h1>Adri Poltronas</h1></div>
+            <div class="header-right">
+                <button class="btn-icon" onclick="abrirNotificacoes()" title="Notificacoes" id="btnNotificacoes">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                    <span class="notif-badge" id="notifBadge" style="display:none;">0</span>
+                </button>
+                <button class="btn-icon theme-toggle" onclick="toggleTheme()" title="Alternar tema" id="btnThemeToggle">
+                    <svg id="iconSun" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+                    <svg id="iconMoon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                </button>
+                <img src="Design-sem-nome-8-1024x1024.png" alt="Logo" class="header-logo">
+            </div>
+        </header>
+
+        <nav class="nav-tabs">
+            <button class="nav-tab active" data-tab="dashboard" onclick="trocarAba('dashboard')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+                Dashboard
+            </button>
+            <button class="nav-tab" data-tab="clientes" onclick="trocarAba('clientes')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                Clientes
+            </button>
+            <button class="nav-tab" data-tab="mapa" onclick="trocarAba('mapa')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                Mapa
+            </button>
+            <button class="nav-tab" data-tab="relatorios" onclick="trocarAba('relatorios')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                Relatorios
+            </button>
+            <button class="nav-tab" data-tab="pagamentos" onclick="trocarAba('pagamentos')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                Pagamentos
+            </button>
+            <button class="nav-tab" data-tab="historico" onclick="trocarAba('historico')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                Historico
+            </button>
+        </nav>
+
+        <main>
+            <section id="aba-dashboard" class="tab-content active">
+                <div class="dashboard-grid">
+                    <div class="card card-metrica"><div class="metrica-icon" style="background:rgba(59,130,246,0.15);color:#3b82f6;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div><div class="metrica-info"><span class="metrica-valor" id="metricTotalClientes">0</span><span class="metrica-label">Total Clientes</span></div></div>
+                    <div class="card card-metrica"><div class="metrica-icon" style="background:rgba(16,185,129,0.15);color:#10b981;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg></div><div class="metrica-info"><span class="metrica-valor" id="metricEntregas">0</span><span class="metrica-label">Entregas</span></div></div>
+                    <div class="card card-metrica"><div class="metrica-icon" style="background:rgba(245,158,11,0.15);color:#f59e0b;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/></svg></div><div class="metrica-info"><span class="metrica-valor" id="metricRetiradas">0</span><span class="metrica-label">Retiradas</span></div></div>
+                    <div class="card card-metrica"><div class="metrica-icon" style="background:rgba(139,92,246,0.15);color:#8b5cf6;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/></svg></div><div class="metrica-info"><span class="metrica-valor" id="metricCadastros30d">0</span><span class="metrica-label">Novos (30 dias)</span></div></div>
+                </div>
+                <div class="dashboard-charts">
+                    <div class="card chart-card"><h3 class="card-title">Entregas vs Retiradas</h3><canvas id="chartEntregaRetirada"></canvas></div>
+                    <div class="card chart-card"><h3 class="card-title">Top 10 Cidades</h3><canvas id="chartCidades"></canvas></div>
+                </div>
+                <div class="dashboard-charts"><div class="card chart-card" style="flex:1;"><h3 class="card-title">Cadastros - Ultimos 30 dias</h3><canvas id="chartTimeline"></canvas></div></div>
+                <div class="card"><h3 class="card-title">Ultimos Clientes</h3><div id="ultimosClientes"></div></div>
+            </section>
+
+            <section id="aba-clientes" class="tab-content" style="display:none;">
+                <section class="card">
+                    <h2 id="formTitle" style="margin-bottom:1.5rem;font-size:1.2rem;">
+                        <svg id="editIcon" class="title-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                        <span id="formTitleText">Cadastro de Cliente</span>
+                    </h2>
+                    <form id="clienteForm">
+                        <input type="hidden" id="clienteId">
+                        <div class="form-grid">
+                            <div class="input-group"><label>Nome Completo</label><input type="text" id="nome" required placeholder="Ex: Joao da Silva"></div>
+                            <div class="input-group"><label>CEP <button type="button" class="btn-ia" onclick="sugerirBairro()" title="Sugestao IA">&#10024; IA</button></label><input type="text" id="cep" required placeholder="00000-000" maxlength="9"></div>
+                            <div class="input-group"><label>Rua e numero</label><input type="text" id="rua" required placeholder="Ex: Rua das Flores, 123"></div>
+                            <div class="input-group"><label>Bairro</label><input type="text" id="bairro" required placeholder="Bairro"></div>
+                            <div class="input-group"><label>Cidade</label><input type="text" id="cidade" required placeholder="Cidade"></div>
+                            <div class="input-group"><label>Entrega / Retirada</label><select id="entregaRetirada" required><option value="Entrega">Entrega</option><option value="Retirada">Retirada</option></select></div>
+                        </div>
+                        <div class="input-group input-group-obs"><label>Observacoes</label><textarea id="observacoes" rows="3" placeholder="Notas sobre o cliente, preferencias, horarios especiais..." maxlength="1000"></textarea><span id="obsCount" class="obs-counter">0/1000</span></div>
+                        <div class="form-actions"><button type="submit" class="btn btn-primary" id="btnSalvar">Salvar Cliente</button><button type="button" class="btn btn-cancelar" id="btnCancelar">Cancelar Edicao</button></div>
+                    </form>
+                </section>
+                <section class="card">
+                    <div style="display:flex;gap:1rem;align-items:center;justify-content:space-between;margin-bottom:1.5rem;flex-wrap:wrap;">
+                        <div class="input-group search-bar" style="flex:1;"><input type="text" id="inputPesquisa" placeholder="Pesquisar por nome ou cidade..." autocomplete="off"></div>
+                        <div style="position:relative;">
+                            <button type="button" class="btn-select-mode" id="btnFiltro" onclick="toggleFiltro()">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                                <span id="txtBtnFiltro">Filtrar</span>
+                                <span id="badgeFiltroCount" class="filtro-badge" style="display:none;">0</span>
+                            </button>
+                            <div class="filtro-dropdown" id="filtroDropdown">
+                                <div class="filtro-header"><span>Filtros</span><button type="button" class="filtro-limpar" onclick="limparFiltros()">Limpar</button></div>
+                                <div class="filtro-section"><div class="filtro-label">Tipo</div>
+                                    <label class="filtro-option"><input type="checkbox" name="filtroTipo" value="Entrega" checked><span class="badge-entrega" style="font-size:0.75rem;">Entrega</span></label>
+                                    <label class="filtro-option"><input type="checkbox" name="filtroTipo" value="Retirada" checked><span class="badge-retirada" style="font-size:0.75rem;">Retirada</span></label>
+                                </div>
+                                <div class="filtro-section"><div class="filtro-label">Cidade</div><div id="filtroCidadesContainer"></div></div>
+                                <button type="button" class="btn btn-primary" style="width:100%;margin-top:0.5rem;font-size:0.85rem;padding:0.5rem;" onclick="aplicarFiltros()">Aplicar Filtros</button>
+                            </div>
+                        </div>
+                        <button type="button" class="btn-select-mode" id="btnModoSelecao" onclick="toggleModoSelecao()">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+                            <span id="txtBtnSelecao">Selecionar Clientes</span>
+                        </button>
+                    </div>
+                    <div style="overflow-x:hidden;padding-bottom:10px;">
+                        <table><thead><tr><th class="col-checkbox"><input type="checkbox" id="selectAll"></th><th class="col-nome">Nome</th><th class="col-cidade">Cidade</th><th class="col-bairro">Bairro</th><th class="col-tipo">Entrega/Retirada</th><th class="col-acoes" style="text-align:right;">Acoes</th></tr></thead><tbody id="tabelaClientes"></tbody></table>
+                    </div>
+                    <div class="actions-excel" style="display:flex;justify-content:flex-end;gap:0.75rem;margin-top:1rem;flex-wrap:wrap;">
+                        <button type="button" class="btn" onclick="abrirModalImportar()" title="Importar clientes"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Importar</button>
+                        <button type="button" class="btn" onclick="fazerBackupJSON()" title="Backup JSON"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Backup JSON</button>
+                        <button type="button" class="btn" onclick="fazerBackupSQLite()" title="Backup SQLite"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg> Backup DB</button>
+                        <button type="button" class="btn btn-microsoft" id="btnConectarMicrosoft" onclick="conectarMicrosoft()"><img src="img/excel.png" alt="Microsoft" style="width:18px;height:18px;object-fit:contain;"><span id="txtBtnConectar">Conectar Microsoft</span></button>
+                        <button type="button" class="btn btn-excel" id="btnEnviarExcel" onclick="enviarParaExcel()" disabled><img src="img/excel.png" alt="Excel" style="width:18px;height:18px;object-fit:contain;"> Enviar Excel</button>
+                    </div>
+                </section>
+            </section>
+
+            <section id="aba-mapa" class="tab-content" style="display:none;">
+                <div class="card">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;"><h3 class="card-title" style="margin:0;">&#128205; Mapa de Clientes</h3><span id="mapaInfo" style="font-size:0.85rem;color:var(--text-muted);">Carregando...</span></div>
+                    <div id="mapaContainer" style="width:100%;height:500px;border-radius:16px;overflow:hidden;border:1px solid var(--glass-border);"></div>
+                </div>
+            </section>
+
+            <section id="aba-relatorios" class="tab-content" style="display:none;">
+                <div class="card">
+                    <h3 class="card-title">&#128202; Relatorios Personalizados</h3>
+                    <div class="form-grid" style="margin-bottom:1.5rem;">
+                        <div class="input-group"><label>Filtro por Tipo</label><select id="relFiltroTipo"><option value="">Todos</option><option value="Entrega">Entrega</option><option value="Retirada">Retirada</option></select></div>
+                        <div class="input-group"><label>Filtro por Cidade</label><input type="text" id="relFiltroCidade" placeholder="Ex: Sao Paulo"></div>
+                        <div class="input-group"><label>Formato</label><select id="relFormato"><option value="csv">CSV</option><option value="xlsx">Excel (XLSX)</option></select></div>
+                    </div>
+                    <button class="btn btn-primary" onclick="exportarRelatorio()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Exportar Relatorio</button>
+                </div>
+                <div class="card"><h3 class="card-title">&#128200; Performance por Regiao</h3><div id="relatorioRegioes"></div></div>
+            </section>
+
+            <section id="aba-pagamentos" class="tab-content" style="display:none;">
+                <div class="card">
+                    <h3 class="card-title">&#128176; Gerenciar Pagamentos</h3>
+                    <div class="form-grid" style="margin-bottom:1.5rem;">
+                        <div class="input-group"><label>Cliente</label><select id="pagClienteId"><option value="">Selecione um cliente...</option></select></div>
+                        <div class="input-group"><label>Valor (R$)</label><input type="number" id="pagValor" step="0.01" min="0" placeholder="0,00"></div>
+                        <div class="input-group"><label>Descricao</label><input type="text" id="pagDescricao" placeholder="Ex: Poltrona model X"></div>
+                        <div class="input-group"><label>Status</label><select id="pagStatus"><option value="Pendente">Pendente</option><option value="Recebido">Recebido</option><option value="Atrasado">Atrasado</option><option value="Cancelado">Cancelado</option></select></div>
+                        <div class="input-group"><label>Data Vencimento</label><input type="date" id="pagDataVencimento"></div>
+                        <div class="input-group"><label>Data Pagamento</label><input type="date" id="pagDataPagamento"></div>
+                    </div>
+                    <button class="btn btn-primary" onclick="salvarPagamento()">Registrar Pagamento</button>
+                </div>
+                <div class="dashboard-grid" style="margin-top:1rem;">
+                    <div class="card card-metrica"><div class="metrica-info"><span class="metrica-valor" id="pagTotalRecebido" style="color:#10b981;">R$ 0,00</span><span class="metrica-label">Total Recebido</span></div></div>
+                    <div class="card card-metrica"><div class="metrica-info"><span class="metrica-valor" id="pagTotalPendente" style="color:#f59e0b;">R$ 0,00</span><span class="metrica-label">Total Pendente</span></div></div>
+                </div>
+                <div class="card"><h3 class="card-title">Historico de Pagamentos</h3><div style="overflow-x:auto;"><table><thead><tr><th>Cliente</th><th>Valor</th><th>Descricao</th><th>Status</th><th>Vencimento</th><th>Acoes</th></tr></thead><tbody id="tabelaPagamentos"></tbody></table></div></div>
+            </section>
+
+            <section id="aba-historico" class="tab-content" style="display:none;">
+                <div class="card"><h3 class="card-title">&#128336; Historico de Alteracoes</h3><div id="historicoLista"></div></div>
+            </section>
+        </main>
+    </div>
+
+    <div id="toast"></div>
+
+    <div class="modal-overlay" id="modalExcluir"><div class="modal-box"><div class="modal-icon"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></div><div class="modal-title">Excluir Cliente</div><div class="modal-msg" id="modalMsgExcluir">Tem certeza que deseja excluir este cliente?</div><div class="modal-actions"><button class="modal-btn modal-btn-cancelar" id="modalBtnCancelar">Cancelar</button><button class="modal-btn modal-btn-confirmar" id="modalBtnConfirmar">Excluir</button></div></div></div>
+
+    <div class="modal-overlay" id="modalNomeArquivo"><div class="modal-box" style="max-width:460px;"><div class="modal-title">Nome do Arquivo</div><div class="modal-msg">Digite o nome desejado para a planilha:</div><input type="text" id="inputNomeArquivo" value="Clientes_AdriPoltronas" class="modal-input"><div class="modal-actions"><button class="modal-btn modal-btn-cancelar" id="modalNomeCancelar">Cancelar</button><button class="modal-btn" id="modalNomeConfirmar" style="background:linear-gradient(135deg,#2563eb,#3b82f6);box-shadow:0 4px 15px rgba(37,99,235,0.3);">Exportar</button></div></div></div>
+
+    <div class="modal-overlay" id="modalImportar"><div class="modal-box" style="max-width:520px;"><div class="modal-title">Importar Clientes em Lote</div><div class="modal-msg">Suporta CSV, JSON ou XLSX. Colunas: nome, cep, rua, bairro, cidade, entrega_retirada, observacoes.</div><input type="file" id="inputArquivoImportar" accept=".csv,.json,.xlsx,.xls" class="modal-input"><div id="importarResultado" style="display:none;margin-bottom:1rem;padding:1rem;border-radius:10px;"></div><div class="modal-actions"><button class="modal-btn modal-btn-cancelar" id="modalImportarCancelar">Cancelar</button><button class="modal-btn" onclick="executarImportacao()" style="background:linear-gradient(135deg,#8b5cf6,#a78bfa);box-shadow:0 4px 15px rgba(139,92,246,0.3);">Importar</button></div></div></div>
+
+    <div class="keyboard-shortcuts-bar" id="shortcutsBar">
+        <span><kbd>Ctrl</kbd>+<kbd>N</kbd> Novo</span>
+        <span><kbd>Ctrl</kbd>+<kbd>F</kbd> Buscar</span>
+        <span><kbd>Ctrl</kbd>+<kbd>E</kbd> Exportar</span>
+        <span><kbd>Ctrl</kbd>+<kbd>B</kbd> Backup</span>
+        <span><kbd>Ctrl</kbd>+<kbd>I</kbd> Importar</span>
+        <span><kbd>Esc</kbd> Cancelar</span>
+    </div>
+
+    <script src="js/app.js?v=v41"></script>
+</body>
+</html>'''.strip()
+
+if __name__ == '__main__':
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'frontend', 'index.html')
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(HTML)
+    print(f'Written {len(HTML)} chars to {path}')

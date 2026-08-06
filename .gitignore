@@ -1,0 +1,77 @@
+# --- Python / PyInstaller ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.spec.bak
+
+# Builds do PyInstaller (já versionados pelos .spec no raiz; ignorar artefatos)
+build/
+dist/
+*.exe
+*.app
+
+# Banco de dados local (gerado em runtime; em produção vai para %APPDATA%)
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Ambiente virtual
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# --- Editores / IDEs ---
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# --- Logs e arquivos temporários ---
+*.log
+*.tmp
+*.bak
+*.old
+*.orig
+
+# --- Credenciais e segredos locais ---
+.env
+.env.local
+*.pem
+*.key
+*.pfx
+*.p12
+
+# --- PyWebview / Webview cache ---
+.webview/
+webview_cache/
+
+# --- Builds do Inno Setup ---
+Output/
+Setup-*.exe
+*.iss.bak
+
+# --- Cobertura de testes ---
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.tox/
+
+# --- Documentação gerada ---
+docs/_build/
+site/
+
+# --- Frontend: se houver build de assets ---
+node_modules/
+*.min.js
+*.min.css
+.DS_Store
+
+# --- Uploads temporários do usuário ---
+uploads/
+*.xls.tmp
