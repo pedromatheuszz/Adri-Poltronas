@@ -1,6 +1,5 @@
 # backend/blueprints/dashboard.py
 """Blueprint de dashboard (métricas e gráficos)."""
-import time
 import logging
 from flask import Blueprint, jsonify
 
@@ -25,11 +24,13 @@ def dashboard_dados_graficos():
         cidades = database.obter_dados_grafico_cidades(10)
         timeline = database.obter_dados_grafico_timeline(30)
         ultimos = database.obter_ultimos_clientes(5)
+        financeiro = database.obter_metricas_financeiras()
         return jsonify({
             "por_tipo": por_tipo,
             "cidades": {"labels": [c[0] for c in cidades], "valores": [c[1] for c in cidades]},
             "timeline": {"labels": [t[0] for t in timeline], "valores": [t[1] for t in timeline]},
             "ultimos_clientes": ultimos,
+            "financeiro": financeiro,
         })
     except Exception as e:
         log.exception("Erro ao obter dados dos graficos")

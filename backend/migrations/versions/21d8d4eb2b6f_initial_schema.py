@@ -53,7 +53,8 @@ def upgrade() -> None:
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('cliente_id', sa.Integer(), nullable=False),
         sa.Column('cliente_nome', sa.Text(), nullable=True, server_default="''"),
-        sa.Column('valor', sa.Real(), nullable=False, server_default="0"),
+        # sa.REAL (maiusculo) e o tipo do dialeto; sa.Real nao existe.
+        sa.Column('valor', sa.REAL(), nullable=False, server_default="0"),
         sa.Column('descricao', sa.Text(), nullable=True, server_default="''"),
         sa.Column('status', sa.Text(), nullable=False, server_default="'Pendente'"),
         sa.Column('data_pagamento', sa.Text(), nullable=True, server_default="''"),

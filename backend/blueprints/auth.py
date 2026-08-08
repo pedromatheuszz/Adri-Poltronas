@@ -6,10 +6,9 @@ import base64
 import hashlib
 import urllib.parse
 import urllib.request
-import json
 import webbrowser
 import logging
-from flask import Blueprint, request, jsonify, render_template_string
+from flask import Blueprint, jsonify
 
 import database
 import config

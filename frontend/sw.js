@@ -2,7 +2,10 @@
 // Adri Poltronas - Service Worker (PWA Offline)
 // =============================================================================
 
-const CACHE_NAME = 'adri-poltronas-v1';
+// IMPORTANTE: incremente CACHE_NAME sempre que o HTML, o CSS ou o JS mudarem.
+// O handler de `activate` apaga todo cache cujo nome nao esteja nesta lista, e
+// e isso que expurga a versao anterior da maquina do usuario.
+const CACHE_NAME = 'adri-poltronas-v4';
 const CACHE_API = 'adri-api-v1';
 
 // Assets estáticos para cache imediato durante install
@@ -78,11 +81,58 @@ self.addEventListener('fetch', function(event) {
     return;
   }
 
+  // O documento HTML vai por Network First, e nao por Stale-While-Revalidate.
+  //
+  // O SWR devolve a copia em cache primeiro e so revalida depois: o usuario
+  // ficava permanentemente uma versao atras, vendo markup antigo mesmo com o
+  // servidor ja respondendo o novo. Como o HTML e servido de '/' (sem hash nem
+  // query de versao), nao havia nada que invalidasse a entrada.
+  // Offline continua funcionando pelo fallback de cache.
+  if (event.request.mode === 'navigate' ||
+      (event.request.destination === 'document') ||
+      (event.request.headers.get('accept') || '').includes('text/html')) {
+    event.respondWith(
+      networkFirstDocument(event.request, CACHE_NAME)
+    );
+    return;
+  }
+
   // Para assets estáticos: Stale-While-Revalidate
   event.respondWith(
     staleWhileRevalidate(event.request, CACHE_NAME)
   );
 });
+
+// =============================================================================
+// Estratégia Network First (para o documento HTML)
+// =============================================================================
+async function networkFirstDocument(request, cacheName) {
+  try {
+    const networkResponse = await fetch(request);
+    if (networkResponse.ok) {
+      const cache = await caches.open(cacheName);
+      cache.put(request, networkResponse.clone());
+    }
+    return networkResponse;
+  } catch (error) {
+    // Offline: serve a ultima versao boa. Cai para '/' porque a navegacao pode
+    // ter vindo de uma URL que nunca foi cacheada.
+    const cachedResponse = await caches.match(request) || await caches.match('/');
+    if (cachedResponse) {
+      return cachedResponse;
+    }
+    // Sem cache algum: devolve HTML, nunca JSON (isso quebraria a pagina).
+    return new Response(
+      '<!doctype html><meta charset="utf-8">' +
+      '<title>Adri Poltronas - Offline</title>' +
+      '<body style="font-family:sans-serif;background:#0f172a;color:#f8fafc;' +
+      'display:flex;align-items:center;justify-content:center;height:100vh;margin:0">' +
+      '<div style="text-align:center"><h2>Voce esta offline</h2>' +
+      '<p>Reabra o aplicativo quando a conexao voltar.</p></div>',
+      { headers: { 'Content-Type': 'text/html; charset=utf-8' }, status: 503 }
+    );
+  }
+}
 
 // =============================================================================
 // Estratégia Network First (para APIs)

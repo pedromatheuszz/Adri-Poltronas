@@ -1,7 +1,5 @@
 import sqlite3
 import os
-import sys
-import json
 import logging
 from datetime import datetime
 
@@ -143,6 +141,16 @@ def criar_tabela():
             CREATE TABLE IF NOT EXISTS clientes_asaas (
                 cliente_id INTEGER PRIMARY KEY,
                 asaas_customer_id TEXT NOT NULL DEFAULT ''
+            )
+        ''')
+
+        # As notificacoes sao derivadas de consultas, nao armazenadas. O estado
+        # de "lida" precisa entao de uma chave estavel por notificacao
+        # (tipo:id_da_entidade), guardada aqui.
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS notificacoes_lidas (
+                chave TEXT PRIMARY KEY,
+                lida_em TEXT DEFAULT (datetime('now', 'localtime'))
             )
         ''')
 
@@ -401,7 +409,6 @@ def obter_ou_criar_cliente_asaas(cliente_id, nome, cpf_cnpj=None, email=None, ci
         linha = conexao.execute('SELECT asaas_customer_id FROM clientes_asaas WHERE cliente_id=?', (cliente_id,)).fetchone()
         if linha and linha['asaas_customer_id']:
             return linha['asaas_customer_id']
-        import asaas
         resultado = asaas.criar_cliente(nome, cpf_cnpj, email=email, cidade=cidade, uf=uf, bairro=bairro, rua=rua, cep=cep)
         if resultado.get('_erro'):
             return None
@@ -440,6 +447,90 @@ def obter_metricas_pagamentos():
         'qtd_pendente': qtd_pendente or 0,
     }
 
+
+
+# A data efetiva de um recebimento e a de pagamento; quando ela nao foi
+# preenchida, cai para a criacao da cobranca. `date()` normaliza os dois
+# formatos que convivem na coluna: 'AAAA-MM-DD' (confirmacao manual) e
+# 'AAAA-MM-DD HH:MM:SS' (webhook do Asaas).
+_DATA_RECEBIMENTO = "date(COALESCE(NULLIF(data_pagamento, ''), criado_em))"
+
+
+def obter_metricas_financeiras(meses_historico=6):
+    """
+    Indicadores financeiros do dashboard: faturamento do mes corrente
+    comparado ao anterior, valores a receber e em atraso, ticket medio e a
+    serie mensal de receita.
+    """
+    with conectar() as conexao:
+        def receita_do_mes(deslocamento):
+            """Soma recebida no mes com `deslocamento` meses a partir do atual."""
+            return conexao.execute(
+                f"SELECT COALESCE(SUM(valor), 0) FROM pagamentos "
+                f"WHERE status = 'Recebido' AND strftime('%Y-%m', {_DATA_RECEBIMENTO}) = "
+                f"strftime('%Y-%m', date('now', 'localtime', ?))",
+                (f'{deslocamento} months',),
+            ).fetchone()[0] or 0
+
+        faturamento_mes = receita_do_mes(0)
+        faturamento_anterior = receita_do_mes(-1)
+
+        qtd_mes = conexao.execute(
+            f"SELECT COUNT(*) FROM pagamentos WHERE status = 'Recebido' "
+            f"AND strftime('%Y-%m', {_DATA_RECEBIMENTO}) = strftime('%Y-%m', date('now', 'localtime'))"
+        ).fetchone()[0] or 0
+
+        a_receber = conexao.execute(
+            "SELECT COALESCE(SUM(valor), 0) FROM pagamentos WHERE status = 'Pendente'"
+        ).fetchone()[0] or 0
+
+        em_atraso = conexao.execute(
+            "SELECT COALESCE(SUM(valor), 0) FROM pagamentos "
+            "WHERE status IN ('Pendente', 'Atrasado') "
+            "AND data_vencimento != '' AND date(data_vencimento) < date('now', 'localtime')"
+        ).fetchone()[0] or 0
+
+        qtd_atraso = conexao.execute(
+            "SELECT COUNT(*) FROM pagamentos "
+            "WHERE status IN ('Pendente', 'Atrasado') "
+            "AND data_vencimento != '' AND date(data_vencimento) < date('now', 'localtime')"
+        ).fetchone()[0] or 0
+
+        # Serie mensal: consulta uma vez e preenche os meses sem receita com
+        # zero, para o grafico nao pular periodos.
+        linhas = conexao.execute(
+            f"SELECT strftime('%Y-%m', {_DATA_RECEBIMENTO}) AS mes, SUM(valor) AS total "
+            f"FROM pagamentos WHERE status = 'Recebido' "
+            f"AND {_DATA_RECEBIMENTO} >= date('now', 'localtime', ?) "
+            f"GROUP BY mes",
+            (f'-{meses_historico - 1} months',),
+        ).fetchall()
+        por_mes = {linha['mes']: linha['total'] or 0 for linha in linhas}
+
+        meses = conexao.execute(
+            "WITH RECURSIVE seq(n) AS (SELECT 0 UNION ALL SELECT n + 1 FROM seq WHERE n < ?) "
+            "SELECT strftime('%Y-%m', date('now', 'localtime', '-' || (? - n) || ' months')) AS mes FROM seq",
+            (meses_historico - 1, meses_historico - 1),
+        ).fetchall()
+        serie = [{'mes': m['mes'], 'total': round(por_mes.get(m['mes'], 0), 2)} for m in meses]
+
+    variacao = None
+    if faturamento_anterior:
+        variacao = round(((faturamento_mes - faturamento_anterior) / faturamento_anterior) * 100, 1)
+    elif faturamento_mes:
+        variacao = 100.0
+
+    return {
+        'faturamento_mes': round(faturamento_mes, 2),
+        'faturamento_mes_anterior': round(faturamento_anterior, 2),
+        'variacao_percentual': variacao,
+        'qtd_recebimentos_mes': qtd_mes,
+        'ticket_medio_mes': round(faturamento_mes / qtd_mes, 2) if qtd_mes else 0,
+        'a_receber': round(a_receber, 2),
+        'em_atraso': round(em_atraso, 2),
+        'qtd_em_atraso': qtd_atraso,
+        'serie_mensal': serie,
+    }
 
 
 def obter_dados_grafico_por_tipo():
@@ -561,7 +652,7 @@ def obter_metricas_dashboard():
                 "total_retirada": total_retirada,
                 "cadastros_30d": cadastros_30d,
             }
-    except Exception as e:
+    except Exception:
         _log_db.exception("Erro ao obter metricas do dashboard")
         return {"total_clientes": 0, "total_entrega": 0, "total_retirada": 0, "cadastros_30d": 0}
 
@@ -607,6 +698,7 @@ def obter_notificacoes():
         for e in entregas_hoje:
             notifs.append({
                 'tipo': 'entrega_hoje',
+                'chave': f"entrega_hoje:{e['id']}",
                 'prioridade': 'alta',
                 'icone': '📦',
                 'msg': f"Entrega agendada para HOJE: {e['cliente_nome']}" + (f" as {e['hora_entrega']}" if e['hora_entrega'] else ''),
@@ -622,6 +714,7 @@ def obter_notificacoes():
         for e in entregas_proximas:
             notifs.append({
                 'tipo': 'entrega_proxima',
+                'chave': f"entrega_proxima:{e['id']}",
                 'prioridade': 'media',
                 'icone': '📋',
                 'msg': f"Entrega proxima: {e['cliente_nome']} em {e['data_entrega']}",
@@ -637,6 +730,7 @@ def obter_notificacoes():
         for e in entregas_atrasadas:
             notifs.append({
                 'tipo': 'entrega_atrasada',
+                'chave': f"entrega_atrasada:{e['id']}",
                 'prioridade': 'critica',
                 'icone': '🚨',
                 'msg': f"ENTREGA ATRASADA: {e['cliente_nome']} (era {e['data_entrega']})",
@@ -659,6 +753,7 @@ def obter_notificacoes():
                     dias = '?'
             notifs.append({
                 'tipo': 'cliente_inativo',
+                'chave': f"cliente_inativo:{c['id']}",
                 'prioridade': 'baixa',
                 'icone': '👤',
                 'msg': f"{c['nome']} sem atualizacao ha {dias} dias",
@@ -674,9 +769,10 @@ def obter_notificacoes():
         for p in pagamentos_atrasados:
             notifs.append({
                 'tipo': 'pagamento_atrasado',
+                'chave': f"pagamento_atrasado:{p['id']}",
                 'prioridade': 'alta',
                 'icone': '💰',
-                'msg': f"Pagamento R$ {p['valor']:.2f} de {p.get('nome_cliente', p['cliente_nome'])} atrasado!",
+                'msg': f"Pagamento R$ {p['valor']:.2f} de {p['nome_cliente'] or p['cliente_nome']} atrasado!",
                 'detalhes': f"Vencimento: {p['data_vencimento']}",
                 'pagamento_id': p['id'],
                 'data': p['data_vencimento']
@@ -689,15 +785,52 @@ def obter_notificacoes():
         for p in pagamentos_hoje:
             notifs.append({
                 'tipo': 'pagamento_hoje',
+                'chave': f"pagamento_hoje:{p['id']}",
                 'prioridade': 'media',
                 'icone': '💳',
-                'msg': f"Pagamento R$ {p['valor']:.2f} de {p.get('nome_cliente', p['cliente_nome'])} vence HOJE!",
+                'msg': f"Pagamento R$ {p['valor']:.2f} de {p['nome_cliente'] or p['cliente_nome']} vence HOJE!",
                 'detalhes': '',
                 'pagamento_id': p['id'],
                 'data': p['data_vencimento']
             })
 
-    # Ordenar por prioridade
+        # Marca quais ja foram lidas. Notificacoes lidas continuam na lista
+        # (o fato subjacente nao mudou), mas nao contam para o badge.
+        lidas = {linha['chave'] for linha in
+                 conexao.execute('SELECT chave FROM notificacoes_lidas').fetchall()}
+
+    for n in notifs:
+        n['lida'] = n.get('chave') in lidas
+
+    # Nao lidas primeiro; dentro de cada grupo, por prioridade.
     ordem = {'critica': 0, 'alta': 1, 'media': 2, 'baixa': 3}
-    notifs.sort(key=lambda n: ordem.get(n.get('prioridade', 'baixa'), 4))
+    notifs.sort(key=lambda n: (n['lida'], ordem.get(n.get('prioridade', 'baixa'), 4)))
     return notifs
+
+
+def marcar_notificacoes_lidas(chaves) -> int:
+    """Marca as chaves informadas como lidas. Idempotente."""
+    chaves = [str(c).strip() for c in (chaves or []) if str(c).strip()]
+    if not chaves:
+        return 0
+    with conectar() as conexao:
+        conexao.executemany(
+            'INSERT OR IGNORE INTO notificacoes_lidas (chave) VALUES (?)',
+            [(c,) for c in chaves],
+        )
+        return len(chaves)
+
+
+def desmarcar_notificacoes_lidas(chaves=None) -> int:
+    """Remove o estado de lida. Sem chaves, limpa todas."""
+    with conectar() as conexao:
+        if chaves is None:
+            cursor = conexao.execute('DELETE FROM notificacoes_lidas')
+        else:
+            chaves = [str(c).strip() for c in chaves if str(c).strip()]
+            if not chaves:
+                return 0
+            marcadores = ','.join('?' * len(chaves))
+            cursor = conexao.execute(
+                f'DELETE FROM notificacoes_lidas WHERE chave IN ({marcadores})', chaves)
+        return cursor.rowcount

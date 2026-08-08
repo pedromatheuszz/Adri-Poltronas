@@ -39,15 +39,12 @@ clean:
 
 build: test lint
 	@echo "🔨 Building aplicação..."
-	$(PYTHON) -m PyInstaller main.py \
-		--onefile \
-		--windowed \
-		--icon=icone_sistema.ico \
-		--name=AdriPoltronasApp \
-		--distpath=dist \
-		--buildpath=build
+	$(PYTHON) -m PyInstaller AdriPoltronasApp.spec \
+		--noconfirm \
+		--distpath dist \
+		--workpath build
 	@echo "✅ Build concluído!"
-	@echo "📍 Executável em: dist/AdriPoltronasApp.exe"
+	@echo "📍 Executável em: dist/AdriPoltronasApp/AdriPoltronasApp.exe"
 
 run:
 	@echo "▶️  Executando aplicação..."

@@ -1,3 +1,14 @@
+> ⚠️ **DOCUMENTO HISTÓRICO (05/08/2026) — CONTÉM AFIRMAÇÕES INCORRETAS.**
+>
+> A auditoria de 07/08/2026 verificou que várias entregas descritas aqui como
+> concluídas não funcionavam: a validação HMAC do webhook (o Asaas usa token
+> estático, não assinatura), o `ApiResponse` (nunca usado por nenhum endpoint,
+> depois removido), o build automatizado (flag `--buildpath` inexistente) e a
+> cobertura de ~30% (não havia medição). Consulte a errata completa e o estado
+> atual em `COMPLETION_SUMMARY.md`.
+
+---
+
 # RELATÓRIO FINAL DE IMPLEMENTAÇÃO - Adri Poltronas
 
 **Data:** 05/08/2026  

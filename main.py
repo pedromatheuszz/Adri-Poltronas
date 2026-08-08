@@ -32,68 +32,6 @@ HOST = "127.0.0.1"  # loopback only — nao exposto na rede
 URL_LOCAL = f"http://{HOST}:{PORTA}/"
 
 
-class WindowApi:
-    """API exposta ao JavaScript para controle da janela.
-
-    Para janelas frameless no Windows, o restore() nativo do pywebview
-    apenas define WindowState=Normal, mas NAO restaura posicao/tamanho.
-    Por isso, salvamos a geometria manualmente antes de maximizar.
-    """
-
-    def __init__(self):
-        self._saved_x = None
-        self._saved_y = None
-        self._saved_width = None
-        self._saved_height = None
-        self._is_maximized = False
-
-    def minimize(self):
-        webview.windows[0].minimize()
-
-    def maximize(self) -> bool:
-        """Alterna maximizar/restaurar. Retorna True se a janela ficou maximizada."""
-        window = webview.windows[0]
-        if self._is_maximized:
-            self._restore_geometry(window)
-            self._is_maximized = False
-            return False
-        else:
-            self._save_geometry(window)
-            window.maximize()
-            self._is_maximized = True
-            return True
-
-    def _save_geometry(self, window):
-        """Salva posicao e tamanho atuais da janela."""
-        self._saved_x = window.x
-        self._saved_y = window.y
-        self._saved_width = window.width
-        self._saved_height = window.height
-
-    def _restore_geometry(self, window):
-        """Restaura posicao e tamanho salvos (correcao para frameless no Windows)."""
-        # Primeiro: define WindowState = Normal (remove maximizado)
-        window.restore()
-        # Depois: reposiciona e redimensiona manualmente
-        if self._saved_x is not None and self._saved_y is not None:
-            try:
-                window.move(self._saved_x, self._saved_y)
-            except Exception:
-                pass
-        if self._saved_width is not None and self._saved_height is not None:
-            try:
-                window.resize(self._saved_width, self._saved_height)
-            except Exception:
-                pass
-
-    def is_maximized(self) -> bool:
-        """Retorna True se a janela esta maximizada."""
-        return self._is_maximized
-
-    def close(self):
-        webview.windows[0].destroy()
-
-
 def _esperar_servidor(timeout: float = 10.0) -> bool:
     """
     Faz health check no Flask antes de abrir a janela.
@@ -158,15 +96,12 @@ if __name__ == '__main__':
         )
 
     try:
-        window_api = WindowApi()
         webview.create_window(
             title='Adri Poltronas',
             url=URL_LOCAL,
             width=1000,
             height=700,
             resizable=True,
-            frameless=True,
-            js_api=window_api,
         )
         webview.start()
     except Exception:

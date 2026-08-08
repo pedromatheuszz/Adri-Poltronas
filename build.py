@@ -13,6 +13,7 @@ BACKEND_DIR = PROJECT_ROOT / "backend"
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
 DIST_DIR = PROJECT_ROOT / "dist"
 BUILD_DIR = PROJECT_ROOT / "build"
+SPEC_FILE = PROJECT_ROOT / "AdriPoltronasApp.spec"
 
 def run_command(cmd, cwd=None, description=""):
     """Executa um comando e retorna o status."""
@@ -20,9 +21,9 @@ def run_command(cmd, cwd=None, description=""):
         print(f"\n📦 {description}...")
     print(f"  $ {' '.join(cmd)}")
     try:
-        result = subprocess.run(cmd, cwd=cwd or PROJECT_ROOT, check=True)
+        subprocess.run(cmd, cwd=cwd or PROJECT_ROOT, check=True)
         return True
-    except subprocess.CalledProcessError as e:
+    except subprocess.CalledProcessError:
         print(f"❌ Erro: {description or 'Comando falhou'}")
         return False
 
@@ -64,28 +65,29 @@ def clean():
 def build():
     """Build da aplicação com PyInstaller."""
     print("🔨 Building aplicação...")
-    
+
     if not test():
         print("❌ Testes falharam. Build abortado.")
         return False
-    
+
     if not lint():
-        print("⚠️  Lint encontrou problemas, mas continuando...")
-    
+        print("❌ Lint encontrou problemas. Build abortado.")
+        return False
+
+    # O build usa o .spec, que declara templates/, alembic.ini e migrations/
+    # como datas. Recriar as flags aqui produziria um bundle sem esses
+    # recursos e o app empacotado quebraria no primeiro render_template.
     cmd = [
         sys.executable, "-m", "PyInstaller",
-        "main.py",
-        "--onefile",
-        "--windowed",
-        "--icon=icone_sistema.ico",
-        "--name=AdriPoltronasApp",
-        "--distpath=dist",
-        "--buildpath=build",
+        str(SPEC_FILE),
+        "--noconfirm",
+        "--distpath", str(DIST_DIR),
+        "--workpath", str(BUILD_DIR),
     ]
-    
+
     if run_command(cmd, PROJECT_ROOT, "PyInstaller"):
         print("✅ Build concluído com sucesso!")
-        print(f"  📍 Executável em: {DIST_DIR / 'AdriPoltronasApp.exe'}")
+        print(f"  📍 Executável em: {DIST_DIR / 'AdriPoltronasApp' / 'AdriPoltronasApp.exe'}")
         return True
     return False
 

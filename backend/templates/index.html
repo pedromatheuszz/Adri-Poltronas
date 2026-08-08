@@ -8,29 +8,10 @@
     <meta name="theme-color" content="#0f172a">
     <link rel="icon" type="image/png" href="/Design-sem-nome-8-1024x1024.png">
     <link rel="manifest" href="/manifest.json">
-    <link rel="stylesheet" href="/css/style.css?v=v58">
+    <link rel="stylesheet" href="/css/style.css?v=v62">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 </head>
 <body>
-    <!-- Custom Title Bar -->
-    <div id="custom-titlebar">
-        <div class="titlebar-drag">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(139,92,246,0.8)" stroke-width="2" style="margin-right:8px;"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
-            <span class="titlebar-title">Adri Poltronas</span>
-        </div>
-        <div class="titlebar-controls">
-            <button class="titlebar-btn" onclick="minimizeWindow()" title="Minimizar">
-                <svg width="10" height="10" viewBox="0 0 10 10"><rect x="0.5" y="4.5" width="9" height="1" rx="0.5" fill="currentColor"/></svg>
-            </button>
-            <button class="titlebar-btn" id="btnMaximize" onclick="maximizeWindow()" title="Maximizar">
-                <svg width="10" height="10" viewBox="0 0 10 10"><rect x="1" y="1" width="8" height="8" rx="1" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
-            </button>
-            <button class="titlebar-btn titlebar-close" onclick="closeWindow()" title="Fechar">
-                <svg width="10" height="10" viewBox="0 0 10 10"><path d="M1.5 1.5L8.5 8.5M8.5 1.5L1.5 8.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
-            </button>
-        </div>
-    </div>
-
     <div class="container">
         <header class="main-header">
             <div class="header-left"><h1>Adri Poltronas</h1></div>
@@ -46,7 +27,7 @@
                     <svg id="iconSun" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
                     <svg id="iconMoon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
                 </button>
-                <img src="/Design-sem-nome-8-1024x1024.png" alt="Logo" class="header-logo">
+                <img src="/Design-sem-nome-8-1024x1024.png" alt="Logo Adri Poltronas" class="header-logo">
             </div>
         </header>
 
@@ -81,12 +62,71 @@
                     <div class="card card-metrica"><div class="metrica-icon" style="background:rgba(16,185,129,0.15);color:#10b981;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg></div><div class="metrica-info"><span class="metrica-valor" id="metricEntregas">{{ ENTREGAS }}</span><span class="metrica-label">Entregas</span></div></div>
                     <div class="card card-metrica"><div class="metrica-icon" style="background:rgba(245,158,11,0.15);color:#f59e0b;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/></svg></div><div class="metrica-info"><span class="metrica-valor" id="metricRetiradas">{{ RETIRADAS }}</span><span class="metrica-label">Retiradas</span></div></div>
                     <div class="card card-metrica"><div class="metrica-icon" style="background:rgba(139,92,246,0.15);color:#8b5cf6;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/></svg></div><div class="metrica-info"><span class="metrica-valor" id="metricCadastros30d">{{ NOVOS }}%</span><span class="metrica-label">Novos (30 dias)</span></div></div>
-                    <div style="text-align:center;font-size:0.75rem;color:var(--text-muted);margin-top:0.5rem;">Atualizado: <span id="metricAtualizado">{{ NOW }}</span></div>
+                </div>
+
+                <!-- Financeiro -->
+                <div class="dashboard-grid">
+                    <div class="card card-metrica">
+                        <div class="metrica-icon" style="background:rgba(16,185,129,0.15);color:#10b981;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div>
+                        <div class="metrica-info">
+                            <span class="metrica-valor" id="metricFaturamentoMes">R$ 0,00</span>
+                            <span class="metrica-label">Faturamento do mes <span class="metrica-variacao" id="metricVariacao"></span></span>
+                            <span class="metrica-comparativo" id="metricMesAnterior"></span>
+                        </div>
+                    </div>
+                    <div class="card card-metrica">
+                        <div class="metrica-icon" style="background:rgba(59,130,246,0.15);color:#3b82f6;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
+                        <div class="metrica-info">
+                            <span class="metrica-valor" id="metricAReceber">R$ 0,00</span>
+                            <span class="metrica-label">A receber</span>
+                        </div>
+                    </div>
+                    <div class="card card-metrica">
+                        <div class="metrica-icon" style="background:rgba(239,68,68,0.15);color:#ef4444;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></div>
+                        <div class="metrica-info">
+                            <span class="metrica-valor" id="metricEmAtraso">R$ 0,00</span>
+                            <span class="metrica-label">Em atraso</span>
+                            <span class="metrica-comparativo" id="metricQtdAtraso"></span>
+                        </div>
+                    </div>
+                    <div class="card card-metrica">
+                        <div class="metrica-icon" style="background:rgba(245,158,11,0.15);color:#f59e0b;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg></div>
+                        <div class="metrica-info">
+                            <span class="metrica-valor" id="metricTicketMedio">R$ 0,00</span>
+                            <span class="metrica-label">Ticket medio do mes</span>
+                            <span class="metrica-comparativo" id="metricQtdRecebimentos"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Graficos -->
+                <div class="card grafico-card grafico-largo">
+                    <h3 class="grafico-titulo">Receita por mes</h3>
+                    <div class="grafico-area grafico-area-alta"><canvas id="chartReceitaMensal"></canvas></div>
+                </div>
+
+                <div class="graficos-grid">
+                    <div class="card grafico-card">
+                        <h3 class="grafico-titulo">Entregas vs Retiradas</h3>
+                        <div class="grafico-area"><canvas id="chartEntregaRetirada"></canvas></div>
+                    </div>
+                    <div class="card grafico-card">
+                        <h3 class="grafico-titulo">Clientes por cidade</h3>
+                        <div class="grafico-area"><canvas id="chartCidades"></canvas></div>
+                    </div>
+                    <div class="card grafico-card">
+                        <h3 class="grafico-titulo">Novos clientes (30 dias)</h3>
+                        <div class="grafico-area"><canvas id="chartTimeline"></canvas></div>
+                    </div>
+                    <div class="card grafico-card">
+                        <h3 class="grafico-titulo">Ultimos clientes</h3>
+                        <div id="ultimosClientes" class="ultimos-clientes"></div>
+                    </div>
                 </div>
             </section>
 
             <!-- CLIENTES -->
-            <section id="aba-clientes" class="tab-content" style="display:none;">
+            <section id="aba-clientes" class="tab-content">
                 <section class="card">
                     <h2 id="formTitle" style="margin-bottom:1.5rem;font-size:1.2rem;">
                         <svg id="editIcon" class="title-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
@@ -141,7 +181,7 @@
             </section>
 
             <!-- MAPA -->
-            <section id="aba-mapa" class="tab-content" style="display:none;">
+            <section id="aba-mapa" class="tab-content">
                 <div class="card" style="padding:1rem;">
                     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
                         <h2 style="margin:0;font-size:1.1rem;display:flex;align-items:center;gap:0.5rem;">
@@ -155,7 +195,7 @@
             </section>
 
             <!-- PAGAMENTOS -->
-            <section id="aba-pagamentos" class="tab-content" style="display:none;">
+            <section id="aba-pagamentos" class="tab-content">
                 <div class="card">
                     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.5rem;flex-wrap:wrap;gap:1rem;">
                         <h2 style="margin:0;font-size:1.2rem;display:flex;align-items:center;gap:0.5rem;">
@@ -227,7 +267,7 @@
             </section>
 
             <!-- RELATORIOS -->
-            <section id="aba-relatorios" class="tab-content" style="display:none;">
+            <section id="aba-relatorios" class="tab-content">
                 <div class="card">
                     <h2 style="margin:0 0 1.5rem;font-size:1.2rem;display:flex;align-items:center;gap:0.5rem;">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
@@ -275,15 +315,29 @@
         </div>
         <div id="notificacoesLista" class="notificacoes-lista"></div>
         <div class="notif-footer">
-            <button class="btn" style="width:100%;font-size:0.8rem;padding:0.5rem;background:rgba(59,130,246,0.15);color:#3b82f6;border:1px solid rgba(59,130,246,0.3);" onclick="carregarNotificacoes();abrirNotificacoes();">Atualizar</button>
+            <button id="btnMarcarTodasLidas" class="btn notif-btn-rodape notif-btn-lidas" style="display:none;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                Marcar todas como lidas
+            </button>
+            <button class="btn notif-btn-rodape notif-btn-atualizar" onclick="atualizarNotificacoes()">Atualizar</button>
         </div>
     </div>
 
     <div id="syncIndicator"></div>
     <div id="toast"></div>
 
-    <!-- Modal exclusao -->
-    <div class="modal-overlay" id="modalExcluir"><div class="modal-box"><div class="modal-icon"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></div><div class="modal-title">Excluir Cliente</div><div class="modal-msg" id="modalMsgExcluir">Tem certeza que deseja excluir este cliente?</div><div class="modal-actions"><button class="modal-btn modal-btn-cancelar" id="modalBtnCancelar">Cancelar</button><button class="modal-btn modal-btn-confirmar" id="modalBtnConfirmar">Excluir</button></div></div></div>
+    <!-- Modal de confirmacao (generico: exclusao, cancelamento, desconexao...) -->
+    <div class="modal-overlay" id="modalConfirmar" role="alertdialog" aria-modal="true" aria-labelledby="modalConfirmarTitulo" aria-describedby="modalConfirmarMsg">
+        <div class="modal-box" data-variante="perigo">
+            <div class="modal-icon" id="modalConfirmarIcone" aria-hidden="true"></div>
+            <div class="modal-title" id="modalConfirmarTitulo">Confirmar</div>
+            <div class="modal-msg" id="modalConfirmarMsg"></div>
+            <div class="modal-actions">
+                <button type="button" class="modal-btn modal-btn-cancelar" id="modalConfirmarCancelar">Cancelar</button>
+                <button type="button" class="modal-btn modal-btn-confirmar" id="modalConfirmarOk">Confirmar</button>
+            </div>
+        </div>
+    </div>
 
     <!-- Modal nome arquivo -->
     <div class="modal-overlay" id="modalNomeArquivo"><div class="modal-box" style="max-width:460px;"><div class="modal-title">Nome do Arquivo</div><div class="modal-msg">Digite o nome desejado para a planilha:</div><input type="text" id="inputNomeArquivo" value="Clientes_AdriPoltronas" class="modal-input"><div class="modal-actions"><button class="modal-btn modal-btn-cancelar" id="modalNomeCancelar">Cancelar</button><button class="modal-btn" id="modalNomeConfirmar" style="background:linear-gradient(135deg,#2563eb,#3b82f6);box-shadow:0 4px 15px rgba(37,99,235,0.3);">Exportar</button></div></div></div>
@@ -355,120 +409,9 @@
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script src="/js/offline.js"></script>
-    <script src="/js/app.js?v=v52"></script>
-    <script>
-        // Window controls for pywebview frameless window
-        let _isMaximized = false;
+    <script src="/js/app.js?v=v55"></script>
 
-        function waitForPywebview() {
-            return new Promise((resolve) => {
-                if (window.pywebview && window.pywebview.api) {
-                    resolve();
-                } else {
-                    const check = setInterval(() => {
-                        if (window.pywebview && window.pywebview.api) {
-                            clearInterval(check);
-                            resolve();
-                        }
-                    }, 50);
-                }
-            });
-        }
-
-        // SVG icons for maximize/restore
-        const ICON_MAXIMIZE = '<svg width="10" height="10" viewBox="0 0 10 10"><rect x="1" y="1" width="8" height="8" rx="1" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>';
-        const ICON_RESTORE = '<svg width="10" height="10" viewBox="0 0 12 12"><rect x="3.5" y="0.5" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1.2"/><rect x="1" y="2.5" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>';
-
-        function updateMaximizeIcon() {
-            const btn = document.getElementById('btnMaximize');
-            if (!btn) return;
-            btn.innerHTML = _isMaximized ? ICON_RESTORE : ICON_MAXIMIZE;
-            btn.title = _isMaximized ? 'Restaurar' : 'Maximizar';
-        }
-
-        async function minimizeWindow() {
-            await waitForPywebview();
-            const container = document.querySelector('.container');
-            // Slide-down + fade animation (runs immediately, no blocking)
-            if (container) {
-                container.style.transition = 'transform 0.3s cubic-bezier(0.4,0,1,1), opacity 0.3s ease-in';
-                container.style.transform = 'translateY(40px) scale(0.97)';
-                container.style.opacity = '0';
-            }
-            // Defer API call so browser can paint the animation frame first
-            setTimeout(() => {
-                try { window.pywebview.api.minimize(); } catch(e) {}
-            }, 50);
-        }
-
-        async function maximizeWindow() {
-            await waitForPywebview();
-            const container = document.querySelector('.container');
-            if (container) {
-                container.style.transition = 'none';
-                // Force a reflow so the 'none' transition applies immediately
-                container.offsetHeight;
-                if (_isMaximized) {
-                    // Restaurar: zoom-out sutil, depois volta ao normal
-                    container.style.transition = 'transform 0.3s cubic-bezier(0,0,0.2,1), opacity 0.25s ease';
-                    container.style.transform = 'scale(0.96)';
-                    container.style.opacity = '0.7';
-                } else {
-                    // Maximizar: zoom-in sutil
-                    container.style.transition = 'transform 0.3s cubic-bezier(0,0,0.2,1), opacity 0.25s ease';
-                    container.style.transform = 'scale(1.03)';
-                    container.style.opacity = '0.7';
-                }
-            }
-            // Defer API call so browser can paint the animation frame first
-            setTimeout(async () => {
-                try {
-                    const nowMaximized = await window.pywebview.api.maximize();
-                    _isMaximized = !!nowMaximized;
-                } catch(e) {
-                    _isMaximized = !_isMaximized;
-                }
-                updateMaximizeIcon();
-                // Settle animation: return to normal scale
-                if (container) {
-                    container.style.transition = 'transform 0.35s cubic-bezier(0,0,0.2,1), opacity 0.35s ease';
-                    container.style.transform = 'scale(1)';
-                    container.style.opacity = '1';
-                }
-            }, 50);
-        }
-
-        async function closeWindow() {
-            await waitForPywebview();
-            const container = document.querySelector('.container');
-            const titlebar = document.getElementById('custom-titlebar');
-            // Fade + scale-down + slide-up animation
-            if (container) {
-                container.style.transition = 'transform 0.35s cubic-bezier(0.4,0,1,1), opacity 0.3s ease-in';
-                container.style.transform = 'scale(0.92) translateY(-20px)';
-                container.style.opacity = '0';
-            }
-            if (titlebar) {
-                titlebar.style.transition = 'opacity 0.25s ease-in, transform 0.25s ease-in';
-                titlebar.style.opacity = '0';
-                titlebar.style.transform = 'translateY(-100%)';
-            }
-            // Defer API call so browser can paint the animation
-            setTimeout(() => {
-                try { window.pywebview.api.close(); } catch(e) { window.close(); }
-            }, 350);
-        }
-
-        // Initialize icon and sync state on load
-        document.addEventListener('DOMContentLoaded', async () => {
-            await waitForPywebview();
-            try {
-                _isMaximized = await window.pywebview.api.is_maximized();
-            } catch(e) { /* fallback: assume not maximized */ }
-            updateMaximizeIcon();
-        });
-    </script>
 </body>
 </html>

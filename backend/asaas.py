@@ -8,38 +8,44 @@ Suporta:
   - Consulta de status de pagamento
   - Cancelamento de cobranças
 
-Variáveis de ambiente:
+Variáveis de ambiente (lidas via `config`, que carrega o .env):
   ASAAS_API_KEY    – Chave de acesso à API Asaas (obrigatória)
   ASAAS_SANDBOX    – 'true' para ambiente sandbox (opcional, padrão: true)
 """
 import json
 import logging
-import os
-import sys
 import urllib.request
 import urllib.error
 import urllib.parse
+
+import config
 
 _log = logging.getLogger("adri.asaas")
 _APP_NAME = "AdriPoltronas/1.0"
 
 # ---------------------------------------------------------------------------
 # Configuração
+#
+# A leitura é feita através de `config` (que executa load_dotenv no import) e
+# não por snapshot de os.environ no import deste módulo. Um snapshot aqui seria
+# lido antes do .env ser carregado — a cadeia database -> asaas acontece antes
+# do load_dotenv de app.py — deixando a chave vazia sem nenhum aviso.
 # ---------------------------------------------------------------------------
-_API_KEY = os.environ.get("ASAAS_API_KEY", "")
-_SANDBOX = os.environ.get("ASAAS_SANDBOX", "true").lower() == "true"
-
 _BASE_URL_SANDBOX = "https://api-sandbox.asaas.com/v3"
 _BASE_URL_PROD = "https://api.asaas.com/v3"
 
 
+def _api_key() -> str:
+    return config.ASAAS_API_KEY
+
+
 def _base_url() -> str:
-    return _BASE_URL_SANDBOX if _SANDBOX else _BASE_URL_PROD
+    return _BASE_URL_SANDBOX if config.ASAAS_SANDBOX else _BASE_URL_PROD
 
 
 def _headers(content_type=True):
     h = {
-        "access_token": _API_KEY,
+        "access_token": _api_key(),
         "User-Agent": _APP_NAME,
     }
     if content_type:
@@ -110,12 +116,26 @@ def _request_delete(path):
 
 def esta_configurado():
     """Retorna True se a chave de API está configurada."""
-    return bool(_API_KEY)
+    return bool(_api_key())
 
 
 def ambiente():
     """Retorna 'sandbox' ou 'producao'."""
-    return "sandbox" if _SANDBOX else "producao"
+    return "sandbox" if config.ASAAS_SANDBOX else "producao"
+
+
+def chave_incompativel_com_ambiente() -> bool:
+    """
+    True quando o prefixo da chave não bate com o ambiente selecionado.
+    Uma chave $aact_prod_* apontando para o sandbox (ou vice-versa) sempre
+    resulta em 401 — vale detectar isso no boot em vez de na primeira cobrança.
+    """
+    chave = _api_key()
+    if not chave:
+        return False
+    if config.ASAAS_SANDBOX:
+        return '_prod_' in chave
+    return '_hmlg_' in chave
 
 
 # ---------------------------------------------------------------------------

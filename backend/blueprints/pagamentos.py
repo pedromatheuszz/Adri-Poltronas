@@ -1,14 +1,12 @@
 # backend/blueprints/pagamentos.py
 """Blueprint de pagamentos (CRUD, Asaas, webhook)."""
 import time
-import json
 import logging
 from flask import Blueprint, request, jsonify
 
 import database
 import validators
 import asaas
-import config
 
 log = logging.getLogger("adri.pagamentos")
 

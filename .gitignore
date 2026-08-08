@@ -13,8 +13,16 @@ dist/
 # Banco de dados local (gerado em runtime; em produção vai para %APPDATA%)
 *.db
 *.db-journal
+# SQLite em modo WAL gera companheiros -wal/-shm que chegam a dezenas de MB.
+*.db-wal
+*.db-shm
 *.sqlite
 *.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+
+# Estado de ferramentas locais (não faz parte do código-fonte)
+.freebuff/
 
 # Ambiente virtual
 .venv/
@@ -75,3 +83,9 @@ node_modules/
 # --- Uploads temporários do usuário ---
 uploads/
 *.xls.tmp
+
+# --- Artefatos acidentais de shell no Windows ---
+# `> nul` no Git Bash cria um arquivo literal chamado `_nul`/`nul`.
+_nul
+nul
+output.txt

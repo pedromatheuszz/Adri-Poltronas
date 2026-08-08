@@ -46,7 +46,8 @@ python build.py lint          # Check code style
 | Database logic | `backend/database.py` |
 | Validation rules | `backend/validators.py` |
 | Configuration | `backend/config.py` |
-| API response format | `backend/api_response.py` |
+| API response format | `API_STANDARD.md` |
+| Formatação de planilhas | `backend/planilha.py` |
 | Frontend | `frontend/` |
 | Tests | `tests/` |
 | Migrations | `backend/migrations/` |
@@ -67,7 +68,6 @@ python build.py lint          # Check code style
 ### Backend Refactored
 - `app.py` - Now 250 lines (was 837)
 - `blueprints/` - 10 new modular files
-- `api_response.py` - Standardized responses
 - `config.py` - Shared configuration
 - `migrations/` - Alembic schema versioning
 
@@ -92,6 +92,8 @@ ADRI_MICROSOFT_CLIENT_ID=your_client_id
 GEMINI_API_KEY=your_gemini_key
 ASAAS_API_KEY=your_asaas_key
 ASAAS_SANDBOX=true
+# Token do webhook Asaas - obrigatorio e DIFERENTE da ASAAS_API_KEY
+ASAAS_WEBHOOK_TOKEN=your_webhook_token
 ```
 
 ### Database Migrations
@@ -115,40 +117,43 @@ pytest tests/test_api.py -v
 # Specific test
 pytest tests/test_api.py::test_index_page -v
 
-# With coverage
-pytest tests/ --cov=backend --cov-report=html
+# With coverage (rode de dentro de backend/)
+cd backend && pytest ../tests --cov=. --cov-report=term-missing
 ```
 
-**Current Status:** 28/28 tests passing ✅
+**Current Status:** 48/48 tests passing ✅
+(28 funcionais + 20 de regressão em `tests/test_regressoes.py`)
 
 ---
 
 ## 🔒 SECURITY CHECKLIST
 
-- ✅ Webhook signature validation (HMAC SHA256)
+- ✅ Webhook autenticado por token estático (`asaas-access-token`), fail closed
+- ✅ Proteção contra CSRF (checagem de `Origin`/`Referer`)
+- ✅ Cabeçalhos de segurança (CSP, nosniff, DENY, no-referrer)
 - ✅ Rate limiting configured
 - ✅ SQL injection prevented (parameterized)
 - ✅ Input validation centralized
 - ✅ Credentials in .env (not in code)
-- ✅ Dependencies audited
+- ✅ `pip-audit` bloqueante no CI + scan de segredos
+- ⏳ SRI nos assets de CDN (pendente: exige vendorizar os arquivos)
 
 ---
 
-## 📋 MIGRATION CHECKLIST
+## 📋 FORMATO DE RESPOSTA
 
-When migrating endpoints to ApiResponse standard:
+A API não usa envelope. Veja `API_STANDARD.md` para o contrato completo.
 
 ```python
-from api_response import ApiResponse
+# Sucesso
+return jsonify(dados), 200
 
-# Before
-return jsonify({"erro": "Not found"}), 404
-
-# After
-return ApiResponse.not_found("Not found")
+# Erro (a chave `erro` e obrigatoria - o frontend depende dela)
+return jsonify({"erro": "Cliente nao encontrado."}), 404
 ```
 
-**Endpoints still to migrate:** All (optional but recommended)
+> O módulo `api_response.py` foi removido em 07/08/2026: existia mas nenhum
+> endpoint o usava. Veja a errata em `COMPLETION_SUMMARY.md`.
 
 ---
 

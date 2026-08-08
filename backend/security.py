@@ -10,17 +10,10 @@ base64 + flag de marcação para deixar claro que NÃO está cifrado.
 Em produção (PyInstaller), o fallback PLAIN é recusado por segurança.
 """
 import base64
-import os
 import sys
 
-# Tenta importar DPAPI (só disponível em Windows)
-# A função _importar_win32crypt() faz a tentativa sob demanda.
-
-try:
-    import win32crypt  # type: ignore
-except ImportError:
-    pass
-
+# O DPAPI (win32crypt) só existe no Windows e é importado sob demanda por
+# _importar_win32crypt(), definida abaixo.
 
 PREFIXO_DPAPI = "DPAPI1:"  # Marcador para identificar valor cifrado por DPAPI
 PREFIXO_PLAIN = "PLAIN1:"  # Marcador para identificar valor em texto puro (legado)

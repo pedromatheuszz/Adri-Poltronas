@@ -3,11 +3,9 @@
 import json
 import logging
 import hmac
-import hashlib
 from flask import Blueprint, request, jsonify
 
 import database
-import asaas
 import config
 
 log = logging.getLogger("adri.webhook")
@@ -15,26 +13,32 @@ log = logging.getLogger("adri.webhook")
 webhook_bp = Blueprint('webhook', __name__, url_prefix='/api/pagamentos')
 
 
-def _validar_assinatura_asaas(payload: bytes, assinatura: str) -> bool:
-    """Valida a assinatura HMAC SHA256 do webhook Asaas."""
-    if not assinatura or not config.ASAAS_API_KEY:
+def _token_valido(token_recebido: str) -> bool:
+    """
+    Valida o token de autenticacao do webhook Asaas.
+
+    O Asaas nao assina o payload: ele envia, no header `asaas-access-token`,
+    o token estatico definido no momento em que o webhook foi cadastrado.
+    A comparacao e feita em tempo constante para nao vazar o token por timing.
+    """
+    esperado = config.ASAAS_WEBHOOK_TOKEN
+    if not esperado or not token_recebido:
         return False
-    expected = hmac.new(
-        config.ASAAS_API_KEY.encode('utf-8'),
-        payload,
-        hashlib.sha256
-    ).hexdigest()
-    return hmac.compare_digest(expected, assinatura)
+    return hmac.compare_digest(esperado, token_recebido)
 
 
 @webhook_bp.route('/webhook', methods=['POST'])
 def webhook_asaas():
     """Endpoint para webhooks do Asaas (confirmacao de pagamento)."""
-    assinatura = request.headers.get('asaas-signature', '')
-    payload_bytes = request.get_data()
-    if not _validar_assinatura_asaas(payload_bytes, assinatura):
-        log.warning("[WEBHOOK] Assinatura invalida ou ausente.")
-        return jsonify({"erro": "Assinatura invalida"}), 401
+    if not config.ASAAS_WEBHOOK_TOKEN:
+        # Fail closed: sem token configurado nao ha como distinguir o Asaas de
+        # um terceiro, e o efeito seria marcar cobrancas como pagas.
+        log.error("[WEBHOOK] ASAAS_WEBHOOK_TOKEN nao configurado. Requisicao recusada.")
+        return jsonify({"erro": "Webhook nao configurado."}), 503
+
+    if not _token_valido(request.headers.get('asaas-access-token', '')):
+        log.warning("[WEBHOOK] Token de autenticacao invalido ou ausente.")
+        return jsonify({"erro": "Nao autorizado"}), 401
 
     dados = request.get_json(silent=True) or {}
     log.info("[WEBHOOK] Recebido: %s", json.dumps(dados, ensure_ascii=False)[:500])

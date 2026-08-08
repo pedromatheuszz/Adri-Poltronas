@@ -21,6 +21,76 @@ function exibirToast(mensagem, tipo) {
     }
 }
 
+// -----------------------------------------------------------------------------
+// Confirmacao
+//
+// Substitui o confirm() nativo, que ignora o tema do app e ainda exibe o
+// endereco do servidor ("127.0.0.1:5000 diz"). Devolve uma Promise<boolean>,
+// entao o uso fica igual ao do nativo: `if (!await confirmarAcao({...})) return;`
+// -----------------------------------------------------------------------------
+var ICONES_CONFIRMACAO = {
+    excluir: '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
+    alerta: '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+    desconectar: '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>'
+};
+
+function confirmarAcao(opcoes) {
+    opcoes = opcoes || {};
+    var overlay = document.getElementById('modalConfirmar');
+
+    // Sem o modal no DOM, cai para o nativo em vez de travar o fluxo.
+    if (!overlay) return Promise.resolve(window.confirm(opcoes.mensagem || 'Confirmar?'));
+
+    var caixa = overlay.querySelector('.modal-box');
+    var elIcone = document.getElementById('modalConfirmarIcone');
+    var elTitulo = document.getElementById('modalConfirmarTitulo');
+    var elMsg = document.getElementById('modalConfirmarMsg');
+    var btnOk = document.getElementById('modalConfirmarOk');
+    var btnCancelar = document.getElementById('modalConfirmarCancelar');
+
+    caixa.setAttribute('data-variante', opcoes.variante || 'perigo');
+    elIcone.innerHTML = ICONES_CONFIRMACAO[opcoes.icone] || ICONES_CONFIRMACAO.alerta;
+    elTitulo.textContent = opcoes.titulo || 'Confirmar';
+    elMsg.textContent = opcoes.mensagem || '';
+    btnOk.textContent = opcoes.textoConfirmar || 'Confirmar';
+    btnCancelar.textContent = opcoes.textoCancelar || 'Cancelar';
+
+    return new Promise(function(resolver) {
+        var finalizado = false;
+
+        function encerrar(resultado) {
+            if (finalizado) return;
+            finalizado = true;
+            overlay.classList.remove('ativo');
+            btnOk.removeEventListener('click', aoConfirmar);
+            btnCancelar.removeEventListener('click', aoCancelar);
+            overlay.removeEventListener('click', aoClicarFora);
+            document.removeEventListener('keydown', aoTeclar);
+            resolver(resultado);
+        }
+
+        function aoConfirmar() { encerrar(true); }
+        function aoCancelar() { encerrar(false); }
+        function aoClicarFora(e) { if (e.target === overlay) encerrar(false); }
+        function aoTeclar(e) {
+            if (e.key === 'Escape') encerrar(false);
+            else if (e.key === 'Enter' && document.activeElement !== btnCancelar) {
+                e.preventDefault(); encerrar(true);
+            }
+        }
+
+        btnOk.addEventListener('click', aoConfirmar);
+        btnCancelar.addEventListener('click', aoCancelar);
+        overlay.addEventListener('click', aoClicarFora);
+        document.addEventListener('keydown', aoTeclar);
+
+        overlay.classList.add('ativo');
+        // Foco no cancelar: acao destrutiva nao deve ser confirmada por engano
+        // quem chegou ali pelo teclado.
+        setTimeout(function(){ btnCancelar.focus(); }, 60);
+    });
+}
+
 function aplicarMascaraCep(e) {
     var value = e.target.value.replace(/\D/g, '');
     if (value.length > 5) value = value.replace(/^(\d{5})(\d)/, '$1-$2');
@@ -28,11 +98,20 @@ function aplicarMascaraCep(e) {
 }
 
 function trocarAba(aba) {
-    document.querySelectorAll('.tab-content').forEach(function(s){ s.style.display = 'none'; s.classList.remove('active'); });
+    // Hide all tabs (remove active class; CSS handles display:none via .tab-content)
+    document.querySelectorAll('.tab-content').forEach(function(s) {
+        s.classList.remove('active');
+        s.style.display = '';
+    });
     document.querySelectorAll('.nav-tab').forEach(function(t){ t.classList.remove('active'); });
     var section = document.getElementById('aba-' + aba);
     var tab = document.querySelector('#navTabs [onclick*="' + aba + '"]');
-    if (section) { section.style.display = 'block'; section.classList.add('active'); }
+    if (section) {
+        // Force display:block first (opacity still 0 from CSS), then trigger opacity transition
+        section.style.display = 'block';
+        section.offsetHeight; // force reflow so transition fires
+        section.classList.add('active');
+    }
     if (tab) tab.classList.add('active');
     if (aba === 'dashboard') { carregarDashboardGraficos(); }
     if (aba === 'mapa') { setTimeout(function() { initMapa(); carregarMapaClientes(); }, 100); }
@@ -120,13 +199,26 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    var modalBtnConfirmar = document.getElementById('modalBtnConfirmar');
-    var modalBtnCancelar = document.getElementById('modalBtnCancelar');
-    if (modalBtnCancelar) modalBtnCancelar.addEventListener('click', function(){ document.getElementById('modalExcluir').classList.remove('ativo'); });
-    if (modalBtnConfirmar) modalBtnConfirmar.addEventListener('click', function() {
-        document.getElementById('modalExcluir').classList.remove('ativo');
-        if (window._confirmDeleteCallback) window._confirmDeleteCallback();
-    });
+    // O modal de confirmacao e cabeado dentro de confirmarAcao(), que registra e
+    // remove os listeners a cada uso — nao precisa de wiring fixo aqui.
+
+    // Acoes das notificacoes por delegacao: a lista e reconstruida a cada
+    // atualizacao, entao listeners por item seriam perdidos.
+    var listaNotifs = document.getElementById('notificacoesLista');
+    if (listaNotifs) {
+        listaNotifs.addEventListener('click', function(e) {
+            var botao = e.target.closest('.notif-acao');
+            if (!botao) return;
+            e.stopPropagation();
+            var acao = botao.getAttribute('data-acao');
+            if (acao === 'lida') marcarNotificacaoLida(botao.getAttribute('data-chave'), true);
+            else if (acao === 'naolida') marcarNotificacaoLida(botao.getAttribute('data-chave'), false);
+            else if (acao === 'entrega') marcarEntregaConcluida(parseInt(botao.getAttribute('data-id'), 10));
+        });
+    }
+
+    var btnTodasLidas = document.getElementById('btnMarcarTodasLidas');
+    if (btnTodasLidas) btnTodasLidas.addEventListener('click', marcarTodasNotificacoesLidas);
 
     var modalNomeCancelar = document.getElementById('modalNomeCancelar');
     var modalNomeConfirmar = document.getElementById('modalNomeConfirmar');
@@ -201,8 +293,8 @@ async function carregarDashboardGraficos() {
         if (elEN) elEN.textContent = totalEntregas;
         if (elRE) elRE.textContent = totalRetiradas;
         if (el30) el30.textContent = cadastros30d + '%';
-        var elNow = document.getElementById('metricAtualizado');
-        if (elNow) elNow.textContent = new Date().toLocaleString('pt-BR');
+
+        renderizarFinanceiro(dados.financeiro);
 
         // Gráfico Pizza: Entregas vs Retiradas
         var tipoLabels = Object.keys(dados.por_tipo || {});
@@ -315,6 +407,104 @@ async function carregarDashboardGraficos() {
     } catch(e) { console.error('Erro ao carregar gráficos:', e); exibirToast('Erro ao carregar dashboard.', 'error'); }
 }
 
+// -----------------------------------------------------------------------------
+// Dashboard financeiro
+// -----------------------------------------------------------------------------
+function formatarReal(valor) {
+    return 'R$ ' + (Number(valor) || 0).toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+}
+
+function rotuloMes(chave) {
+    // 'AAAA-MM' -> 'ago/26'
+    var nomes = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
+    var partes = String(chave).split('-');
+    if (partes.length !== 2) return chave;
+    return nomes[parseInt(partes[1], 10) - 1] + '/' + partes[0].slice(2);
+}
+
+function renderizarFinanceiro(fin) {
+    if (!fin) return;
+
+    var def = function(id, texto) { var el = document.getElementById(id); if (el) el.textContent = texto; };
+    def('metricFaturamentoMes', formatarReal(fin.faturamento_mes));
+    def('metricAReceber', formatarReal(fin.a_receber));
+    def('metricEmAtraso', formatarReal(fin.em_atraso));
+    def('metricTicketMedio', formatarReal(fin.ticket_medio_mes));
+    def('metricQtdRecebimentos', fin.qtd_recebimentos_mes + ' recebimento(s) no mes');
+    def('metricQtdAtraso', fin.qtd_em_atraso > 0 ? fin.qtd_em_atraso + ' cobranca(s) vencida(s)' : 'Nenhuma cobranca vencida');
+    def('metricMesAnterior', 'Mes anterior: ' + formatarReal(fin.faturamento_mes_anterior));
+
+    // Variacao vs mes anterior. `null` = nao havia base de comparacao, entao
+    // nao inventa um "0%" que sugeriria estabilidade.
+    var elVar = document.getElementById('metricVariacao');
+    if (elVar) {
+        if (fin.variacao_percentual === null || fin.variacao_percentual === undefined) {
+            elVar.textContent = '';
+            elVar.className = 'metrica-variacao';
+        } else {
+            var v = fin.variacao_percentual;
+            var subiu = v >= 0;
+            elVar.textContent = (subiu ? '▲ +' : '▼ ') + v.toFixed(1).replace('.', ',') + '%';
+            elVar.className = 'metrica-variacao ' + (subiu ? 'variacao-alta' : 'variacao-baixa');
+        }
+    }
+
+    var ctx = document.getElementById('chartReceitaMensal');
+    var serie = fin.serie_mensal || [];
+    if (!ctx || typeof Chart === 'undefined' || serie.length === 0) return;
+
+    // Destaca o mes corrente (ultimo da serie) para a leitura de "onde estou".
+    var ultimoIndice = serie.length - 1;
+    var cores = serie.map(function(_, i) { return i === ultimoIndice ? '#10b981' : 'rgba(59,130,246,0.65)'; });
+
+    if (chartInstances.receita) chartInstances.receita.destroy();
+    chartInstances.receita = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: serie.map(function(p){ return rotuloMes(p.mes); }),
+            datasets: [{
+                label: 'Receita',
+                data: serie.map(function(p){ return p.total; }),
+                backgroundColor: cores,
+                borderRadius: 6,
+                maxBarThickness: 64
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: function(item) { return formatarReal(item.parsed.y); }
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        color: corDoTexto(),
+                        callback: function(v) { return 'R$ ' + v.toLocaleString('pt-BR'); }
+                    },
+                    grid: { color: corDaGrade() }
+                },
+                x: { ticks: { color: corDoTexto() }, grid: { display: false } }
+            }
+        }
+    });
+}
+
+function corDoTexto() {
+    return getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim() || '#94a3b8';
+}
+
+function corDaGrade() {
+    return document.documentElement.getAttribute('data-theme') === 'light'
+        ? 'rgba(0,0,0,0.07)' : 'rgba(255,255,255,0.07)';
+}
+
 
 
 function initTheme() {
@@ -358,52 +548,125 @@ async function carregarNotificacoes() {
     try {
         var resp = await fetch('/api/notificacoes');
         var dados = await resp.json();
-        var notifs = dados.notificacoes || [];
-        if (notifs.length > 0) {
-            var badge = document.getElementById('notifBadge');
-            if (badge) { badge.style.display = 'flex'; badge.textContent = notifs.length; }
-        } else {
-            var badge = document.getElementById('notifBadge');
-            if (badge) { badge.style.display = 'none'; }
-        }
-        window._notificacoes = notifs;
+        window._notificacoes = dados.notificacoes || [];
+        // O badge conta apenas nao lidas: e esse o sinal de "tem algo novo".
+        window._notificacoesNaoLidas = dados.nao_lidas || 0;
+        atualizarBadgeNotificacoes();
     } catch(_) {}
+}
+
+function atualizarBadgeNotificacoes() {
+    var badge = document.getElementById('notifBadge');
+    if (!badge) return;
+    var naoLidas = window._notificacoesNaoLidas || 0;
+    badge.style.display = naoLidas > 0 ? 'flex' : 'none';
+    badge.textContent = naoLidas;
+}
+
+// Renderiza o painel sem alternar sua visibilidade. Separado de
+// abrirNotificacoes() porque "Atualizar" e o marcar-como-concluida precisavam
+// redesenhar a lista, e o toggle fechava o painel no lugar disso.
+function renderizarNotificacoes() {
+    var lista = document.getElementById('notificacoesLista');
+    var contador = document.getElementById('notifCounter');
+    if (!lista) return;
+
+    var notifs = window._notificacoes || [];
+    var naoLidas = notifs.filter(function(n){ return !n.lida; }).length;
+
+    if (contador) {
+        contador.textContent = naoLidas > 0
+            ? naoLidas + ' nao lida(s) de ' + notifs.length
+            : notifs.length + ' notificacao(es)';
+    }
+
+    var btnTodas = document.getElementById('btnMarcarTodasLidas');
+    if (btnTodas) btnTodas.style.display = naoLidas > 0 ? 'block' : 'none';
+
+    if (notifs.length === 0) {
+        lista.innerHTML = '<div class="notif-empty"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg><p>Nenhuma notificacao no momento</p></div>';
+        return;
+    }
+
+    function renderItem(n) {
+        var chave = escaparHtml(n.chave || '');
+        var classes = 'notif-item notif-prioridade-' + n.prioridade + (n.lida ? ' notif-lida' : '');
+        var acoes = '';
+        if (n.chave) {
+            acoes = n.lida
+                ? '<button class="notif-acao" title="Marcar como nao lida" data-acao="naolida" data-chave="' + chave + '">' +
+                  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button>'
+                : '<button class="notif-acao" title="Marcar como lida" data-acao="lida" data-chave="' + chave + '">' +
+                  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></button>';
+        }
+        var concluir = n.entrega_id
+            ? '<button class="notif-acao" title="Marcar entrega como concluida" data-acao="entrega" data-id="' + n.entrega_id + '">' +
+              '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></button>'
+            : '';
+        return '<div class="' + classes + '">' +
+            '<span class="notif-icone">' + (n.icone || '🔔') + '</span>' +
+            '<div class="notif-conteudo"><div class="notif-msg">' + escaparHtml(n.msg) + '</div>' +
+            (n.detalhes ? '<div class="notif-detalhes">' + escaparHtml(n.detalhes) + '</div>' : '') +
+            '</div><div class="notif-acoes">' + concluir + acoes + '</div></div>';
+    }
+
+    function renderSecao(titulo, items) {
+        if (items.length === 0) return '';
+        return '<div class="notif-section"><div class="notif-section-title">' + titulo + ' (' + items.length + ')</div>' +
+            items.map(renderItem).join('') + '</div>';
+    }
+
+    function porPrioridade(lista_, prioridade, lida) {
+        return lista_.filter(function(n){ return n.prioridade === prioridade && !!n.lida === lida; });
+    }
+
+    var html = '';
+    html += renderSecao('🚨 Criticas', porPrioridade(notifs, 'critica', false));
+    html += renderSecao('⚠️ Altas', porPrioridade(notifs, 'alta', false));
+    html += renderSecao('📋 Medias', porPrioridade(notifs, 'media', false));
+    html += renderSecao('ℹ️ Informativas', porPrioridade(notifs, 'baixa', false));
+    var lidas = notifs.filter(function(n){ return n.lida; });
+    html += renderSecao('✓ Lidas', lidas);
+    lista.innerHTML = html;
 }
 
 function abrirNotificacoes() {
     var panel = document.getElementById('notificacoesPanel');
-    var lista = document.getElementById('notificacoesLista');
-    var contador = document.getElementById('notifCounter');
-    if (!panel || !lista) return;
-    var notifs = window._notificacoes || [];
-    if (contador) contador.textContent = notifs.length + ' notificacao(es)';
-    if (notifs.length === 0) {
-        lista.innerHTML = '<div class="notif-empty"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg><p>Nenhuma notificacao no momento</p></div>';
-    } else {
-        var html = '';
-        var criticas = notifs.filter(function(n){ return n.prioridade === 'critica'; });
-        var altas = notifs.filter(function(n){ return n.prioridade === 'alta'; });
-        var medias = notifs.filter(function(n){ return n.prioridade === 'media'; });
-        var baixas = notifs.filter(function(n){ return n.prioridade === 'baixa'; });
-        function renderSection(titulo, items, cssClass) {
-            if (items.length === 0) return '';
-            return '<div class="notif-section"><div class="notif-section-title">' + titulo + ' (' + items.length + ')</div>' +
-                items.map(function(n) {
-                    var prioridadeClass = 'notif-prioridade-' + n.prioridade;
-                    return '<div class="notif-item ' + prioridadeClass + '"' + (n.entrega_id ? ' onclick="marcarEntregaConcluida(' + n.entrega_id + ')" style="cursor:pointer;" title="Clique para marcar como concluida"' : '') + '>' +
-                        '<span class="notif-icone">' + (n.icone || '🔔') + '</span>' +
-                        '<div class="notif-conteudo"><div class="notif-msg">' + escaparHtml(n.msg) + '</div>' +
-                        (n.detalhes ? '<div class="notif-detalhes">' + escaparHtml(n.detalhes) + '</div>' : '') +
-                        '</div></div>';
-                }).join('');
-        }
-        html += renderSection('🚨 Criticas', criticas, 'critica');
-        html += renderSection('⚠️ Altas', altas, 'alta');
-        html += renderSection('📋 Medias', medias, 'media');
-        html += renderSection('ℹ️ Informativas', baixas, 'baixa');
-        lista.innerHTML = html;
-    }
+    if (!panel) return;
+    renderizarNotificacoes();
     panel.classList.toggle('ativo');
+}
+
+async function marcarNotificacaoLida(chave, lida) {
+    try {
+        var resp = await fetch('/api/notificacoes/lidas', {
+            method: lida ? 'POST' : 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chaves: [chave] })
+        });
+        if (!resp.ok) throw new Error('Falha');
+        await carregarNotificacoes();
+        renderizarNotificacoes();
+    } catch(_) { exibirToast('Erro ao atualizar notificacao.', 'error'); }
+}
+
+async function marcarTodasNotificacoesLidas() {
+    try {
+        var resp = await fetch('/api/notificacoes/lidas', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ todas: true })
+        });
+        if (!resp.ok) throw new Error('Falha');
+        await carregarNotificacoes();
+        renderizarNotificacoes();
+        exibirToast('Todas as notificacoes foram marcadas como lidas.');
+    } catch(_) { exibirToast('Erro ao marcar notificacoes.', 'error'); }
+}
+
+async function atualizarNotificacoes() {
+    await carregarNotificacoes();
+    renderizarNotificacoes();
 }
 
 async function marcarEntregaConcluida(entregaId) {
@@ -415,8 +678,8 @@ async function marcarEntregaConcluida(entregaId) {
         });
         if (resp.ok) {
             exibirToast('Entrega marcada como concluida!');
-            carregarNotificacoes();
-            setTimeout(abrirNotificacoes, 300);
+            await carregarNotificacoes();
+            renderizarNotificacoes();
         } else {
             exibirToast('Erro ao atualizar entrega.', 'error');
         }
@@ -521,35 +784,41 @@ async function atualizarClienteServidor(id, dados) {
 }
 
 async function excluirClienteServidor(id) {
-    window._confirmDeleteCallback = async function() {
-        // Se offline, salvar na fila de sincronizacao
-        if (!navigator.onLine) {
-            try {
-                // Se ID é temporario (negativo), não precisa enviar ao servidor
-                if (id < 0) {
-                    exibirToast('Cliente removido do cache offline.', 'success');
-                } else {
-                    await OfflineManager.savePendingAction('delete', { id: id });
-                    exibirToast('Exclusao salva offline! Sera sincronizado quando voltar online.', 'success');
-                }
-                cancelarEdicao();
-                // Remover do cache local
-                var cached = await OfflineManager.getCachedClientes();
-                cached = cached.filter(function(c) { return c.id !== id; });
-                await OfflineManager.cacheClientes(cached);
-                carregarClientesOffline(true);
-            } catch (erro) { exibirToast('Erro ao salvar exclusao offline.', 'error'); }
-            return;
-        }
+    var confirmado = await confirmarAcao({
+        titulo: 'Excluir Cliente',
+        mensagem: 'Tem certeza que deseja excluir este cliente? Esta acao nao pode ser desfeita.',
+        textoConfirmar: 'Excluir',
+        icone: 'excluir',
+        variante: 'perigo'
+    });
+    if (!confirmado) return;
+
+    // Se offline, salvar na fila de sincronizacao
+    if (!navigator.onLine) {
         try {
-            var resposta = await fetch(API_URL+'/'+id, { method: 'DELETE' });
-            var dados = await resposta.json();
-            if (!resposta.ok) throw new Error(dados.erro || 'Erro');
-            exibirToast('Cliente excluido!');
-            cancelarEdicao(); carregarClientes(); carregarDashboardGraficos();
-        } catch (erro) { exibirToast('Erro: ' + erro.message, 'error'); }
-    };
-    document.getElementById('modalExcluir').classList.add('ativo');
+            // Se ID é temporario (negativo), não precisa enviar ao servidor
+            if (id < 0) {
+                exibirToast('Cliente removido do cache offline.', 'success');
+            } else {
+                await OfflineManager.savePendingAction('delete', { id: id });
+                exibirToast('Exclusao salva offline! Sera sincronizado quando voltar online.', 'success');
+            }
+            cancelarEdicao();
+            // Remover do cache local
+            var cached = await OfflineManager.getCachedClientes();
+            cached = cached.filter(function(c) { return c.id !== id; });
+            await OfflineManager.cacheClientes(cached);
+            carregarClientesOffline(true);
+        } catch (erro) { exibirToast('Erro ao salvar exclusao offline.', 'error'); }
+        return;
+    }
+    try {
+        var resposta = await fetch(API_URL+'/'+id, { method: 'DELETE' });
+        var dados = await resposta.json();
+        if (!resposta.ok) throw new Error(dados.erro || 'Erro');
+        exibirToast('Cliente excluido!');
+        cancelarEdicao(); carregarClientes(); carregarDashboardGraficos();
+    } catch (erro) { exibirToast('Erro: ' + erro.message, 'error'); }
 }
 
 function renderizarTabela(clientes) {
@@ -783,7 +1052,14 @@ function resetarVisualBotaoConexao() {
 async function conectarMicrosoft() {
     var estaLogado = await checarLoginExistente();
     if (estaLogado) {
-        if (confirm('Deseja desconectar sua conta Microsoft?')) { await desconectarMicrosoft(); }
+        var confirmado = await confirmarAcao({
+            titulo: 'Desconectar Conta',
+            mensagem: 'Sua conta Microsoft sera desconectada e o envio de planilhas para o OneDrive deixara de funcionar ate voce reconectar.',
+            textoConfirmar: 'Desconectar',
+            icone: 'desconectar',
+            variante: 'atencao'
+        });
+        if (confirmado) { await desconectarMicrosoft(); }
         return;
     }
     try { exibirToast('Abrindo login...'); await fetch('/api/auth/login'); if(!intervaloChecagem) intervaloChecagem = setInterval(checarLoginExistente, 1500); } catch(_) { exibirToast('Falha ao iniciar login.', 'error'); }
@@ -1000,30 +1276,29 @@ async function geocodificarCidade(query) {
     } catch(e) { console.warn('Nominatim falhou:', query, e); }
     return null;
 }
-
 // -----------------------------------------------------------------------------
 // Pagamentos
 // -----------------------------------------------------------------------------
-var _pagamentoEditando = null;
 
 async function carregarPagamentos() {
     carregarPagamentosLista();
     carregarPagamentosMetricas();
-    carregarClientesParaPagamento();
-    verificarStatusAsaas();
-}
-
-async function verificarStatusAsaas() {
+    // Load clients into the modal's select (recClienteId)
     try {
-        var resp = await fetch('/api/pagamentos/asaas-status');
-        var dados = await resp.json();
-        var el = document.getElementById('asaasStatus');
-        if (el) {
-            if (dados.configurado) {
-                el.innerHTML = '<span class="badge-entrega" style="font-size:0.75rem;">Conectado (' + escaparHtml(dados.ambiente) + ')</span>';
-            } else {
-                el.innerHTML = '<span class="badge-pendente" style="font-size:0.75rem;">Nao configurado</span>';
-            }
+        var resp = await fetch('/api/clientes?busca=');
+        var clientes = await resp.json();
+        var select = document.getElementById('recClienteId');
+        if (select) {
+            var valAtual = select.value;
+            select.innerHTML = '<option value="">Selecione um cliente...</option>';
+            clientes.forEach(function(c) {
+                var opt = document.createElement('option');
+                opt.value = c.id;
+                opt.textContent = c.nome + (c.cidade ? ' (' + c.cidade + ')' : '');
+                opt.setAttribute('data-nome', c.nome);
+                select.appendChild(opt);
+            });
+            if (valAtual) select.value = valAtual;
         }
     } catch(_) {}
 }
@@ -1041,29 +1316,27 @@ async function carregarPagamentosMetricas() {
     } catch(_) {}
 }
 
-async function carregarClientesParaPagamento() {
-    try {
-        var resp = await fetch('/api/clientes?busca=');
-        var clientes = await resp.json();
-        var select = document.getElementById('pagClienteId');
-        if (!select) return;
-        var valAtual = select.value;
-        select.innerHTML = '<option value="">Selecione um cliente...</option>';
-        clientes.forEach(function(c) {
-            var opt = document.createElement('option');
-            opt.value = c.id;
-            opt.textContent = c.nome + (c.cidade ? ' (' + c.cidade + ')' : '');
-            opt.setAttribute('data-nome', c.nome);
-            select.appendChild(opt);
-        });
-        if (valAtual) select.value = valAtual;
-    } catch(_) {}
-}
+// carregarClientesParaPagamento removed — clients are now loaded directly
+// in carregarPagamentos() and abrirModalNovoRecebimento() targeting recClienteId
 
 async function carregarPagamentosLista() {
     try {
+        var filtroCliente = (document.getElementById('pagFiltroCliente') || {}).value || '';
+        var filtroStatus = (document.getElementById('pagFiltroStatus') || {}).value || '';
         var resp = await fetch('/api/pagamentos');
         var pagamentos = await resp.json();
+        // Apply client-side filters
+        if (filtroCliente) {
+            var term = filtroCliente.toLowerCase();
+            pagamentos = pagamentos.filter(function(p) {
+                return (p.cliente_nome || '').toLowerCase().indexOf(term) !== -1;
+            });
+        }
+        if (filtroStatus) {
+            pagamentos = pagamentos.filter(function(p) {
+                return p.status === filtroStatus;
+            });
+        }
         renderizarTabelaPagamentos(pagamentos);
     } catch(e) {
         console.error('Erro ao carregar pagamentos:', e);
@@ -1110,45 +1383,9 @@ function renderizarTabelaPagamentos(pagamentos) {
     }).join('');
 }
 
-async function salvarPagamento() {
-    var clienteSelect = document.getElementById('pagClienteId');
-    var clienteId = clienteSelect ? clienteSelect.value : '';
-    if (!clienteId) { exibirToast('Selecione um cliente.', 'error'); return; }
-    var clienteOpt = clienteSelect.options[clienteSelect.selectedIndex];
-    var clienteNome = clienteOpt ? (clienteOpt.getAttribute('data-nome') || clienteOpt.textContent) : '';
-    var valor = parseFloat((document.getElementById('pagValor') || {}).value || 0);
-    if (isNaN(valor) || valor <= 0) { exibirToast('Informe um valor valido.', 'error'); return; }
-    var descricao = (document.getElementById('pagDescricao') || {}).value || '';
-    var dataVencimento = (document.getElementById('pagDataVencimento') || {}).value || '';
-    if (!dataVencimento) { exibirToast('Informe a data de vencimento.', 'error'); return; }
-    var tipoPagamento = (document.getElementById('pagTipoPagamento') || {}).value || 'Pix';
-    var dados = {
-        cliente_id: parseInt(clienteId),
-        cliente_nome: clienteNome,
-        valor: valor,
-        descricao: descricao,
-        data_vencimento: dataVencimento,
-        tipo_pagamento: tipoPagamento,
-    };
-    try {
-        var url = _pagamentoEditando ? '/api/pagamentos/' + _pagamentoEditando : '/api/pagamentos';
-        var method = _pagamentoEditando ? 'PUT' : 'POST';
-        var resp = await fetch(url, { method: method, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(dados) });
-        var resultado = await resp.json();
-        if (!resp.ok) throw new Error(resultado.erro || 'Erro');
-        exibirToast(_pagamentoEditando ? 'Pagamento atualizado!' : 'Pagamento registrado!');
-        cancelarPagamentoForm();
-        carregarPagamentos();
-    } catch(e) { exibirToast('Erro: ' + e.message, 'error'); }
-}
-
-function cancelarPagamentoForm() {
-    _pagamentoEditando = null;
-    var form = document.getElementById('pagamentoForm');
-    if (form) form.reset();
-    var btnSalvar = document.getElementById('pagBtnSalvar');
-    if (btnSalvar) btnSalvar.textContent = 'Registrar Pagamento';
-}
+// salvarPagamento() and cancelarPagamentoForm() removed — replaced by
+// salvarNovoRecebimento() and fecharModalNovoRecebimento() which target
+// the new modal IDs (recClienteId, recValor, recDataPagamento, etc.)
 
 async function gerarCobranca(pagamentoId) {
     exibirToast('Gerando cobranca...');
@@ -1223,7 +1460,15 @@ async function confirmarPagamentoLocal(pagamentoId) {
 }
 
 async function cancelarPagamentoLocal(pagamentoId) {
-    if (!confirm('Deseja cancelar este pagamento?')) return;
+    var confirmado = await confirmarAcao({
+        titulo: 'Cancelar Cobranca',
+        mensagem: 'Esta cobranca sera cancelada e nao podera ser recuperada. Deseja continuar?',
+        textoConfirmar: 'Cancelar cobranca',
+        textoCancelar: 'Voltar',
+        icone: 'alerta',
+        variante: 'perigo'
+    });
+    if (!confirmado) return;
     try {
         var resp = await fetch('/api/pagamentos/' + pagamentoId, { method: 'DELETE' });
         var dados = await resp.json();
@@ -1379,76 +1624,4 @@ async function carregarMapaClientes() {
     }
 }
 
-async function carregarPagamentos() {
-    try {
-        var filtroCliente = document.getElementById('pagFiltroCliente')?.value || '';
-        var filtroStatus = document.getElementById('pagFiltroStatus')?.value || '';
-        var url = '/api/pagamentos?';
-        if (filtroStatus) url += 'status=' + encodeURIComponent(filtroStatus) + '&';
-        var resp = await fetch(url);
-        if (!resp.ok) throw new Error('Falha ao buscar pagamentos');
-        var pagamentos = await resp.json();
-        
-        var filtrados = pagamentos;
-        if (filtroCliente) {
-            filtrados = pagamentos.filter(function(p) {
-                return (p.cliente_nome || '').toLowerCase().includes(filtroCliente.toLowerCase());
-            });
-        }
-        
-        var tbody = document.getElementById('tabelaPagamentos');
-        if (!tbody) return;
-        tbody.innerHTML = '';
-        
-        filtrados.forEach(function(p) {
-            var statusClass = '';
-            if (p.status === 'Recebido') statusClass = 'badge-entrega';
-            else if (p.status === 'Atrasado') statusClass = 'badge-retirada';
-            else statusClass = 'badge-entrega';
-            
-            var row = '<tr>' +
-                '<td>' + escaparHtml(p.cliente_nome || '') + '</td>' +
-                '<td>R$ ' + (p.valor || 0).toFixed(2) + '</td>' +
-                '<td>' + (p.data_vencimento || '') + '</td>' +
-                '<td><span class="' + statusClass + '" style="font-size:0.75rem;">' + escaparHtml(p.status || '') + '</span></td>' +
-                '<td>' + escaparHtml(p.tipo_pagamento || 'Pix') + '</td>' +
-                '<td style="text-align:right;">' +
-                '<button class="btn" onclick="confirmarPagamentoLocal(' + p.id + ')" style="padding:0.5rem 0.75rem;font-size:0.8rem;">✓</button>' +
-                '<button class="btn" onclick="cancelarPagamentoLocal(' + p.id + ')" style="padding:0.5rem 0.75rem;font-size:0.8rem;">✕</button>' +
-                '</td></tr>';
-            tbody.innerHTML += row;
-        });
-        
-        carregarMetricasPagamentos();
-    } catch(e) {
-        exibirToast('Erro ao carregar pagamentos: ' + e.message, 'error');
-    }
-}
 
-async function carregarMetricasPagamentos() {
-    try {
-        var resp = await fetch('/api/pagamentos/metricas');
-        if (!resp.ok) throw new Error('Falha ao buscar métricas');
-        var m = await resp.json();
-        var container = document.getElementById('pagMetricas');
-        if (!container) return;
-        container.innerHTML = 
-            '<div class="card card-metrica" style="padding:1rem;">' +
-            '<div class="metrica-info">' +
-            '<span class="metrica-valor">R$ ' + (m.total_recebido || 0).toFixed(2) + '</span>' +
-            '<span class="metrica-label">Recebido</span>' +
-            '</div></div>' +
-            '<div class="card card-metrica" style="padding:1rem;">' +
-            '<div class="metrica-info">' +
-            '<span class="metrica-valor">R$ ' + (m.total_pendente || 0).toFixed(2) + '</span>' +
-            '<span class="metrica-label">Pendente</span>' +
-            '</div></div>' +
-            '<div class="card card-metrica" style="padding:1rem;">' +
-            '<div class="metrica-info">' +
-            '<span class="metrica-valor">R$ ' + (m.total_atrasado || 0).toFixed(2) + '</span>' +
-            '<span class="metrica-label">Atrasado</span>' +
-            '</div></div>';
-    } catch(e) {
-        console.error('Erro ao carregar métricas:', e);
-    }
-}

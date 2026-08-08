@@ -7,7 +7,6 @@ import json
 import os
 import logging
 import openpyxl
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from flask import Blueprint, request, jsonify, send_file
 
 import database
@@ -100,9 +99,11 @@ def importar_clientes():
         else:
             return jsonify({"erro": "Formato nao suportado. Use CSV, JSON ou XLSX."}), 400
     except Exception as e:
-        from ..app import log
-        log.exception("Erro ao ler arquivo: %s", e)
-        return jsonify({"erro": f"Erro ao ler arquivo: {str(e)}"}), 400
+        # `log` ja existe no modulo. O `from ..app import log` que estava aqui
+        # subia alem do pacote raiz e levantava ImportError dentro do except,
+        # transformando um 400 legivel em 500.
+        log.exception("Erro ao ler arquivo importado: %s", e)
+        return jsonify({"erro": "Nao foi possivel ler o arquivo enviado. Verifique o formato."}), 400
 
     if not clientes:
         return jsonify({"erro": "Nenhum cliente encontrado no arquivo."}), 400
@@ -147,7 +148,6 @@ def backup_json():
 @clientes_bp.route('/backup/sqlite')
 def backup_sqlite():
     caminho = database.obter_caminho_banco_absoluto()
-    import os
     if not os.path.exists(caminho):
         return jsonify({"erro": "Banco de dados nao encontrado."}), 404
     return send_file(caminho, mimetype='application/x-sqlite3', as_attachment=True,

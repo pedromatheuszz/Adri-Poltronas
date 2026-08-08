@@ -3,7 +3,7 @@
   "short_name": "AdriPoltronas",
   "description": "Sistema de gestao de clientes - Adri Poltronas",
   "start_url": "/",
-  "display": "standalone",
+  "display": "browser",
   "background_color": "#0f172a",
   "theme_color": "#3b82f6",
   "orientation": "any",

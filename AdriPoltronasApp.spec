@@ -5,8 +5,21 @@ a = Analysis(
     ['main.py'],
     pathex=['backend'],
     binaries=[],
-    datas=[('frontend', 'frontend')],
-    hiddenimports=['database', 'openpyxl', 'openpyxl.utils', 'et_xmlfile'],
+    # O destino de cada entrada precisa casar com o que app.py e
+    # migrations_manager.py procuram dentro de sys._MEIPASS.
+    datas=[
+        ('frontend', 'frontend'),
+        ('backend/templates', 'templates'),
+        ('backend/alembic.ini', '.'),
+        ('backend/migrations', 'migrations'),
+    ],
+    hiddenimports=[
+        'database', 'security', 'asaas', 'config', 'validators',
+        'blueprints', 'migrations_manager',
+        'openpyxl', 'openpyxl.utils', 'et_xmlfile',
+        'alembic', 'alembic.config', 'alembic.command',
+        'win32crypt',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

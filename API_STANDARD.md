@@ -1,281 +1,114 @@
-# API Response Standard - Adri Poltronas
+# Padrão de resposta da API — Adri Poltronas
 
-## Envelope Padrão
+> **Este documento descreve o formato que a API realmente usa hoje.**
+>
+> Uma versão anterior documentava um envelope `{status, code, message, data}`
+> implementado em `backend/api_response.py`. Esse módulo nunca chegou a ser
+> usado por nenhum endpoint e foi removido na auditoria de agosto/2026, junto
+> com esta seção da documentação. Se o envelope for adotado no futuro, a
+> migração precisa ser feita em conjunto com o frontend, que hoje depende do
+> formato descrito abaixo.
 
-Todas as respostas da API seguem um envelope JSON consistente:
+## Formato em uso
 
-### Sucesso (2xx)
+A API não usa envelope. O corpo da resposta é o próprio recurso, e o status
+HTTP carrega o resultado da operação.
+
+### Sucesso
+
+Listagens devolvem um array direto:
+
+```json
+[
+  { "id": 1, "nome": "Ana", "cidade": "Santos" }
+]
+```
+
+Objetos e métricas devolvem o objeto direto:
+
+```json
+{ "total_clientes": 42, "total_entrega": 30, "total_retirada": 12 }
+```
+
+Operações de escrita devolvem uma confirmação curta:
+
+```json
+{ "mensagem": "Salvo" }
+```
+
+### Erro
+
+Todo erro traz a chave `erro` com uma mensagem apresentável ao usuário:
+
+```json
+{ "erro": "Cliente nao encontrado." }
+```
+
+Erros de validação acrescentam `detalhes` com a lista de problemas:
+
 ```json
 {
-  "status": "success",
-  "code": 200,
-  "message": "Mensagem descritiva",
-  "data": { /* dados da resposta */ }
+  "erro": "Dados invalidos.",
+  "detalhes": [
+    "Nome obrigatorio (entre 2 e 120 caracteres).",
+    "CEP invalido. Use o formato 00000-000."
+  ]
 }
 ```
 
-### Erro (4xx, 5xx)
+Erros não tratados (500) trazem um `id` de correlação que aparece também no
+log da aplicação, para rastrear o caso sem expor o stack trace:
+
 ```json
-{
-  "status": "error",
-  "code": 400,
-  "error_code": "ERROR_CODE",
-  "message": "Mensagem descritiva",
-  "details": { /* informações adicionais */ }
-}
+{ "erro": "Erro interno do servidor.", "id": "a1b2c3d4e5f6" }
 ```
 
-## Códigos de Status HTTP
+## Códigos de status em uso
 
-| Status | Uso | Exemplo |
-|--------|-----|---------|
-| 200 | OK - Sucesso geral | GET, PUT bem-sucedido |
-| 201 | Created - Recurso criado | POST bem-sucedido |
-| 204 | No Content - Sem conteúdo | DELETE bem-sucedido |
-| 400 | Bad Request - Requisição inválida | Dados inválidos |
-| 401 | Unauthorized - Não autenticado | Token ausente/expirado |
-| 403 | Forbidden - Sem permissão | Acesso negado |
-| 404 | Not Found - Não encontrado | Recurso inexistente |
-| 422 | Unprocessable Entity - Erro validação | Validação falhou |
-| 500 | Internal Server Error | Erro no servidor |
+| Status | Uso | Onde aparece |
+|--------|-----|--------------|
+| 200 | Sucesso geral | GET, PUT, confirmações |
+| 201 | Recurso criado | POST de cliente, pagamento, entrega |
+| 400 | Requisição inválida | Falha de validação, arquivo ilegível |
+| 401 | Não autenticado | Sessão OneDrive ausente/expirada; webhook sem token válido |
+| 403 | Origem não permitida | Bloqueio de CSRF (`Origin`/`Referer` externo) |
+| 404 | Não encontrado | Cliente, pagamento ou entrega inexistente |
+| 502 | Falha em serviço externo | Erro retornado pelo Asaas ou Microsoft Graph |
+| 503 | Integração indisponível | `ASAAS_API_KEY` ou `ASAAS_WEBHOOK_TOKEN` ausente |
 
-## Exemplos de Uso
+## Tratamento centralizado
 
-### Sucesso Simples
-```python
-from api_response import ApiResponse
+`backend/app.py` registra dois handlers globais que garantem que rotas sob
+`/api/` nunca devolvam HTML:
 
-@app.route('/api/clientes/<int:id>')
-def obter_cliente(id):
-    cliente = database.obter_cliente_por_id(id)
-    if not cliente:
-        return ApiResponse.not_found("Cliente não encontrado")
-    return ApiResponse.success(cliente, "Cliente obtido com sucesso")
-```
+- `HTTPException` → `{"erro": <descrição>}` com o status original.
+- `Exception` → `{"erro": "Erro interno do servidor.", "id": <correlação>}` com
+  status 500 e o stack trace registrado no log.
 
-**Resposta:**
-```json
-{
-  "status": "success",
-  "code": 200,
-  "message": "Cliente obtido com sucesso",
-  "data": {
-    "id": 1,
-    "nome": "João Silva",
-    "cep": "12345-678"
-  }
-}
-```
+## Cabeçalhos de segurança
 
-### Criação de Recurso
-```python
-@app.route('/api/clientes', methods=['POST'])
-def criar_cliente():
-    cliente, erros = validators.validar_cliente(request.get_json())
-    if erros:
-        return ApiResponse.validation_error({"cliente": erros})
-    
-    id_cliente = database.salvar_cliente(**cliente)
-    return ApiResponse.created(
-        {"id": id_cliente},
-        "Cliente criado com sucesso"
-    )
-```
+Toda resposta recebe, via `after_request`:
 
-**Resposta:**
-```json
-{
-  "status": "success",
-  "code": 201,
-  "message": "Cliente criado com sucesso",
-  "data": {
-    "id": 42
-  }
-}
-```
+| Cabeçalho | Valor |
+|-----------|-------|
+| `Content-Security-Policy` | restringe script/style/img/connect às origens efetivamente usadas |
+| `X-Content-Type-Options` | `nosniff` |
+| `X-Frame-Options` | `DENY` |
+| `Referrer-Policy` | `no-referrer` |
 
-### Erro de Validação
-```python
-@app.route('/api/pagamentos', methods=['POST'])
-def criar_pagamento():
-    pagamento, erros = validators.validar_pagamento(request.get_json())
-    if erros:
-        return ApiResponse.validation_error({
-            "pagamento": erros
-        })
-    # ...
-```
+## Proteção contra CSRF
 
-**Resposta:**
-```json
-{
-  "status": "error",
-  "code": 422,
-  "error_code": "VALIDATION_ERROR",
-  "message": "Erro de validação",
-  "details": {
-    "pagamento": [
-      "Valor invalido. Use entre R$ 0.01 e R$ 500000.00.",
-      "Data de vencimento obrigatoria."
-    ]
-  }
-}
-```
+Requisições `POST`/`PUT`/`PATCH`/`DELETE` para `/api/` são recusadas com 403
+quando trazem um `Origin` (ou, na ausência dele, um `Referer`) que não
+corresponde ao host da própria requisição.
 
-### Erro de Autorização
-```python
-@app.route('/api/excel/enviar', methods=['POST'])
-def enviar_excel():
-    sessao = database.obter_sessao()
-    if not sessao:
-        return ApiResponse.unauthorized("Usuário não autenticado")
-    # ...
-```
+A lista de origens aceitas é derivada de `request.host` — e não fixada numa
+constante — para que a checagem continue correta se a porta mudar. Os aliases
+de loopback (`127.0.0.1`, `localhost`, `[::1]`) na mesma porta são tratados
+como a mesma origem, já que o navegador os considera distintos.
 
-**Resposta:**
-```json
-{
-  "status": "error",
-  "code": 401,
-  "error_code": "UNAUTHORIZED",
-  "message": "Usuário não autenticado"
-}
-```
+Requisições sem `Origin` nem `Referer` são permitidas: não vêm de navegador
+(curl, scripts locais) e portanto não são vetor de CSRF.
 
-### Erro Não Encontrado
-```python
-@app.route('/api/clientes/<int:id>', methods=['DELETE'])
-def excluir_cliente(id):
-    linhas = database.excluir_cliente(id)
-    if linhas == 0:
-        return ApiResponse.not_found("Cliente não encontrado")
-    return ApiResponse.success(None, "Cliente excluído com sucesso")
-```
-
-**Resposta (sucesso):**
-```json
-{
-  "status": "success",
-  "code": 200,
-  "message": "Cliente excluído com sucesso",
-  "data": null
-}
-```
-
-### Lista Paginada
-```python
-@app.route('/api/clientes')
-def listar_clientes():
-    page = request.args.get('page', 1, type=int)
-    page_size = request.args.get('page_size', 10, type=int)
-    
-    todos = database.listar_clientes()
-    total = len(todos)
-    start = (page - 1) * page_size
-    items = todos[start:start + page_size]
-    
-    return ApiResponse.paginated(
-        items, 
-        total, 
-        page, 
-        page_size,
-        "Clientes listados com sucesso"
-    )
-```
-
-**Resposta:**
-```json
-{
-  "status": "success",
-  "code": 200,
-  "message": "Clientes listados com sucesso",
-  "data": [
-    {"id": 1, "nome": "João"},
-    {"id": 2, "nome": "Maria"}
-  ],
-  "pagination": {
-    "total": 42,
-    "page": 1,
-    "page_size": 10,
-    "pages": 5
-  }
-}
-```
-
-### Erro Interno
-```python
-@app.errorhandler(Exception)
-def handle_error(e):
-    correlation_id = uuid.uuid4().hex[:12]
-    log.exception("Erro não tratado [%s]: %s", correlation_id, e)
-    return ApiResponse.server_error(
-        "Erro interno do servidor",
-        correlation_id
-    )
-```
-
-**Resposta:**
-```json
-{
-  "status": "error",
-  "code": 500,
-  "error_code": "INTERNAL_SERVER_ERROR",
-  "message": "Erro interno do servidor",
-  "details": {
-    "correlation_id": "a1b2c3d4e5f6"
-  }
-}
-```
-
-## Guia de Migração
-
-Para migrar endpoints existentes para o novo padrão:
-
-1. **Importar ApiResponse:**
-```python
-from api_response import ApiResponse
-```
-
-2. **Substituir retornos simples:**
-```python
-# Antes
-return jsonify({"mensagem": "Salvo"}), 201
-
-# Depois
-return ApiResponse.created(None, "Salvo com sucesso")
-```
-
-3. **Substituir retornos com dados:**
-```python
-# Antes
-return jsonify({"mensagem": "OK", "data": cliente}), 200
-
-# Depois
-return ApiResponse.success(cliente, "Cliente obtido com sucesso")
-```
-
-4. **Substituir erros:**
-```python
-# Antes
-return jsonify({"erro": "Not found"}), 404
-
-# Depois
-return ApiResponse.not_found("Cliente não encontrado")
-```
-
-## Status Atual
-
-- ✅ Implementado: `api_response.py`
-- ⏳ Pendente: Migração de endpoints existentes
-- 📋 Checklist de migração: [Ver abaixo]
-
-### Endpoints a Migrar
-- [ ] `/api/clientes` - CRUD
-- [ ] `/api/pagamentos` - CRUD
-- [ ] `/api/relatorios` - Filtros e export
-- [ ] `/api/dashboard` - Métricas
-- [ ] `/api/auth` - Autenticação
-- [ ] `/api/entregas` - Agendamentos
-- [ ] `/api/notificacoes` - Notificações
-- [ ] `/api/excel` - OneDrive
-- [ ] `/api/ia` - IA sugestões
+O webhook do Asaas (`/api/pagamentos/webhook`) é isento dessa checagem por ser
+uma chamada servidor-para-servidor — ele tem autenticação própria por token.
