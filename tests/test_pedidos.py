@@ -17,7 +17,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'backend'))
 
 import app as app_module  # noqa: E402
 import database  # noqa: E402
-from erp.comercial import servico  # noqa: E402
 
 ORIGEM = 'http://localhost'
 CABECALHOS = {'Origin': ORIGEM, 'Content-Type': 'application/json'}
