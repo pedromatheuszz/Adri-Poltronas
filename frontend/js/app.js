@@ -96,7 +96,17 @@ var CABECALHOS_JSON = { 'Content-Type': 'application/json' };
 
 async function tentarBackend(url, opcoes) {
     try {
-        return { resposta: await fetch(url, opcoes) };
+        var resposta = await fetch(url, opcoes);
+        // Sem service worker, a queda de rede vira excecao e cai no catch.
+        // COM service worker registrado, ele intercepta a falha e devolve uma
+        // resposta sintetica -- o `fetch` resolve, e o catch nunca dispara.
+        // O header e o que revela esse caso; sem esta checagem, o app tratava
+        // o envelope de offline como se fosse dado do servidor.
+        if (resposta.headers.get('X-Adri-Offline')) {
+            console.warn('[backend] offline (service worker):', url);
+            return { semBackend: true };
+        }
+        return { resposta: resposta };
     } catch (erro) {
         console.warn('[backend] indisponivel:', url, erro);
         return { semBackend: true };
@@ -974,7 +984,7 @@ async function carregarClientes() {
     // anterior ate a resposta chegar.
     mostrarEsqueleto('tabelaClientes', 6, 5);
     var r = await tentarBackend(API_URL+'?busca='+encodeURIComponent(busca));
-    if (r.semBackend) { carregarClientesOffline(); return; }
+    if (r.semBackend) { carregarClientesOffline(true); return; }
     try {
         if (!r.resposta.ok) throw new Error('Falha');
         var clientes = await r.resposta.json();
@@ -996,16 +1006,29 @@ async function carregarClientes() {
 
 async function carregarClientesOffline(mostrarToast) {
     try {
-        if (typeof OfflineManager === 'undefined') return;
+        if (typeof OfflineManager === 'undefined') {
+            renderizarTabela([]);
+            return;
+        }
         var clientes = await OfflineManager.getCachedClientes();
-        if (!clientes || clientes.length === 0) return;
-        clientes = clientes.filter(clientePassaFiltro);
+        // Cache vazio precisa renderizar mesmo assim: sem isto a tabela ficava
+        // presa nas linhas de esqueleto para sempre, sugerindo carregamento
+        // eterno em vez de "offline e sem nada guardado".
+        clientes = (clientes || []).filter(clientePassaFiltro);
         renderizarTabela(clientes);
+        // Quem chama depois de gravar offline ja exibiu a mensagem propria
+        // ("Salvo offline!"); um aviso generico aqui apagaria a informacao
+        // mais util, porque o toast e um elemento so.
         if (mostrarToast) {
-            exibirToast('Exibindo dados do cache offline.', 'success');
+            exibirToast(clientes.length
+                ? 'Sem conexao. Exibindo os dados guardados neste computador.'
+                : 'Sem conexao e sem dados guardados neste computador.',
+                clientes.length ? 'success' : 'error');
         }
     } catch (error) {
         console.error('Erro ao carregar cache offline:', error);
+        renderizarTabela([]);
+        exibirToast('Falha ao ler o cache offline.', 'error');
     }
 }
 
@@ -1024,7 +1047,7 @@ async function registrarNovoCliente(dados) {
             dados._offline = true; // Flag para identificar offline
             cached.push(dados);
             await OfflineManager.cacheClientes(cached);
-            carregarClientesOffline(true);
+            carregarClientesOffline(false);
         } catch (erro) { exibirToast('Erro ao salvar offline.', 'error'); }
         return;
     }
@@ -1049,7 +1072,7 @@ async function atualizarClienteServidor(id, dados) {
             var idx = cached.findIndex(function(c) { return c.id === id; });
             if (idx !== -1) { cached[idx] = Object.assign(cached[idx], dados); }
             await OfflineManager.cacheClientes(cached);
-            carregarClientesOffline(true);
+            carregarClientesOffline(false);
         } catch (erro) { exibirToast('Erro ao salvar offline.', 'error'); }
         return;
     }
@@ -1087,7 +1110,7 @@ async function excluirClienteServidor(id) {
             var cached = await OfflineManager.getCachedClientes();
             cached = cached.filter(function(c) { return c.id !== id; });
             await OfflineManager.cacheClientes(cached);
-            carregarClientesOffline(true);
+            carregarClientesOffline(false);
         } catch (erro) { exibirToast('Erro ao salvar exclusao offline.', 'error'); }
         return;
     }
@@ -1262,11 +1285,30 @@ async function carregarCidadesParaFiltro() {
     } catch(_) {}
 }
 
+// O dropdown fecha ao aplicar, entao sem este indicador a lista fica filtrada
+// sem nenhum sinal na tela -- o operador ve menos clientes do que cadastrou e
+// nao tem como saber por que. O rotulo e o contador ja existiam no HTML e
+// nunca eram tocados pelo JS.
+function atualizarIndicadorFiltro() {
+    var rotulo = document.getElementById('txtBtnFiltro');
+    var contador = document.getElementById('badgeFiltroCount');
+    // Os dois tipos marcados sao o estado inicial: nao restringem nada.
+    var tiposRestringem = filtrosAtivos.tipos.length !== 2;
+    var quantidade = filtrosAtivos.cidades.length + (tiposRestringem ? 1 : 0);
+
+    if (rotulo) rotulo.textContent = quantidade ? 'Filtrando' : 'Filtrar';
+    if (contador) {
+        contador.textContent = quantidade;
+        contador.hidden = quantidade === 0;
+    }
+}
+
 function aplicarFiltros() {
     filtrosAtivos.tipos = Array.from(document.querySelectorAll('input[name="filtroTipo"]:checked')).map(function(cb){ return cb.value; });
     filtrosAtivos.cidades = Array.from(document.querySelectorAll('input[name="filtroCidade"]:checked')).map(function(cb){ return cb.value; });
     var dd = document.getElementById('filtroDropdown'); if(dd) dd.classList.remove('ativo');
     var bf = document.getElementById('btnFiltro'); if(bf) { bf.classList.remove('ativo'); bf.setAttribute('aria-expanded', 'false'); }
+    atualizarIndicadorFiltro();
     carregarClientes();
 }
 
@@ -1274,6 +1316,7 @@ function limparFiltros() {
     filtrosAtivos = { tipos: ['Entrega', 'Retirada'], cidades: [] };
     document.querySelectorAll('input[name="filtroTipo"]').forEach(function(cb){ cb.checked = true; });
     document.querySelectorAll('input[name="filtroCidade"]').forEach(function(cb){ cb.checked = true; });
+    atualizarIndicadorFiltro();
     carregarClientes();
 }
 
@@ -1304,14 +1347,88 @@ async function sugerirBairro() {
     } catch(_) { exibirToast('Erro ao consultar CEP.', 'error'); }
 }
 
-function fazerBackupJSON() {
-    window.open('/api/backup/json', '_blank');
-    exibirToast('Backup JSON iniciado!');
+// -----------------------------------------------------------------------------
+// Backup
+//
+// Duas correcoes moram aqui.
+//
+// 1. A URL estava errada: as rotas vivem no blueprint de clientes, sob o
+//    prefixo /api/clientes. O caminho antigo devolvia 404.
+//
+// 2. `window.open` NAO consegue observar o resultado da requisicao -- e por
+//    isso o codigo antigo anunciava "Backup iniciado!" mesmo quando a resposta
+//    era 404. O operador lia a confirmacao e ficava sem backup nenhum, que e
+//    pior do que nao ter a funcao. Com `fetch` o status e verificavel, entao
+//    o aviso passa a corresponder ao que de fato aconteceu.
+// -----------------------------------------------------------------------------
+function _nomeDoAnexo(resposta, alternativo) {
+    var cabecalho = resposta.headers.get('Content-Disposition') || '';
+    var achado = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(cabecalho);
+    return achado ? decodeURIComponent(achado[1]) : alternativo;
 }
 
-function fazerBackupSQLite() {
-    window.open('/api/backup/sqlite', '_blank');
-    exibirToast('Backup do banco iniciado!');
+// Mensagem curta e acionavel por status. O texto cru do servidor nao serve
+// para um toast: o 404 padrao do Flask sozinho tem 120 caracteres de prosa
+// sobre conferir a URL, que nao diz nada ao operador.
+function _motivoDaFalha(resposta, detalhe) {
+    if (resposta.status === 404) return 'rota de backup nao encontrada no servidor';
+    if (resposta.status === 401 || resposta.status === 403) return 'sem permissao';
+    if (resposta.status >= 500) return 'o servidor falhou ao gerar o arquivo';
+    // Mensagem propria da API (curta, na chave `erro`) vale mais que o status.
+    if (detalhe && detalhe.length <= 90) return detalhe;
+    return 'o servidor respondeu ' + resposta.status;
+}
+
+async function baixarArquivo(url, nomeAlternativo, mensagemSucesso) {
+    try {
+        var resposta = await fetch(url);
+        if (!resposta.ok) {
+            var detalhe = '';
+            try { detalhe = (await resposta.json()).erro || ''; } catch (_) {}
+            throw new Error(_motivoDaFalha(resposta, detalhe));
+        }
+        var blob = await resposta.blob();
+        var endereco = URL.createObjectURL(blob);
+        var link = document.createElement('a');
+        link.href = endereco;
+        link.download = _nomeDoAnexo(resposta, nomeAlternativo);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        // Sem o revoke o blob fica retido em memoria ate a aba fechar -- e um
+        // backup do banco inteiro nao e pequeno.
+        setTimeout(function() { URL.revokeObjectURL(endereco); }, 1000);
+        exibirToast(mensagemSucesso);
+    } catch (erro) {
+        exibirToast('Backup nao concluido: ' + erro.message, 'error');
+    }
+}
+
+function _carimboDeData() {
+    return new Date().toISOString().slice(0, 10).replace(/-/g, '');
+}
+
+function fazerBackupJSON() {
+    baixarArquivo('/api/clientes/backup/json',
+        'backup_adri_poltronas_' + _carimboDeData() + '.json',
+        'Backup JSON salvo.');
+}
+
+async function fazerBackupSQLite() {
+    // O arquivo e o banco inteiro, com todos os clientes e lancamentos. Vale
+    // uma confirmacao antes de ele sair da maquina.
+    var confirmado = await confirmarAcao({
+        titulo: 'Baixar o banco de dados',
+        mensagem: 'O arquivo contem toda a base: clientes, pagamentos e historico. '
+                + 'Guarde em local seguro.',
+        textoConfirmar: 'Baixar',
+        icone: 'alerta',
+        variante: 'atencao'
+    });
+    if (!confirmado) return;
+    baixarArquivo('/api/clientes/backup/sqlite',
+        'backup_adri_poltronas_' + _carimboDeData() + '.db',
+        'Backup do banco salvo.');
 }
 
 function abrirModalImportar() {

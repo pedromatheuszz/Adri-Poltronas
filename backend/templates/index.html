@@ -19,8 +19,8 @@
           href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 
     <!-- Ordem obrigatoria: tokens.css declara as variaveis que style.css usa. -->
-    <link rel="stylesheet" href="/css/tokens.css?v=v75">
-    <link rel="stylesheet" href="/css/style.css?v=v75">
+    <link rel="stylesheet" href="/css/tokens.css?v=v76">
+    <link rel="stylesheet" href="/css/style.css?v=v76">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
           integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H"
           crossorigin="anonymous" referrerpolicy="no-referrer" />
@@ -417,6 +417,13 @@
                             <img src="/img/excel.png" alt="" width="18" height="18">
                             Enviar para Excel
                         </button>
+                        <!-- Backup do banco: a funcao existia desde sempre, mas
+                             nao havia botao nem atalho que a alcancasse. -->
+                        <button type="button" class="btn btn-secundario" id="btnBackupBanco"
+                                onclick="fazerBackupSQLite()" title="Baixa o banco de dados completo">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            Backup do banco
+                        </button>
                     </footer>
                 </section>
             </section>
@@ -699,6 +706,11 @@
             <div id="importarResultado" class="importar-resultado" role="status" aria-live="polite"></div>
             <div class="modal-actions">
                 <button type="button" class="modal-btn modal-btn-cancelar" id="modalImportarCancelar">Fechar</button>
+                <!-- Sem este botao a importacao nao tinha como ser executada:
+                     `executarImportacao()` existia completa no app.js e nunca
+                     era chamada, entao Ctrl+I abria um modal sem saida. -->
+                <button type="button" class="modal-btn modal-btn-confirmar"
+                        id="modalImportarConfirmar" onclick="executarImportacao()">Importar</button>
             </div>
         </div>
     </dialog>
@@ -779,7 +791,7 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"
             integrity="sha384-e6nUZLBkQ86NJ6TVVKAeSaK8jWa3NhkYWZFomE39AvDbQWeie9PlQqM3pmYW5d1g"
             crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-    <script src="/js/offline.js?v=v75"></script>
-    <script src="/js/app.js?v=v75"></script>
+    <script src="/js/offline.js?v=v76"></script>
+    <script src="/js/app.js?v=v76"></script>
 </body>
 </html>
