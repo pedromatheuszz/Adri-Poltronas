@@ -1,2 +1,0 @@
-# Runtime isolado do backend ERP v2.
-Flask==3.1.3

@@ -17,17 +17,9 @@ export const PORTA = 5000;
 export const HOST = '127.0.0.1';
 export const URL_APP = `http://${HOST}:${PORTA}/`;
 
-/**
- * O v1 continua sendo o padrao para preservar o comportamento instalado.
- * Em desenvolvimento, `ADRI_BACKEND=v2` seleciona explicitamente o ERP novo.
- * A escolha fica no processo do Electron e e herdada pelo Python filho.
- */
-export const BACKEND_SELECIONADO =
-  String(process.env.ADRI_BACKEND || '').toLowerCase() === 'v2' ? 'v2' : 'v1';
-
-const URL_SONDA = BACKEND_SELECIONADO === 'v2'
-  ? `http://${HOST}:${PORTA}/api/v2/saude`
-  : URL_APP;
+/** A sonda de disponibilidade e a propria pagina: se ela responde, o Flask
+ *  subiu e serviu o shell. */
+const URL_SONDA = URL_APP;
 
 const TIMEOUT_BOOT_MS = 30_000;
 const INTERVALO_SONDA_MS = 250;
@@ -49,17 +41,13 @@ function comandoDoBackend(raizProjeto: string, empacotado: boolean): {
   diretorio: string;
 } {
   if (empacotado) {
-    const nomeExecutavel = BACKEND_SELECIONADO === 'v2'
-      ? 'AdriPoltronasBackendV2.exe'
-      : 'AdriPoltronasBackend.exe';
-    const exe = join(process.resourcesPath, 'backend', nomeExecutavel);
+    const exe = join(process.resourcesPath, 'backend', 'AdriPoltronasBackend.exe');
     return { comando: exe, argumentos: [], diretorio: join(process.resourcesPath, 'backend') };
   }
   const python = process.platform === 'win32' ? 'python' : 'python3';
-  const pastaBackend = BACKEND_SELECIONADO === 'v2' ? 'backend_v2' : 'backend';
   return {
     comando: python,
-    argumentos: [join(raizProjeto, pastaBackend, 'servidor.py')],
+    argumentos: [join(raizProjeto, 'backend', 'servidor.py')],
     diretorio: raizProjeto,
   };
 }
@@ -97,13 +85,10 @@ export async function iniciarBackend(
 
   processo = spawn(comando, argumentos, {
     cwd: diretorio,
-    // O backend herda o ambiente; ADRI_DB_PATH e afins continuam valendo. O
-    // v2 usa sua variavel de porta propria, mas dentro do Electron serve em
-    // 5000 para manter a mesma origem da interface e do service worker.
+    // O backend herda o ambiente; ADRI_DB_PATH e afins continuam valendo.
     env: {
       ...process.env,
       PYTHONUNBUFFERED: '1',
-      ...(BACKEND_SELECIONADO === 'v2' ? { ADRI_V2_PORTA: String(PORTA) } : {}),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

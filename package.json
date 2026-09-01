@@ -10,8 +10,6 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "npm run build && electron .",
-    "start:v1": "npm run build && set \"ADRI_BACKEND=v1\" && electron .",
-    "start:v2": "npm run build && set \"ADRI_BACKEND=v2\" && electron .",
     "dist": "npm run build && electron-builder"
   },
   "devDependencies": {
