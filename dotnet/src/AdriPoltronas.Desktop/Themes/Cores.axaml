@@ -1,0 +1,48 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!--
+    Paleta identica a da interface web (frontend/css/style.css) e a da janela
+    Qt. A reorganizacao de arquitetura nao muda a identidade visual: quem usa o
+    sistema deve reconhecer a mesma tela.
+
+    Os dois temas ficam em ThemeDictionaries e sao trocados em tempo de
+    execucao pelo botao do cabecalho. Por isso as telas referenciam estes
+    pinceis com DynamicResource: com StaticResource o valor seria congelado no
+    carregamento e o botao nao mudaria nada.
+  -->
+  <ResourceDictionary.ThemeDictionaries>
+
+    <ResourceDictionary x:Key="Dark">
+      <SolidColorBrush x:Key="Fundo" Color="#080D1A" />
+      <SolidColorBrush x:Key="Superficie" Color="#0F1729" />
+      <SolidColorBrush x:Key="SuperficieAlta" Color="#16233B" />
+      <SolidColorBrush x:Key="Borda" Color="#1E293B" />
+      <SolidColorBrush x:Key="Texto" Color="#F8FAFC" />
+      <SolidColorBrush x:Key="TextoFraco" Color="#94A3B8" />
+      <SolidColorBrush x:Key="Destaque" Color="#3B82F6" />
+      <SolidColorBrush x:Key="DestaqueClaro" Color="#60A5FA" />
+      <SolidColorBrush x:Key="Entrega" Color="#10B981" />
+      <SolidColorBrush x:Key="Retirada" Color="#F59E0B" />
+      <SolidColorBrush x:Key="Perigo" Color="#EF4444" />
+      <SolidColorBrush x:Key="LinhaAlternada" Color="#111C30" />
+      <SolidColorBrush x:Key="Grade" Color="#243349" />
+    </ResourceDictionary>
+
+    <ResourceDictionary x:Key="Light">
+      <SolidColorBrush x:Key="Fundo" Color="#F1F5F9" />
+      <SolidColorBrush x:Key="Superficie" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="SuperficieAlta" Color="#F8FAFC" />
+      <SolidColorBrush x:Key="Borda" Color="#D8E0EA" />
+      <SolidColorBrush x:Key="Texto" Color="#1E293B" />
+      <SolidColorBrush x:Key="TextoFraco" Color="#64748B" />
+      <SolidColorBrush x:Key="Destaque" Color="#2563EB" />
+      <SolidColorBrush x:Key="DestaqueClaro" Color="#3B82F6" />
+      <SolidColorBrush x:Key="Entrega" Color="#059669" />
+      <SolidColorBrush x:Key="Retirada" Color="#D97706" />
+      <SolidColorBrush x:Key="Perigo" Color="#DC2626" />
+      <SolidColorBrush x:Key="LinhaAlternada" Color="#F1F5F9" />
+      <SolidColorBrush x:Key="Grade" Color="#E2E8F0" />
+    </ResourceDictionary>
+
+  </ResourceDictionary.ThemeDictionaries>
+</ResourceDictionary>

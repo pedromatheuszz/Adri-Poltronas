@@ -1,0 +1,64 @@
+{
+  "name": "adri-poltronas",
+  "version": "1.0.0",
+  "description": "Gestao de clientes, entregas e pagamentos da Adri Poltronas",
+  "author": "Pedro Matheus",
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "npm run build && electron .",
+    "start:v1": "npm run build && set \"ADRI_BACKEND=v1\" && electron .",
+    "start:v2": "npm run build && set \"ADRI_BACKEND=v2\" && electron .",
+    "dist": "npm run build && electron-builder"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "electron": "^33.3.1",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.7.2"
+  },
+  "build": {
+    "appId": "com.adripoltronas.app",
+    "productName": "Adri Poltronas",
+    "directories": {
+      "output": "dist-instalador",
+      "buildResources": "."
+    },
+    "files": [
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "dist/AdriPoltronasBackend",
+        "to": "backend"
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "icone_sistema.ico",
+      "signtoolOptions": {
+        "publisherName": "Pedro Matheus - Programmer & Developer"
+      }
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "Adri Poltronas",
+      "installerLanguages": [
+        "pt_BR"
+      ],
+      "language": "1046",
+      "createStartMenuShortcut": true,
+      "uninstallDisplayName": "Adri Poltronas",
+      "artifactName": "AdriPoltronasSetup-${version}.${ext}"
+    },
+    "copyright": "Pedro Matheus - Programmer & Developer"
+  }
+}

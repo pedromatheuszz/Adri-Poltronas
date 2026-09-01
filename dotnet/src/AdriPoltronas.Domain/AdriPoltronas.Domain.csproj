@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Sem uma unica PackageReference, de proposito: o Domain nao conhece
+       Avalonia, Entity Framework nem servico externo. Precisar de um pacote
+       aqui e sinal de que a regra esta na camada errada. -->
+</Project>

@@ -1,0 +1,17 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="AdriPoltronas.Desktop.Views.ConfirmacaoDialog"
+        Width="420" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner"
+        CanResize="False"
+        Background="{DynamicResource Fundo}">
+
+  <StackPanel Margin="20" Spacing="14">
+    <TextBlock Name="Pergunta" TextWrapping="Wrap" />
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+      <Button Content="Cancelar" Click="AoNegar" />
+      <Button Content="Confirmar" Click="AoConfirmar"
+              Background="{DynamicResource Destaque}" />
+    </StackPanel>
+  </StackPanel>
+</Window>

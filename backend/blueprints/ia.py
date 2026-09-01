@@ -29,7 +29,7 @@ def ia_sugestao_bairro():
     except Exception as e:
         log.warning("ViaCEP falhou: %s", e)
     if not config.GEMINI_API_KEY:
-        return jsonify({"erro": "Nao foi possivel buscar dados para este CEP."}), 500
+        return jsonify({"erro": "Nao foi possivel buscar dados para este CEP."}), 502
     try:
         prompt = f"Para o CEP brasileiro {cep[:5]}-{cep[5:]}, quais sao os bairros mais provaveis? Responda APENAS com JSON: {{\"bairro\": \"nome do bairro\"}}"
         payload = json.dumps({"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.3, "maxOutputTokens": 200}}).encode()
@@ -43,4 +43,4 @@ def ia_sugestao_bairro():
                 return jsonify({"bairro": json.loads(match.group()).get('bairro', ''), "fonte": "Gemini AI"})
     except Exception as e:
         log.warning("Gemini falhou: %s", e)
-    return jsonify({"erro": "Nao foi possivel buscar dados."}), 500
+    return jsonify({"erro": "Nao foi possivel buscar dados para este CEP."}), 502

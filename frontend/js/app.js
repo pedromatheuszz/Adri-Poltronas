@@ -5,21 +5,120 @@ let intervaloChecagem = null;
 let debounceTimer;
 var filtrosAtivos = { tipos: ['Entrega', 'Retirada'], cidades: [] };
 
+// ---------------------------------------------------------------------------
+// CSRF Token - integridade de requisicoes
+// ---------------------------------------------------------------------------
+function _obterCsrfToken() {
+    var match = document.cookie.match(/csrf_token=([^;]+)/);
+    if (match) return match[1];
+    var meta = document.querySelector('meta[name="csrf-token"]');
+    if (meta) return meta.getAttribute('content');
+    return null;
+}
+
+async function fetchSeguro(url, options) {
+    options = options || {};
+    options.headers = options.headers || {};
+    var token = _obterCsrfToken();
+    if (token && !options.headers['X-CSRF-Token']) {
+        options.headers['X-CSRF-Token'] = token;
+    }
+    if (!options.headers['Content-Type'] && !(options.body instanceof FormData)) {
+        options.headers['Content-Type'] = 'application/json';
+    }
+    try {
+        var resp = await fetch(url, options);
+        var csrfHeader = resp.headers.get('X-CSRF-Token');
+        if (csrfHeader) {
+            document.cookie = 'csrf_token=' + csrfHeader + '; path=/; SameSite=Lax';
+        }
+        return resp;
+    } catch (e) {
+        console.error('[fetchSeguro] Erro:', e);
+        throw e;
+    }
+}
+
+// Patch do fetch original para injetar CSRF automaticamente
+var _fetchOriginal = window.fetch;
+window.fetch = function(url, options) {
+    if (typeof url === 'string' && (url.startsWith('/api/') || url.startsWith('/api/auth/logout') || url.startsWith('/api/auth/login'))) {
+        options = options || {};
+        options.headers = options.headers || {};
+        if (!options.headers['X-CSRF-Token']) {
+            var tok = _obterCsrfToken();
+            if (tok) options.headers['X-CSRF-Token'] = tok;
+        }
+        if (!options.headers['Content-Type'] && !(options.body instanceof FormData)) {
+            options.headers['Content-Type'] = 'application/json';
+        }
+    }
+    return _fetchOriginal.apply(this, arguments);
+};
+
+// Atualiza o cookie CSRF a partir do header da resposta inicial
+(function() {
+    fetch('/').then(function(r) { var t = r.headers.get('X-CSRF-Token'); if(t) document.cookie = 'csrf_token=' + t + '; path=/; SameSite=Lax'; }).catch(function(){});
+})();
+
 function escaparHtml(str) {
     if (!str) return '';
     return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
+// Base64 valido nao contem aspas nem `<`. Um valor fora do alfabeto nao e
+// escapado, e sim recusado: um "QR Code" que nao e base64 nao tem uso, e
+// concatena-lo dentro de src="data:image/png;base64,..." era o unico ponto do
+// arquivo em que um atributo era montado sem passar por escaparHtml.
+function base64Seguro(valor) {
+    var texto = String(valor || '');
+    return /^[A-Za-z0-9+/\r\n]*={0,2}$/.test(texto) ? texto.replace(/\s/g, '') : '';
+}
+
+// href montado por concatenacao aceita apenas http(s). escaparHtml sozinho
+// impede quebrar o atributo, mas nao impede um `javascript:` inteiro.
+function urlSegura(valor) {
+    var texto = String(valor || '').trim();
+    return /^https?:\/\//i.test(texto) ? texto : '';
+}
+
+// -----------------------------------------------------------------------------
+// Disponibilidade do backend
+//
+// O servidor roda em 127.0.0.1: `navigator.onLine` mede a conexao com a
+// internet, nao com ele. Desligar o WiFi jogava todo o CRUD na fila offline --
+// gravando clientes com id negativo no IndexedDB -- enquanto o backend local
+// respondia normalmente. O unico sinal confiavel e a propria requisicao falhar
+// por rede: `fetch` rejeita nesse caso, enquanto um 4xx/5xx e uma RESPOSTA do
+// servidor, e nao indisponibilidade.
+// -----------------------------------------------------------------------------
+var CABECALHOS_JSON = { 'Content-Type': 'application/json' };
+
+async function tentarBackend(url, opcoes) {
+    try {
+        return { resposta: await fetch(url, opcoes) };
+    } catch (erro) {
+        console.warn('[backend] indisponivel:', url, erro);
+        return { semBackend: true };
+    }
+}
+
 function exibirToast(mensagem, tipo) {
     tipo = tipo || 'success';
     var toast = document.getElementById('toast');
-    if (toast) {
-        toast.innerText = mensagem;
-        toast.style.backgroundColor = tipo === 'success' ? '#27ae60' : '#e74c3c';
-        toast.className = 'show';
-        setTimeout(function(){ toast.className = toast.className.replace('show',''); }, 3000);
-    }
+    if (!toast) return;
+    toast.innerText = mensagem;
+    // A cor sai do CSS por classe, e nao de um hex escrito aqui: assim o aviso
+    // acompanha o tema claro/escuro em vez de ficar preso a um verde fixo.
+    toast.className = (tipo === 'success' ? 'toast-sucesso' : 'toast-erro') + ' show';
+    clearTimeout(_temporizadorToast);
+    _temporizadorToast = setTimeout(function() {
+        toast.classList.remove('show');
+    }, 3000);
 }
+// Guardado fora da funcao: dois toasts em sequencia rapida faziam o timer do
+// primeiro apagar o segundo no meio da exibicao.
+var _temporizadorToast = null;
 
 // -----------------------------------------------------------------------------
 // Confirmacao
@@ -33,6 +132,38 @@ var ICONES_CONFIRMACAO = {
     alerta: '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
     desconectar: '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>'
 };
+
+// -----------------------------------------------------------------------------
+// Modais
+//
+// As janelas modais sao elementos <dialog>. Abrir por showModal() entrega de
+// graca o que antes era imitado a mao: foco preso dentro da janela, fechamento
+// com Esc e fundo escurecido pelo ::backdrop. A classe `ativo` continua sendo
+// aplicada como reserva para o caso raro de um motor sem suporte a <dialog>.
+// -----------------------------------------------------------------------------
+function abrirModal(alvo) {
+    var el = typeof alvo === 'string' ? document.getElementById(alvo) : alvo;
+    if (!el) return null;
+    if (typeof el.showModal === 'function') {
+        if (!el.open) el.showModal();
+    } else {
+        el.classList.add('ativo');
+    }
+    return el;
+}
+
+function fecharModal(alvo) {
+    var el = typeof alvo === 'string' ? document.getElementById(alvo) : alvo;
+    if (!el) return null;
+    if (typeof el.close === 'function' && el.open) el.close();
+    el.classList.remove('ativo');
+    return el;
+}
+
+function modalAberto() {
+    return document.querySelector('dialog[open]') ||
+           document.querySelector('.modal-overlay.ativo');
+}
 
 function confirmarAcao(opcoes) {
     opcoes = opcoes || {};
@@ -61,7 +192,7 @@ function confirmarAcao(opcoes) {
         function encerrar(resultado) {
             if (finalizado) return;
             finalizado = true;
-            overlay.classList.remove('ativo');
+            fecharModal(overlay);
             btnOk.removeEventListener('click', aoConfirmar);
             btnCancelar.removeEventListener('click', aoCancelar);
             overlay.removeEventListener('click', aoClicarFora);
@@ -84,7 +215,7 @@ function confirmarAcao(opcoes) {
         overlay.addEventListener('click', aoClicarFora);
         document.addEventListener('keydown', aoTeclar);
 
-        overlay.classList.add('ativo');
+        abrirModal(overlay);
         // Foco no cancelar: acao destrutiva nao deve ser confirmada por engano
         // quem chegou ali pelo teclado.
         setTimeout(function(){ btnCancelar.focus(); }, 60);
@@ -97,22 +228,56 @@ function aplicarMascaraCep(e) {
     e.target.value = value;
 }
 
+// Titulo e subtitulo de cada modulo, exibidos no cabecalho. Ficam aqui, e nao
+// no HTML de cada aba, porque o cabecalho e um so e precisa ser reescrito a
+// cada troca -- e porque assim a lista de modulos existe num lugar unico.
+var PAGINAS = {
+    dashboard:  { titulo: 'Dashboard',  descricao: 'Visao geral do cadastro e das financas' },
+    clientes:   { titulo: 'Clientes',   descricao: 'Cadastro, edicao e exportacao da base de clientes' },
+    mapa:       { titulo: 'Mapa',       descricao: 'Distribuicao geografica das entregas e retiradas' },
+    pagamentos: { titulo: 'Pagamentos', descricao: 'Recebimentos, cobrancas e situacao financeira' },
+    relatorios: { titulo: 'Relatorios', descricao: 'Consultas filtradas e exportacao de dados' }
+};
+
+function atualizarCabecalho(aba) {
+    var pagina = PAGINAS[aba];
+    if (!pagina) return;
+    var titulo = document.getElementById('tituloPagina');
+    var descricao = document.getElementById('descricaoPagina');
+    if (titulo) titulo.textContent = pagina.titulo;
+    if (descricao) descricao.textContent = pagina.descricao;
+    // O titulo da janela do Electron acompanha: com varias janelas abertas na
+    // barra de tarefas, "Adri Poltronas" repetido nao distingue nada.
+    document.title = pagina.titulo + ' — Adri Poltronas';
+}
+
 function trocarAba(aba) {
-    // Hide all tabs (remove active class; CSS handles display:none via .tab-content)
+    atualizarCabecalho(aba);
+    // Mantem estado visual, semantica ARIA e o atributo HTML5 `hidden` juntos.
     document.querySelectorAll('.tab-content').forEach(function(s) {
         s.classList.remove('active');
+        s.hidden = true;
         s.style.display = '';
     });
-    document.querySelectorAll('.nav-tab').forEach(function(t){ t.classList.remove('active'); });
+    document.querySelectorAll('.nav-tab').forEach(function(t){
+        t.classList.remove('active');
+        t.setAttribute('aria-selected', 'false');
+        t.setAttribute('tabindex', '-1');
+    });
     var section = document.getElementById('aba-' + aba);
-    var tab = document.querySelector('#navTabs [onclick*="' + aba + '"]');
+    var tab = document.getElementById('tab-' + aba);
     if (section) {
         // Force display:block first (opacity still 0 from CSS), then trigger opacity transition
+        section.hidden = false;
         section.style.display = 'block';
         section.offsetHeight; // force reflow so transition fires
         section.classList.add('active');
     }
-    if (tab) tab.classList.add('active');
+    if (tab) {
+        tab.classList.add('active');
+        tab.setAttribute('aria-selected', 'true');
+        tab.removeAttribute('tabindex');
+    }
     if (aba === 'dashboard') { carregarDashboardGraficos(); }
     if (aba === 'mapa') { setTimeout(function() { initMapa(); carregarMapaClientes(); }, 100); }
     if (aba === 'relatorios') { carregarRelatorio(); }
@@ -126,6 +291,7 @@ document.addEventListener('DOMContentLoaded', function() {
     checarLoginExistente();
     carregarNotificacoes();
     initTheme();
+    initSidebar();
     registrarAtalhosTeclado();
 
     initObservacoesCounter();
@@ -185,7 +351,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     document.querySelectorAll('.modal-overlay').forEach(function(overlay) {
         overlay.addEventListener('click', function(e) {
-            if (e.target === overlay) overlay.classList.remove('ativo');
+            if (e.target === overlay) fecharModal(overlay);
         });
     });
 
@@ -196,6 +362,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!btnFiltro.contains(e.target) && !dropdown.contains(e.target)) {
             dropdown.classList.remove('ativo');
             btnFiltro.classList.remove('ativo');
+            btnFiltro.setAttribute('aria-expanded', 'false');
         }
     });
 
@@ -222,14 +389,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
     var modalNomeCancelar = document.getElementById('modalNomeCancelar');
     var modalNomeConfirmar = document.getElementById('modalNomeConfirmar');
-    if (modalNomeCancelar) modalNomeCancelar.addEventListener('click', function(){ document.getElementById('modalNomeArquivo').classList.remove('ativo'); });
+    if (modalNomeCancelar) modalNomeCancelar.addEventListener('click', function(){ fecharModal('modalNomeArquivo'); });
     if (modalNomeConfirmar) modalNomeConfirmar.addEventListener('click', function() {
-        document.getElementById('modalNomeArquivo').classList.remove('ativo');
+        fecharModal('modalNomeArquivo');
         if (window._confirmNomeCallback) window._confirmNomeCallback();
     });
 
     var modalImportarCancelar = document.getElementById('modalImportarCancelar');
-    if (modalImportarCancelar) modalImportarCancelar.addEventListener('click', function(){ document.getElementById('modalImportar').classList.remove('ativo'); });
+    if (modalImportarCancelar) modalImportarCancelar.addEventListener('click', function(){ fecharModal('modalImportar'); });
 
     // Formulario de novo recebimento
     var formNovoRecebimento = document.getElementById('formNovoRecebimento');
@@ -262,11 +429,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
     document.addEventListener('keydown', function(e) {
         if (e.key === 'Escape') {
-            var modalAtivo = document.querySelector('.modal-overlay.ativo');
+            var modalAtivo = modalAberto();
             if (!modalAtivo) {
                 var inputId = document.getElementById('clienteId');
                 if (inputId && inputId.value) { cancelarEdicao(); exibirToast('Edicao cancelada.'); }
-            } else { modalAtivo.classList.remove('ativo'); }
+            } else { fecharModal(modalAtivo); }
         }
     });
 });
@@ -277,6 +444,8 @@ async function carregarDashboardGraficos() {
         if (!resp.ok) return;
         var dados = await resp.json();
         if (dados.erro) return;
+
+        var paleta = paletaGraficos();
 
         // Calcular métricas a partir dos dados do gráfico
         var tipoLabels = Object.keys(dados.por_tipo || {});
@@ -292,7 +461,7 @@ async function carregarDashboardGraficos() {
         if (elTC) elTC.textContent = totalClientes;
         if (elEN) elEN.textContent = totalEntregas;
         if (elRE) elRE.textContent = totalRetiradas;
-        if (el30) el30.textContent = cadastros30d + '%';
+        if (el30) el30.textContent = cadastros30d;
 
         renderizarFinanceiro(dados.financeiro);
 
@@ -309,8 +478,10 @@ async function carregarDashboardGraficos() {
                         labels: tipoLabels,
                         datasets: [{
                             data: tipoValores,
-                            backgroundColor: tipoLabels.map(function(l) { return l === 'Retirada' ? '#f59e0b' : '#10b981'; }),
-                            borderColor: tipoLabels.map(function(l) { return l === 'Retirada' ? 'rgba(245,158,11,0.8)' : 'rgba(16,185,129,0.8)'; }),
+                            backgroundColor: tipoLabels.map(function(l) { return l === 'Retirada' ? paleta.alerta : paleta.sucesso; }),
+                            // A borda na cor da superficie separa as fatias sem
+                            // desenhar um contorno que compete com os dados.
+                            borderColor: paleta.superficie,
                             borderWidth: 2
                         }]
                     },
@@ -318,7 +489,7 @@ async function carregarDashboardGraficos() {
                         responsive: true,
                         maintainAspectRatio: false,
                         plugins: {
-                            legend: { position: 'bottom', labels: { color: '#94a3b8', padding: 16, font: { size: 13 } } }
+                            legend: { position: 'bottom', labels: { color: paleta.texto, padding: 16, font: { size: 12 } } }
                         }
                     }
                 });
@@ -339,10 +510,10 @@ async function carregarDashboardGraficos() {
                         datasets: [{
                             label: 'Clientes',
                             data: cidValores,
-                            backgroundColor: 'rgba(59,130,246,0.6)',
-                            borderColor: 'rgba(59,130,246,1)',
-                            borderWidth: 1,
-                            borderRadius: 6
+                            backgroundColor: paleta.primaria,
+                            borderWidth: 0,
+                            borderRadius: 4,
+                            maxBarThickness: 34
                         }]
                     },
                     options: {
@@ -350,8 +521,8 @@ async function carregarDashboardGraficos() {
                         maintainAspectRatio: false,
                         plugins: { legend: { display: false } },
                         scales: {
-                            x: { ticks: { color: '#94a3b8', font: { size: 11 } }, grid: { display: false } },
-                            y: { ticks: { color: '#94a3b8', stepSize: 1 }, grid: { color: 'rgba(255,255,255,0.05)' } }
+                            x: { ticks: { color: paleta.texto, font: { size: 11 } }, grid: { display: false } },
+                            y: { ticks: { color: paleta.texto, stepSize: 1 }, grid: { color: paleta.grade } }
                         }
                     }
                 });
@@ -372,12 +543,12 @@ async function carregarDashboardGraficos() {
                         datasets: [{
                             label: 'Cadastros',
                             data: tlValores,
-                            borderColor: '#8b5cf6',
-                            backgroundColor: 'rgba(139,92,246,0.1)',
-                            fill: true,
-                            tension: 0.4,
-                            pointRadius: 3,
-                            pointBackgroundColor: '#8b5cf6'
+                            borderColor: paleta.info,
+                            backgroundColor: 'transparent',
+                            fill: false,
+                            tension: 0.3,
+                            pointRadius: 2,
+                            pointBackgroundColor: paleta.info
                         }]
                     },
                     options: {
@@ -385,8 +556,8 @@ async function carregarDashboardGraficos() {
                         maintainAspectRatio: false,
                         plugins: { legend: { display: false } },
                         scales: {
-                            x: { ticks: { color: '#94a3b8', maxTicksLimit: 10, font: { size: 11 } }, grid: { display: false } },
-                            y: { ticks: { color: '#94a3b8', stepSize: 1 }, grid: { color: 'rgba(255,255,255,0.05)' }, beginAtZero: true }
+                            x: { ticks: { color: paleta.texto, maxTicksLimit: 10, font: { size: 11 } }, grid: { display: false } },
+                            y: { ticks: { color: paleta.texto, stepSize: 1 }, grid: { color: paleta.grade }, beginAtZero: true }
                         }
                     }
                 });
@@ -398,9 +569,11 @@ async function carregarDashboardGraficos() {
         if (ulEl && dados.ultimos_clientes && dados.ultimos_clientes.length > 0) {
             ulEl.innerHTML = dados.ultimos_clientes.map(function(c) {
                 var badgeClass = c.tipo === 'Retirada' ? 'badge-retirada' : 'badge-entrega';
-                return '<div style="display:flex;justify-content:space-between;align-items:center;padding:0.6rem 0;border-bottom:1px solid var(--glass-border);">' +
-                    '<span style="font-weight:600;">' + escaparHtml(c.nome) + '</span>' +
-                    '<span style="font-size:0.8rem;color:var(--text-muted);">' + escaparHtml(c.cidade || '-') + ' &middot; <span class="' + badgeClass + '" style="font-size:0.7rem;">' + escaparHtml(c.tipo) + '</span></span>' +
+                var nome = escaparHtml(c.nome);
+                return '<div class="ultimo-cliente-item">' +
+                    '<span class="ultimo-cliente-nome" title="' + nome + '">' + nome + '</span>' +
+                    '<span class="ultimo-cliente-meta">' + escaparHtml(c.cidade || '-') +
+                    '<span class="' + badgeClass + '">' + escaparHtml(c.tipo) + '</span></span>' +
                     '</div>';
             }).join('');
         }
@@ -455,7 +628,8 @@ function renderizarFinanceiro(fin) {
 
     // Destaca o mes corrente (ultimo da serie) para a leitura de "onde estou".
     var ultimoIndice = serie.length - 1;
-    var cores = serie.map(function(_, i) { return i === ultimoIndice ? '#10b981' : 'rgba(59,130,246,0.65)'; });
+    var paleta = paletaGraficos();
+    var cores = serie.map(function(_, i) { return i === ultimoIndice ? paleta.sucesso : paleta.primaria; });
 
     if (chartInstances.receita) chartInstances.receita.destroy();
     chartInstances.receita = new Chart(ctx, {
@@ -496,19 +670,114 @@ function renderizarFinanceiro(fin) {
     });
 }
 
+// -----------------------------------------------------------------------------
+// Paleta dos graficos
+//
+// As cores sao lidas dos tokens CSS em vez de escritas aqui. Duas razoes: os
+// graficos acompanham a troca de tema sem codigo extra, e a identidade visual
+// continua morando num arquivo so (tokens.css). Antes havia sete hex soltos
+// no meio das configuracoes do Chart.js -- azul e roxo que nao existiam em
+// nenhum outro lugar da interface.
+// -----------------------------------------------------------------------------
+function token(nome, reserva) {
+    var valor = getComputedStyle(document.documentElement).getPropertyValue(nome).trim();
+    return valor || reserva;
+}
+
 function corDoTexto() {
-    return getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim() || '#94a3b8';
+    return token('--cor-texto-2', '#6B6153');
 }
 
 function corDaGrade() {
-    return document.documentElement.getAttribute('data-theme') === 'light'
-        ? 'rgba(0,0,0,0.07)' : 'rgba(255,255,255,0.07)';
+    return token('--cor-borda', '#E0D8C9');
+}
+
+function paletaGraficos() {
+    return {
+        primaria: token('--cor-primaria', '#8A5A3B'),
+        sucesso:  token('--cor-sucesso', '#4E6B3C'),
+        alerta:   token('--cor-alerta', '#A8761C'),
+        info:     token('--cor-info', '#4A6480'),
+        texto:    corDoTexto(),
+        grade:    corDaGrade(),
+        superficie: token('--cor-superficie', '#FBF9F5')
+    };
 }
 
 
 
+var CHAVE_SIDEBAR = 'adri-sidebar';
+
+function initSidebar() {
+    // A preferencia acompanha o operador entre sessoes: quem trabalha em tela
+    // pequena deixa recolhido e nao quer refazer isso a cada abertura.
+    var salvo = null;
+    try { salvo = localStorage.getItem(CHAVE_SIDEBAR); } catch(_) {}
+    // `salvo !== null` distingue "escolheu deixar aberta" de "nunca escolheu".
+    // Sem essa distincao, initSidebar marcava TODA sessao como escolha manual
+    // e a regra de recolhimento automatico em tela estreita nunca chegava a
+    // valer -- a barra comia 248px de uma janela de 1024px.
+    aplicarEstadoSidebar(salvo === 'recolhida', salvo !== null);
+    registrarNavegacaoPorSetas();
+}
+
+function aplicarEstadoSidebar(recolhida, escolhaManual) {
+    var barra = document.getElementById('sidebar');
+    var botao = document.getElementById('btnSidebarToggle');
+    if (!barra) return;
+    barra.classList.toggle('recolhida', recolhida);
+    // `expandida-manual` vence a regra de largura que recolhe sozinha: uma
+    // escolha explicita do usuario nao pode ser desfeita pelo CSS.
+    barra.classList.toggle('expandida-manual', !recolhida && escolhaManual === true);
+    if (botao) {
+        var texto = recolhida ? 'Expandir menu' : 'Recolher menu';
+        botao.setAttribute('aria-expanded', recolhida ? 'false' : 'true');
+        botao.title = texto;
+        var rotulo = botao.querySelector('.visually-hidden');
+        if (rotulo) rotulo.textContent = texto;
+    }
+}
+
+function alternarSidebar() {
+    var barra = document.getElementById('sidebar');
+    if (!barra) return;
+    var recolhida = !barra.classList.contains('recolhida');
+    // Clique no botao e, por definicao, escolha manual.
+    aplicarEstadoSidebar(recolhida, true);
+    try { localStorage.setItem(CHAVE_SIDEBAR, recolhida ? 'recolhida' : 'expandida'); } catch(_) {}
+    // O Leaflet mede o container so no momento em que desenha. Mudar a largura
+    // da barra encolhe o mapa sem avisa-lo, e metade dele fica cinza ate o
+    // proximo redraw. O atraso cobre a transicao de 0.28s da barra.
+    if (mapaInstance) { setTimeout(function() { mapaInstance.invalidateSize(); }, 320); }
+}
+
+function registrarNavegacaoPorSetas() {
+    // Com role="tablist" vertical, o padrao ARIA pede Cima/Baixo (e Home/End).
+    // Nao havia navegacao por setas nem na versao horizontal: so Tab, que
+    // percorria uma aba por vez por causa do roving tabindex.
+    var lista = document.getElementById('navTabs');
+    if (!lista) return;
+    lista.addEventListener('keydown', function(e) {
+        var abas = Array.prototype.slice.call(lista.querySelectorAll('.nav-tab'));
+        var atual = abas.indexOf(document.activeElement);
+        if (atual === -1) return;
+        var destino;
+        if (e.key === 'ArrowDown') destino = (atual + 1) % abas.length;
+        else if (e.key === 'ArrowUp') destino = (atual - 1 + abas.length) % abas.length;
+        else if (e.key === 'Home') destino = 0;
+        else if (e.key === 'End') destino = abas.length - 1;
+        else return;
+        e.preventDefault();
+        abas[destino].focus();
+        abas[destino].click();
+    });
+}
+
 function initTheme() {
-    var saved = localStorage.getItem('adri-theme') || 'dark';
+    // Claro e o padrao: a paleta do app e de superficies claras, e o modo
+    // escuro passou a ser a alternativa para turno noturno. Quem ja escolheu
+    // um tema mantem a escolha -- so o padrao de quem nunca escolheu mudou.
+    var saved = localStorage.getItem('adri-theme') || 'light';
     document.documentElement.setAttribute('data-theme', saved);
     updateThemeIcon(saved);
 }
@@ -524,10 +793,12 @@ function toggleTheme() {
 function updateThemeIcon(theme) {
     var sun = document.getElementById('iconSun');
     var moon = document.getElementById('iconMoon');
+    var toggle = document.getElementById('btnThemeToggle');
     if (sun && moon) {
-        sun.style.display = theme === 'dark' ? 'block' : 'none';
-        moon.style.display = theme === 'light' ? 'block' : 'none';
+        sun.hidden = theme !== 'dark';
+        moon.hidden = theme !== 'light';
     }
+    if (toggle) toggle.setAttribute('aria-pressed', theme === 'light' ? 'true' : 'false');
 }
 
 function registrarAtalhosTeclado() {
@@ -559,7 +830,7 @@ function atualizarBadgeNotificacoes() {
     var badge = document.getElementById('notifBadge');
     if (!badge) return;
     var naoLidas = window._notificacoesNaoLidas || 0;
-    badge.style.display = naoLidas > 0 ? 'flex' : 'none';
+    badge.hidden = naoLidas === 0;
     badge.textContent = naoLidas;
 }
 
@@ -581,7 +852,7 @@ function renderizarNotificacoes() {
     }
 
     var btnTodas = document.getElementById('btnMarcarTodasLidas');
-    if (btnTodas) btnTodas.style.display = naoLidas > 0 ? 'block' : 'none';
+    if (btnTodas) btnTodas.hidden = naoLidas === 0;
 
     if (notifs.length === 0) {
         lista.innerHTML = '<div class="notif-empty"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg><p>Nenhuma notificacao no momento</p></div>';
@@ -632,9 +903,11 @@ function renderizarNotificacoes() {
 
 function abrirNotificacoes() {
     var panel = document.getElementById('notificacoesPanel');
+    var botao = document.getElementById('btnNotificacoes');
     if (!panel) return;
     renderizarNotificacoes();
     panel.classList.toggle('ativo');
+    if (botao) botao.setAttribute('aria-expanded', panel.classList.contains('ativo') ? 'true' : 'false');
 }
 
 async function marcarNotificacaoLida(chave, lida) {
@@ -689,29 +962,35 @@ async function marcarEntregaConcluida(entregaId) {
 function fecharNotificacoes() {
     var panel = document.getElementById('notificacoesPanel');
     if (panel) panel.classList.remove('ativo');
+    var botao = document.getElementById('btnNotificacoes');
+    if (botao) botao.setAttribute('aria-expanded', 'false');
 }
 
 async function carregarClientes() {
     var busca = (document.getElementById('inputPesquisa') || {}).value || '';
     busca = busca.trim();
+    // Esqueleto antes da chamada: a lista mantem a altura e o operador ve que
+    // algo esta em andamento, em vez de encarar a tabela vazia da consulta
+    // anterior ate a resposta chegar.
+    mostrarEsqueleto('tabelaClientes', 6, 5);
+    var r = await tentarBackend(API_URL+'?busca='+encodeURIComponent(busca));
+    if (r.semBackend) { carregarClientesOffline(); return; }
     try {
-        var response = await fetch(API_URL+'?busca='+encodeURIComponent(busca));
-        if (!response.ok) throw new Error('Falha');
-        var clientes = await response.json();
-        // Cache para uso offline
-        if (typeof OfflineManager !== 'undefined' && clientes.length > 0) {
-            OfflineManager.cacheClientes(clientes);
+        if (!r.resposta.ok) throw new Error('Falha');
+        var clientes = await r.resposta.json();
+        // Cache para uso offline. `sincronizarCache` (e nao `cacheClientes`)
+        // porque esta lista e a autoritativa: o que nao esta nela precisa
+        // sair do cache, senao ficam residuos de registros ja excluidos e de
+        // ids temporarios negativos criados offline.
+        if (typeof OfflineManager !== 'undefined' && Array.isArray(clientes)) {
+            OfflineManager.sincronizarCache(clientes);
         }
         clientes = clientes.filter(clientePassaFiltro);
         renderizarTabela(clientes);
     } catch (error) {
         console.error('Erro ao carregar do servidor:', error);
-        // Fallback para cache apenas quando offline
-        if (!navigator.onLine) {
-            carregarClientesOffline();
-        } else {
-            exibirToast('Erro ao carregar clientes.', 'error');
-        }
+        renderizarTabela([]);
+        exibirToast('Erro ao carregar clientes.', 'error');
     }
 }
 
@@ -731,8 +1010,8 @@ async function carregarClientesOffline(mostrarToast) {
 }
 
 async function registrarNovoCliente(dados) {
-    // Se offline, salvar na fila de sincronizacao
-    if (!navigator.onLine) {
+    var r = await tentarBackend(API_URL, { method: 'POST', headers: CABECALHOS_JSON, body: JSON.stringify(dados) });
+    if (r.semBackend) {
         try {
             await OfflineManager.savePendingAction('create', dados);
             exibirToast('Salvo offline! Sera sincronizado quando voltar online.', 'success');
@@ -750,17 +1029,16 @@ async function registrarNovoCliente(dados) {
         return;
     }
     try {
-        var resposta = await fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(dados) });
-        var resultado = await resposta.json();
-        if (!resposta.ok) throw new Error(resultado.erro || 'Erro');
+        var resultado = await r.resposta.json();
+        if (!r.resposta.ok) throw new Error(resultado.erro || 'Erro');
         exibirToast('Cliente cadastrado!');
         cancelarEdicao(); carregarClientes(); carregarDashboardGraficos();
     } catch (erro) { exibirToast('Erro ao registrar.', 'error'); }
 }
 
 async function atualizarClienteServidor(id, dados) {
-    // Se offline, salvar na fila de sincronizacao
-    if (!navigator.onLine) {
+    var r = await tentarBackend(API_URL+'/'+id, { method: 'PUT', headers: CABECALHOS_JSON, body: JSON.stringify(dados) });
+    if (r.semBackend) {
         try {
             dados.id = id;
             await OfflineManager.savePendingAction('update', dados);
@@ -776,8 +1054,7 @@ async function atualizarClienteServidor(id, dados) {
         return;
     }
     try {
-        var resposta = await fetch(API_URL+'/'+id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(dados) });
-        if (!resposta.ok) throw new Error('Erro');
+        if (!r.resposta.ok) throw new Error('Erro');
         exibirToast('Cliente atualizado!');
         cancelarEdicao(); carregarClientes(); carregarDashboardGraficos();
     } catch (erro) { exibirToast('Erro ao atualizar.', 'error'); }
@@ -793,10 +1070,12 @@ async function excluirClienteServidor(id) {
     });
     if (!confirmado) return;
 
-    // Se offline, salvar na fila de sincronizacao
-    if (!navigator.onLine) {
+    // ID temporario (negativo) so existe no cache local: nunca chegou ao
+    // servidor, entao nao ha o que excluir la.
+    var r = id < 0 ? { semBackend: true }
+                   : await tentarBackend(API_URL+'/'+id, { method: 'DELETE' });
+    if (r.semBackend) {
         try {
-            // Se ID é temporario (negativo), não precisa enviar ao servidor
             if (id < 0) {
                 exibirToast('Cliente removido do cache offline.', 'success');
             } else {
@@ -813,39 +1092,75 @@ async function excluirClienteServidor(id) {
         return;
     }
     try {
-        var resposta = await fetch(API_URL+'/'+id, { method: 'DELETE' });
-        var dados = await resposta.json();
-        if (!resposta.ok) throw new Error(dados.erro || 'Erro');
+        var dados = await r.resposta.json();
+        if (!r.resposta.ok) throw new Error(dados.erro || 'Erro');
         exibirToast('Cliente excluido!');
         cancelarEdicao(); carregarClientes(); carregarDashboardGraficos();
     } catch (erro) { exibirToast('Erro: ' + erro.message, 'error'); }
 }
 
+// -----------------------------------------------------------------------------
+// Estados de tabela
+//
+// Vazio e carregando deixaram de ser uma celula com texto solto: sao blocos
+// com forma propria, definidos em `.empty-state` e `.skeleton-row` no CSS.
+// O esqueleto importa mais do que parece -- ele segura a altura da lista, e
+// sem ele o conteudo abaixo salta quando os dados chegam.
+// -----------------------------------------------------------------------------
+var ICONE_VAZIO = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>';
+
+function linhaEstadoVazio(colunas, titulo, detalhe) {
+    return '<tr><td colspan="' + colunas + '">' +
+        '<div class="empty-state">' +
+        '<div class="empty-state-icon" aria-hidden="true">' + ICONE_VAZIO + '</div>' +
+        '<h3>' + escaparHtml(titulo) + '</h3>' +
+        '<p>' + escaparHtml(detalhe) + '</p>' +
+        '</div></td></tr>';
+}
+
+function mostrarEsqueleto(idTabela, colunas, linhas) {
+    var tbody = document.getElementById(idTabela);
+    if (!tbody) return;
+    var celulas = new Array(colunas + 1).join('<td>&nbsp;</td>');
+    var html = '';
+    for (var i = 0; i < (linhas || 5); i++) html += '<tr class="skeleton-row">' + celulas + '</tr>';
+    tbody.innerHTML = html;
+}
+
 function renderizarTabela(clientes) {
     var tabela = document.getElementById('tabelaClientes');
     if (!tabela) return;
-    tabela.innerHTML = '';
     if (!Array.isArray(clientes)) clientes = [];
     if (clientes.length === 0) {
-        tabela.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:3rem;color:var(--text-muted);"><p>Nenhum cliente encontrado.</p></td></tr>';
+        tabela.innerHTML = linhaEstadoVazio(6, 'Nenhum cliente encontrado',
+            'Ajuste a busca ou os filtros, ou cadastre um cliente no formulario acima.');
         return;
     }
+    var html = '';
     clientes.forEach(function(c) {
-        var tr = document.createElement('tr');
         var badgeClass = (c.entrega_retirada || 'Entrega') === 'Retirada' ? 'badge-retirada' : 'badge-entrega';
         var idSeguro = escaparHtml('' + c.id);
-        tr.innerHTML =
-            '<td class="col-checkbox"><input type="checkbox" class="client-checkbox" value="'+idSeguro+'"></td>' +
-            '<td class="col-nome"><strong>'+escaparHtml(c.nome)+'</strong></td>' +
-            '<td class="col-cidade">'+escaparHtml(c.cidade||'')+'</td>' +
-            '<td class="col-bairro">'+escaparHtml(c.bairro||'')+'</td>' +
+        var nome = escaparHtml(c.nome || '');
+        var cidade = escaparHtml(c.cidade || '');
+        var bairro = escaparHtml(c.bairro || '');
+        html +=
+            '<tr>' +
+            // Sem `aria-label` o leitor de tela anuncia so "caixa de selecao":
+            // numa lista de 200 linhas, nenhuma delas identificavel.
+            '<td class="col-checkbox"><input type="checkbox" class="client-checkbox" value="'+idSeguro+'" aria-label="Selecionar '+nome+'"></td>' +
+            // `title` porque a coluna trunca com reticencia: o nome completo
+            // continua alcancavel sem abrir o cadastro.
+            '<td class="col-nome" title="'+nome+'"><strong>'+nome+'</strong></td>' +
+            '<td class="col-cidade" title="'+cidade+'">'+cidade+'</td>' +
+            '<td class="col-bairro" title="'+bairro+'">'+bairro+'</td>' +
             '<td class="col-tipo"><span class="'+badgeClass+'">'+escaparHtml(c.entrega_retirada||'Entrega')+'</span></td>' +
-            '<td class="col-acoes" style="text-align:right;"><div style="display:inline-flex;gap:0.5rem;">' +
-            '<button class="btn" style="background:#475569;padding:0.3rem 0.6rem;font-size:0.85rem;" data-action="editar" data-id="'+idSeguro+'" data-nome="'+escaparHtml(c.nome||'')+'" data-cep="'+escaparHtml(c.cep||'')+'" data-rua="'+escaparHtml(c.rua||'')+'" data-bairro="'+escaparHtml(c.bairro||'')+'" data-cidade="'+escaparHtml(c.cidade||'')+'" data-tipo="'+escaparHtml(c.entrega_retirada||'Entrega')+'" data-obs="'+escaparHtml(c.observacoes||'')+'">Editar</button>' +
-            '<button class="btn" style="background:#ef4444;padding:0.3rem 0.6rem;font-size:0.85rem;" data-action="excluir" data-id="'+idSeguro+'">Excluir</button>' +
-            '</div></td>';
-        tabela.appendChild(tr);
+            '<td class="col-acoes"><div class="tabela-acoes">' +
+            '<button type="button" class="btn btn-secundario btn-sm" data-action="editar" data-id="'+idSeguro+'" data-nome="'+nome+'" data-cep="'+escaparHtml(c.cep||'')+'" data-rua="'+escaparHtml(c.rua||'')+'" data-bairro="'+bairro+'" data-cidade="'+cidade+'" data-tipo="'+escaparHtml(c.entrega_retirada||'Entrega')+'" data-obs="'+escaparHtml(c.observacoes||'')+'">Editar</button>' +
+            '<button type="button" class="btn btn-perigo btn-sm" data-action="excluir" data-id="'+idSeguro+'">Excluir</button>' +
+            '</div></td>' +
+            '</tr>';
     });
+    tabela.innerHTML = html;
 }
 
 function editarCliente(id, nome, cep, rua, bairro, cidade, entrega_retirada, observacoes) {
@@ -896,10 +1211,12 @@ function toggleModoSelecao() {
     var btn = document.getElementById('btnModoSelecao');
     if (modoSelecaoAtivo) {
         if (btn) btn.classList.add('ativo');
+        if (btn) btn.setAttribute('aria-pressed', 'true');
         if (txt) txt.innerText = 'Sair da Selecao';
         document.body.classList.add('modo-selecao-ativo');
     } else {
         if (btn) btn.classList.remove('ativo');
+        if (btn) btn.setAttribute('aria-pressed', 'false');
         if (txt) txt.innerText = 'Selecionar Clientes';
         saindoSelecao = true;
         document.body.classList.add('saindo-selecao');
@@ -917,8 +1234,14 @@ function toggleFiltro() {
     var dropdown = document.getElementById('filtroDropdown');
     var btnFiltro = document.getElementById('btnFiltro');
     if (!dropdown) return;
-    if (dropdown.classList.contains('ativo')) { dropdown.classList.remove('ativo'); if(btnFiltro) btnFiltro.classList.remove('ativo'); }
-    else { carregarCidadesParaFiltro(); dropdown.classList.add('ativo'); if(btnFiltro) btnFiltro.classList.add('ativo'); }
+    if (dropdown.classList.contains('ativo')) {
+        dropdown.classList.remove('ativo');
+        if (btnFiltro) { btnFiltro.classList.remove('ativo'); btnFiltro.setAttribute('aria-expanded', 'false'); }
+    } else {
+        carregarCidadesParaFiltro();
+        dropdown.classList.add('ativo');
+        if (btnFiltro) { btnFiltro.classList.add('ativo'); btnFiltro.setAttribute('aria-expanded', 'true'); }
+    }
 }
 
 async function carregarCidadesParaFiltro() {
@@ -943,7 +1266,7 @@ function aplicarFiltros() {
     filtrosAtivos.tipos = Array.from(document.querySelectorAll('input[name="filtroTipo"]:checked')).map(function(cb){ return cb.value; });
     filtrosAtivos.cidades = Array.from(document.querySelectorAll('input[name="filtroCidade"]:checked')).map(function(cb){ return cb.value; });
     var dd = document.getElementById('filtroDropdown'); if(dd) dd.classList.remove('ativo');
-    var bf = document.getElementById('btnFiltro'); if(bf) bf.classList.remove('ativo');
+    var bf = document.getElementById('btnFiltro'); if(bf) { bf.classList.remove('ativo'); bf.setAttribute('aria-expanded', 'false'); }
     carregarClientes();
 }
 
@@ -994,7 +1317,7 @@ function fazerBackupSQLite() {
 function abrirModalImportar() {
     var modal = document.getElementById('modalImportar');
     if (modal) {
-        modal.classList.add('ativo');
+        abrirModal(modal);
         document.getElementById('inputArquivoImportar').value = '';
         var res = document.getElementById('importarResultado');
         if (res) { res.style.display = 'none'; res.innerHTML = ''; }
@@ -1011,12 +1334,18 @@ async function executarImportacao() {
         var resp = await fetch('/api/clientes/importar', { method: 'POST', body: formData });
         var dados = await resp.json();
         if (!resp.ok) throw new Error(dados.erro || 'Erro');
-        if (resultado) { resultado.style.display = 'block'; resultado.style.background = 'rgba(16,185,129,0.1)'; resultado.style.border = '1px solid rgba(16,185,129,0.3)'; resultado.innerHTML = '<strong>Importacao concluida!</strong><br>Importados: '+dados.sucessos+'<br>Duplicados: '+dados.duplicados+'<br>Erros: '+dados.erros; }
+        if (resultado) {
+            resultado.className = 'importar-resultado importar-ok';
+            resultado.innerHTML = '<strong>Importacao concluida.</strong><br>Importados: '+dados.sucessos+'<br>Duplicados: '+dados.duplicados+'<br>Erros: '+dados.erros;
+        }
         exibirToast(dados.sucessos + ' clientes importados!');
         carregarClientes();
         carregarDashboardGraficos();
     } catch(e) {
-        if (resultado) { resultado.style.display = 'block'; resultado.style.background = 'rgba(239,68,68,0.1)'; resultado.style.border = '1px solid rgba(239,68,68,0.3)'; resultado.innerHTML = '<strong>Erro:</strong> '+e.message; }
+        if (resultado) {
+            resultado.className = 'importar-resultado importar-erro';
+            resultado.innerHTML = '<strong>Erro:</strong> '+escaparHtml(e.message);
+        }
         exibirToast('Erro na importacao.', 'error');
     }
 }
@@ -1025,8 +1354,18 @@ async function checarLoginExistente() {
     try {
         var resp = await fetch('/api/auth/status');
         var status = await resp.json();
-        if (status.logado) { atualizarVisualBotaoConexao(status.conta); if(intervaloChecagem){ clearInterval(intervaloChecagem); intervaloChecagem = null; } return true; }
-        else { resetarVisualBotaoConexao(); }
+        if (status.logado) {
+            atualizarVisualBotaoConexao(status.conta);
+            if (intervaloChecagem) { clearInterval(intervaloChecagem); intervaloChecagem = null; }
+            return true;
+        }
+        resetarVisualBotaoConexao();
+        // O backend so devolve este motivo quando havia uma sessao que nao
+        // pode mais ser renovada -- vale avisar, porque a tela acabou de
+        // mudar de "Conectado" para "Conectar" sem o operador ter feito nada.
+        if (status.motivo === 'sessao_expirada') {
+            exibirToast('Sessao Microsoft expirada. Reconecte para exportar planilhas.', 'error');
+        }
     } catch(_) {}
     return false;
 }
@@ -1090,19 +1429,34 @@ async function enviarParaExcel() {
         var nome = (document.getElementById('inputNomeArquivo')||{}).value || 'Clientes_AdriPoltronas';
         enviarExcelComNome(idsParaEnviar, nome);
     };
-    document.getElementById('modalNomeArquivo').classList.add('ativo');
+    abrirModal('modalNomeArquivo');
 }
 
 async function enviarExcelComNome(ids, nomeArquivo) {
     var btnEnviar = document.getElementById('btnEnviarExcel');
+    // A sessao pode cair durante o envio; nesse caso o botao NAO volta a ficar
+    // habilitado no `finally`, senao a tela continuaria oferecendo uma acao
+    // que o backend ja nao aceita.
+    var sessaoCaiu = false;
     try {
         if (btnEnviar) { btnEnviar.disabled = true; btnEnviar.classList.add('carregando'); }
         var resp = await fetch('/api/excel/enviar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: ids, nome_arquivo: nomeArquivo }) });
         var dados = await resp.json();
+        if (resp.status === 401) {
+            sessaoCaiu = true;
+            resetarVisualBotaoConexao();
+            exibirToast('Sessao Microsoft encerrada. Clique em "Conectar Microsoft" para reconectar.', 'error');
+            return;
+        }
         if (!resp.ok) throw new Error(dados.erro || 'Falha');
-        exibirToast('Planilha enviada!');
+        exibirToast('Planilha enviada para o OneDrive.');
     } catch(e) { exibirToast('Erro: ' + e.message, 'error'); }
-    finally { if (btnEnviar) { btnEnviar.disabled = false; btnEnviar.classList.remove('carregando'); } }
+    finally {
+        if (btnEnviar) {
+            btnEnviar.classList.remove('carregando');
+            btnEnviar.disabled = sessaoCaiu;
+        }
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -1140,10 +1494,10 @@ async function carregarRelatorio() {
         var clientes = dados.clientes || [];
         if (contador) contador.textContent = clientes.length + ' cliente(s) encontrado(s).';
         if (clientes.length === 0) {
-            if (previewCard) previewCard.style.display = 'none';
+            if (previewCard) previewCard.hidden = true;
             return;
         }
-        if (previewCard) previewCard.style.display = 'block';
+        if (previewCard) previewCard.hidden = false;
         if (tabela) {
             tabela.innerHTML = clientes.map(function(c) {
                 var badgeClass = c.entrega_retirada === 'Retirada' ? 'badge-retirada' : 'badge-entrega';
@@ -1152,9 +1506,9 @@ async function carregarRelatorio() {
                     '<td><strong>' + escaparHtml(c.nome) + '</strong></td>' +
                     '<td>' + escaparHtml(c.cidade || '-') + '</td>' +
                     '<td>' + escaparHtml(c.bairro || '-') + '</td>' +
-                    '<td><span class="' + badgeClass + '" style="font-size:0.75rem;">' + escaparHtml(c.entrega_retirada) + '</span></td>' +
-                    '<td>' + escaparHtml(c.cep || '-') + '</td>' +
-                    '<td style="font-size:0.8rem;color:var(--text-muted);">' + dataFormatada + '</td>' +
+                    '<td><span class="' + badgeClass + '">' + escaparHtml(c.entrega_retirada) + '</span></td>' +
+                    '<td class="valor">' + escaparHtml(c.cep || '-') + '</td>' +
+                    '<td class="valor">' + dataFormatada + '</td>' +
                     '</tr>';
             }).join('');
         }
@@ -1178,18 +1532,25 @@ function carregarRelatorioRegioes(regioes) {
     var container = document.getElementById('relatorioRegioes');
     if (!container) return;
     if (!regioes || regioes.length === 0) {
-        container.innerHTML = '<div style="padding:1rem;text-align:center;color:var(--text-muted);">Nenhum dado por regiao.</div>';
+        container.innerHTML = '<div class="empty-state">' +
+            '<div class="empty-state-icon" aria-hidden="true">' + ICONE_VAZIO + '</div>' +
+            '<h3>Sem dados por regiao</h3>' +
+            '<p>Cadastre clientes com cidade preenchida para ver a distribuicao aqui.</p>' +
+            '</div>';
         return;
     }
     var total = regioes.reduce(function(a, r) { return a + r.total; }, 0);
-    container.innerHTML = '<table style="width:100%;"><thead><tr><th style="text-align:left;">Cidade</th><th style="text-align:center;">Total</th><th style="text-align:center;">Entregas</th><th style="text-align:center;">Retiradas</th><th style="text-align:right;">%</th></tr></thead><tbody>' +
+    container.innerHTML = '<table class="tabela-simples"><caption class="visually-hidden">Clientes por cidade</caption>' +
+        '<thead><tr><th scope="col">Cidade</th><th scope="col" class="centro">Total</th>' +
+        '<th scope="col" class="centro">Entregas</th><th scope="col" class="centro">Retiradas</th>' +
+        '<th scope="col" class="direita">%</th></tr></thead><tbody>' +
         regioes.map(function(r) {
             var pct = total > 0 ? Math.round((r.total / total) * 100) : 0;
             return '<tr><td><strong>' + escaparHtml(r.cidade) + '</strong></td>' +
-                '<td style="text-align:center;">' + r.total + '</td>' +
-                '<td style="text-align:center;"><span class="badge-entrega" style="font-size:0.75rem;">' + r.entregas + '</span></td>' +
-                '<td style="text-align:center;"><span class="badge-retirada" style="font-size:0.75rem;">' + r.retiradas + '</span></td>' +
-                '<td style="text-align:right;color:var(--text-muted);">' + pct + '%</td></tr>';
+                '<td class="centro">' + r.total + '</td>' +
+                '<td class="centro"><span class="badge-entrega">' + r.entregas + '</span></td>' +
+                '<td class="centro"><span class="badge-retirada">' + r.retiradas + '</span></td>' +
+                '<td class="direita">' + pct + '%</td></tr>';
         }).join('') +
         '</tbody></table>';
 }
@@ -1199,8 +1560,76 @@ function carregarRelatorioRegioes(regioes) {
 // -----------------------------------------------------------------------------
 var mapaInstance = null;
 var mapaMarcadores = [];
-var _geocacheCoords = {};
+// -----------------------------------------------------------------------------
+// Cache de geocodificacao
+//
+// A Nominatim exige 1 requisicao por segundo, e o mapa geocodifica cliente a
+// cliente em serie. Com o cache apenas em memoria, TUDO era refeito a cada
+// reinicio do app -- com 200 clientes, ~4 minutos de espera toda vez que o
+// mapa era aberto pela primeira vez na sessao. localStorage torna o custo
+// pago uma unica vez por maquina.
+// -----------------------------------------------------------------------------
+var CHAVE_GEOCACHE = 'adri-geocache';
+var _geocacheCoords = carregarGeocache();
 var _mapaCarregando = false;
+// Incrementado a cada carregamento do mapa: um carregamento antigo que ainda
+// esteja no meio da fila de 1,1 s por cliente percebe que ficou obsoleto e
+// para, em vez de seguir desenhando marcadores sobre o mapa novo.
+var _geracaoMapa = 0;
+
+function carregarGeocache() {
+    try {
+        return JSON.parse(localStorage.getItem(CHAVE_GEOCACHE) || '{}') || {};
+    } catch (e) {
+        return {};
+    }
+}
+
+function guardarGeocache() {
+    try {
+        localStorage.setItem(CHAVE_GEOCACHE, JSON.stringify(_geocacheCoords));
+    } catch (e) {
+        // Cota estourada ou storage bloqueado: o cache em memoria continua
+        // valendo para esta sessao, entao nao ha o que fazer aqui.
+        console.warn('[geocache] nao foi possivel persistir:', e);
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Aparencia do mapa
+//
+// A base segue sendo a do OpenStreetMap, e o tema escuro sai de um filtro CSS
+// aplicado ao painel de tiles (ver .leaflet-tile-pane no style.css).
+//
+// A alternativa obvia seria uma base ja escura de terceiro. A CARTO foi
+// testada e hoje devolve os tiles com marca d'agua "API KEY REQUIRED" --
+// respondendo HTTP 200, entao so da para perceber olhando a imagem. Stadia e
+// Mapbox tambem exigem chave. Filtrar no cliente evita cadastro, chave para
+// guardar, host novo na CSP e um ponto a mais de falha, e reaproveita os
+// tiles que ja funcionam aqui.
+// -----------------------------------------------------------------------------
+// Zoom de bairro: perto o bastante para reconhecer a rua, longe o
+// bastante para situar o cliente na cidade.
+var ZOOM_CLIENTE_UNICO = 14;
+var URL_TILES_MAPA = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+var ATRIBUICAO_MAPA = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
+
+// Marcador como ponto-sinal, e nao como alfinete: no zoom de cidade dezenas
+// de alfinetes viram uma parede de icones, enquanto pontos luminosos deixam
+// ler a densidade. As cores sao as mesmas dos badges de Entrega/Retirada
+// usados no resto do app, entao o mapa nao inventa uma legenda propria.
+function iconeCliente(tipo) {
+    var variante = tipo === 'Retirada' ? 'retirada' : 'entrega';
+    return L.divIcon({
+        className: 'marcador-cliente',
+        html: '<span class="ponto-sinal ponto-' + variante + '">'
+            + '<i class="ponto-halo"></i><i class="ponto-nucleo"></i></span>',
+        iconSize: [16, 16],
+        iconAnchor: [8, 8],
+        popupAnchor: [0, -12]
+    });
+}
+
 
 function initMapa() {
     var mapContainer = document.getElementById('mapaClientes');
@@ -1210,9 +1639,9 @@ function initMapa() {
         zoom: 4,
         zoomControl: true
     });
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; OpenStreetMap contributors',
-        maxZoom: 18
+    L.tileLayer(URL_TILES_MAPA, {
+        attribution: ATRIBUICAO_MAPA,
+        maxZoom: 19
     }).addTo(mapaInstance);
     setTimeout(function() { mapaInstance.invalidateSize(); }, 300);
 }
@@ -1251,7 +1680,7 @@ async function geocodificarCliente(cliente) {
         var queryCompleta = partesEndereco.join(', ');
         await new Promise(function(r) { setTimeout(r, 1100); });
         var coords = await geocodificarCidade(queryCompleta);
-        if (coords) { _geocacheCoords[cacheKey] = coords; return coords; }
+        if (coords) { _geocacheCoords[cacheKey] = coords; guardarGeocache(); return coords; }
     }
 
     // Passo 2: Fallback - apenas cidade + UF
@@ -1259,7 +1688,7 @@ async function geocodificarCliente(cliente) {
         await new Promise(function(r) { setTimeout(r, 1100); });
         var queryCidade = cliente.cidade.trim() + (uf ? ', ' + uf : '') + ', Brasil';
         var coords = await geocodificarCidade(queryCidade);
-        if (coords) { _geocacheCoords[cacheKey] = coords; return coords; }
+        if (coords) { _geocacheCoords[cacheKey] = coords; guardarGeocache(); return coords; }
     }
     return null;
 }
@@ -1320,6 +1749,7 @@ async function carregarPagamentosMetricas() {
 // in carregarPagamentos() and abrirModalNovoRecebimento() targeting recClienteId
 
 async function carregarPagamentosLista() {
+    mostrarEsqueleto('tabelaPagamentos', 7, 4);
     try {
         var filtroCliente = (document.getElementById('pagFiltroCliente') || {}).value || '';
         var filtroStatus = (document.getElementById('pagFiltroStatus') || {}).value || '';
@@ -1340,6 +1770,10 @@ async function carregarPagamentosLista() {
         renderizarTabelaPagamentos(pagamentos);
     } catch(e) {
         console.error('Erro ao carregar pagamentos:', e);
+        // Sem isto a tabela ficaria presa no esqueleto, sugerindo carregamento
+        // eterno em vez de falha.
+        renderizarTabelaPagamentos([]);
+        exibirToast('Erro ao carregar pagamentos.', 'error');
     }
 }
 
@@ -1347,7 +1781,8 @@ function renderizarTabelaPagamentos(pagamentos) {
     var tbody = document.getElementById('tabelaPagamentos');
     if (!tbody) return;
     if (!pagamentos || pagamentos.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:2rem;color:var(--text-muted);"><p>Nenhum pagamento registrado.</p></td></tr>';
+        tbody.innerHTML = linhaEstadoVazio(7, 'Nenhum pagamento registrado',
+            'Use "Novo Recebimento" para lancar o primeiro, ou revise o filtro de status.');
         return;
     }
     tbody.innerHTML = pagamentos.map(function(p) {
@@ -1362,23 +1797,26 @@ function renderizarTabelaPagamentos(pagamentos) {
         else if (p.tipo_pagamento === 'Outro') tipoClass = 'badge-atrasado';
         var valor = parseFloat(p.valor || 0).toFixed(2).replace('.', ',');
         var dataVen = p.data_vencimento ? p.data_vencimento.split('-').reverse().join('/') : '-';
+        // So a acao mais provavel do estado atual ganha peso visual; as demais
+        // ficam secundarias. "Cancelar" e destrutiva e usa o contorno vermelho.
         var acoes = '';
         if (p.status === 'Pendente') {
             if (!p.asaas_payment_id) {
-                acoes = '<button class="btn" style="background:#3b82f6;padding:0.3rem 0.6rem;font-size:0.8rem;" onclick="gerarCobranca(' + p.id + ')">Gerar Cobranca</button>';
+                acoes = '<button type="button" class="btn btn-primary btn-sm" onclick="gerarCobranca(' + p.id + ')">Gerar Cobranca</button>';
             } else {
-                acoes = '<button class="btn" style="background:#10b981;padding:0.3rem 0.6rem;font-size:0.8rem;" onclick="confirmarPagamentoLocal(' + p.id + ')">Confirmar</button>';
+                acoes = '<button type="button" class="btn btn-sucesso btn-sm" onclick="confirmarPagamentoLocal(' + p.id + ')">Confirmar</button>';
             }
-            acoes += ' <button class="btn" style="background:#ef4444;padding:0.3rem 0.6rem;font-size:0.8rem;" onclick="cancelarPagamentoLocal(' + p.id + ')">Cancelar</button>';
+            acoes += '<button type="button" class="btn btn-perigo btn-sm" onclick="cancelarPagamentoLocal(' + p.id + ')">Cancelar</button>';
         }
+        var descricao = escaparHtml(p.descricao || '-');
         return '<tr>' +
             '<td><strong>' + escaparHtml(p.cliente_nome || '') + '</strong></td>' +
-            '<td>R$ ' + valor + '</td>' +
-            '<td>' + escaparHtml(p.descricao || '-') + '</td>' +
-            '<td><span class="' + statusClass + '" style="font-size:0.75rem;">' + escaparHtml(p.status) + '</span></td>' +
-            '<td><span class="' + tipoClass + '" style="font-size:0.75rem;">' + escaparHtml(p.tipo_pagamento || 'Pix') + '</span></td>' +
-            '<td style="font-size:0.8rem;color:var(--text-muted);">' + dataVen + '</td>' +
-            '<td style="text-align:right;">' + acoes + '</td>' +
+            '<td class="valor">R$ ' + valor + '</td>' +
+            '<td title="' + descricao + '">' + descricao + '</td>' +
+            '<td><span class="' + statusClass + '">' + escaparHtml(p.status) + '</span></td>' +
+            '<td><span class="' + tipoClass + '">' + escaparHtml(p.tipo_pagamento || 'Pix') + '</span></td>' +
+            '<td class="valor">' + dataVen + '</td>' +
+            '<td class="col-acoes"><div class="tabela-acoes">' + acoes + '</div></td>' +
             '</tr>';
     }).join('');
 }
@@ -1412,35 +1850,43 @@ async function exibirDadosCobranca(pagamentoId) {
         var conteudo = document.getElementById('cobrancaConteudo');
         if (!modal || !conteudo) return;
         if (dados.tipo_pagamento === 'Pix') {
-            var qrImg = dados.pix_qr_code ? '<img src="data:image/png;base64,' + dados.pix_qr_code + '" style="max-width:280px;margin:1rem auto;display:block;border-radius:12px;border:2px solid var(--glass-border);">' : '<p style="color:var(--text-muted);">QR Code nao disponivel</p>';
+            var qrSeguro = base64Seguro(dados.pix_qr_code);
+            // `src` continua sendo o primeiro atributo, colado no
+            // `base64Seguro()` que o produziu: e assim que a suite verifica
+            // que o sink nao voltou a ser montado com valor cru.
+            var qrImg = qrSeguro
+                ? '<img src="data:image/png;base64,' + qrSeguro + '" class="cobranca-qr" alt="QR Code do Pix">'
+                : '<p class="cobranca-indisponivel">QR Code nao disponivel.</p>';
             var payload = dados.pix_payload || '';
-            conteudo.innerHTML = '<div style="text-align:center;">' +
-                '<h3 style="margin-bottom:0.5rem;color:var(--primary);">Pagamento Pix</h3>' +
-                '<p style="color:var(--text-muted);margin-bottom:1rem;">Valor: R$ ' + (dados.valor || 0).toFixed(2).replace('.', ',') + '</p>' +
+            conteudo.innerHTML = '<div class="cobranca-bloco">' +
+                '<h3 class="cobranca-titulo">Pagamento Pix</h3>' +
+                '<p class="cobranca-valor">Valor: R$ ' + (dados.valor || 0).toFixed(2).replace('.', ',') + '</p>' +
                 qrImg +
-                (payload ? '<div style="margin-top:1rem;background:var(--input-bg);border-radius:10px;padding:0.8rem;font-size:0.75rem;word-break:break-all;color:var(--text-main);border:1px solid var(--glass-border);">' + escaparHtml(payload) + '</div>' : '') +
-                (payload ? '<button class="btn btn-primary" style="margin-top:0.75rem;" onclick="copiarPix()">Copiar Copia e Cola</button>' : '') +
+                // O id substitui o antigo seletor por atributo de estilo
+                // (`div[style*="word-break"]`), que quebrava a copia assim que
+                // o CSS inline mudasse.
+                (payload ? '<div class="cobranca-payload" id="cobrancaPayload">' + escaparHtml(payload) + '</div>' : '') +
+                (payload ? '<button type="button" class="btn btn-primary" onclick="copiarPix()">Copiar Copia e Cola</button>' : '') +
                 '</div>';
         } else if (dados.tipo_pagamento === 'Boleto') {
-            var url = dados.boleto_url || '';
-            conteudo.innerHTML = '<div style="text-align:center;">' +
-                '<h3 style="margin-bottom:0.5rem;color:var(--primary);">Boleto Bancario</h3>' +
-                '<p style="color:var(--text-muted);margin-bottom:1rem;">Valor: R$ ' + (dados.valor || 0).toFixed(2).replace('.', ',') + '</p>' +
-                (dados.nosso_numero ? '<p style="color:var(--text-muted);font-size:0.85rem;">Nosso Numero: ' + escaparHtml(dados.nosso_numero) + '</p>' : '') +
-                (url ? '<a href="' + escaparHtml(url) + '" target="_blank" class="btn btn-primary" style="margin-top:1rem;">Abrir Boleto</a>' : '<p style="color:var(--text-muted);">URL do boleto nao disponivel.</p>') +
+            var url = urlSegura(dados.boleto_url);
+            conteudo.innerHTML = '<div class="cobranca-bloco">' +
+                '<h3 class="cobranca-titulo">Boleto Bancario</h3>' +
+                '<p class="cobranca-valor">Valor: R$ ' + (dados.valor || 0).toFixed(2).replace('.', ',') + '</p>' +
+                (dados.nosso_numero ? '<p class="cobranca-indisponivel">Nosso Numero: ' + escaparHtml(dados.nosso_numero) + '</p>' : '') +
+                (url ? '<a href="' + escaparHtml(url) + '" target="_blank" rel="noopener" class="btn btn-primary">Abrir Boleto</a>' : '<p class="cobranca-indisponivel">URL do boleto nao disponivel.</p>') +
                 '</div>';
         }
-        modal.classList.add('ativo');
+        abrirModal(modal);
     } catch(e) { console.error('Erro ao obter dados da cobranca:', e); }
 }
 
 function fecharModalCobranca() {
-    var modal = document.getElementById('modalCobranca');
-    if (modal) modal.classList.remove('ativo');
+    fecharModal('modalCobranca');
 }
 
 async function copiarPix() {
-    var payloadEl = document.querySelector('#cobrancaConteudo div[style*="word-break"]');
+    var payloadEl = document.getElementById('cobrancaPayload');
     if (payloadEl && navigator.clipboard) {
         try {
             await navigator.clipboard.writeText(payloadEl.textContent);
@@ -1514,12 +1960,11 @@ async function abrirModalNovoRecebimento() {
     if (form) form.reset();
     if (dataInput) dataInput.value = hoje;
     
-    modal.classList.add('ativo');
+    abrirModal(modal);
 }
 
 function fecharModalNovoRecebimento() {
-    var modal = document.getElementById('modalNovoRecebimento');
-    if (modal) modal.classList.remove('ativo');
+    fecharModal('modalNovoRecebimento');
 }
 
 async function salvarNovoRecebimento(e) {
@@ -1582,6 +2027,7 @@ async function salvarNovoRecebimento(e) {
 async function carregarMapaClientes() {
     if (!mapaInstance || _mapaCarregando) return;
     _mapaCarregando = true;
+    var geracao = ++_geracaoMapa;
     try {
         var resp = await fetch('/api/clientes/mapa');
         if (!resp.ok) throw new Error('Falha ao buscar dados do mapa');
@@ -1594,26 +2040,39 @@ async function carregarMapaClientes() {
         mapaMarcadores = [];
         var bounds = [];
         for (var i = 0; i < clientes.length; i++) {
+            // Cada cliente custa ate ~1,1 s por causa do limite da Nominatim.
+            // Se o mapa foi recarregado nesse meio tempo, este laco esta
+            // obsoleto e precisa sair sem tocar no mapa novo.
+            if (geracao !== _geracaoMapa) return;
             var c = clientes[i];
             var coords = await geocodificarCliente(c);
+            if (geracao !== _geracaoMapa) return;
             if (coords) {
                 var badgeClass = c.tipo === 'Retirada' ? 'badge-retirada' : 'badge-entrega';
-                var popupHtml = '<div style="min-width:200px;font-family:Inter,sans-serif;">' +
-                    '<strong style="font-size:1.05em;">' + escaparHtml(c.nome) + '</strong><br>' +
-                    '<span class="' + badgeClass + '" style="font-size:0.7rem;margin:4px 0;display:inline-block;">' + escaparHtml(c.tipo) + '</span>' +
-                    '<hr style="margin:6px 0;border-color:#e5e7eb;">' +
-                    '<div style="font-size:0.85em;color:#475569;line-height:1.6;">' +
-                    '<div><strong>CEP:</strong> ' + escaparHtml(c.cep) + '</div>' +
-                    (c.rua ? '<div><strong>Rua:</strong> ' + escaparHtml(c.rua) + '</div>' : '') +
-                    (c.bairro ? '<div><strong>Bairro:</strong> ' + escaparHtml(c.bairro) + '</div>' : '') +
-                    (c.cidade ? '<div><strong>Cidade:</strong> ' + escaparHtml(c.cidade) + '</div>' : '') +
-                    '</div></div>';
-                var marker = L.marker([coords.lat, coords.lon]).addTo(mapaInstance).bindPopup(popupHtml);
+                // Estilo por classe (ver `.popup-cliente` no CSS). O cinza-ardosia
+                // que estava escrito aqui vinha da paleta antiga e ficava
+                // ilegivel no tema escuro, porque o popup segue a superficie do
+                // app enquanto o texto continuava fixo em cinza claro.
+                var popupHtml = '<div class="popup-cliente">' +
+                    '<strong class="popup-cliente-nome">' + escaparHtml(c.nome) + '</strong>' +
+                    '<span class="' + badgeClass + '">' + escaparHtml(c.tipo) + '</span>' +
+                    '<dl class="popup-cliente-dados">' +
+                    '<dt>CEP</dt><dd>' + escaparHtml(c.cep) + '</dd>' +
+                    (c.rua ? '<dt>Rua</dt><dd>' + escaparHtml(c.rua) + '</dd>' : '') +
+                    (c.bairro ? '<dt>Bairro</dt><dd>' + escaparHtml(c.bairro) + '</dd>' : '') +
+                    (c.cidade ? '<dt>Cidade</dt><dd>' + escaparHtml(c.cidade) + '</dd>' : '') +
+                    '</dl></div>';
+                var marker = L.marker([coords.lat, coords.lon], { icon: iconeCliente(c.tipo) })
+                    .addTo(mapaInstance).bindPopup(popupHtml);
                 mapaMarcadores.push(marker);
                 bounds.push([coords.lat, coords.lon]);
             }
         }
-        if (bounds.length > 0) {
+        if (bounds.length === 1) {
+            // Um ponto so nao tem area: fitBounds vai ao zoom maximo e entrega
+            // uma quadra sem contexto. O util e o bairro em volta do cliente.
+            mapaInstance.setView(bounds[0], ZOOM_CLIENTE_UNICO);
+        } else if (bounds.length > 1) {
             mapaInstance.fitBounds(bounds, { padding: [50, 50], maxZoom: 14 });
         }
     } catch(e) {
@@ -1623,5 +2082,4 @@ async function carregarMapaClientes() {
         _mapaCarregando = false;
     }
 }
-
 

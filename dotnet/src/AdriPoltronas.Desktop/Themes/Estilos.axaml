@@ -1,0 +1,156 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!-- Aparencia compartilhada. Fica separada das Views para que uma mudanca
+       de estilo nao exija abrir cada tela.
+
+       Todas as cores vem por DynamicResource: o botao de tema troca o
+       dicionario em tempo de execucao, e StaticResource congelaria o valor no
+       carregamento. -->
+
+  <Style Selector="Window">
+    <Setter Property="Background" Value="{DynamicResource Fundo}" />
+    <Setter Property="FontFamily" Value="Inter, Segoe UI, sans-serif" />
+  </Style>
+
+  <Style Selector="TextBlock">
+    <Setter Property="Foreground" Value="{DynamicResource Texto}" />
+  </Style>
+
+  <Style Selector="TextBlock.titulo">
+    <Setter Property="FontSize" Value="20" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+
+  <Style Selector="TextBlock.subtitulo">
+    <Setter Property="FontSize" Value="15" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+
+  <Style Selector="TextBlock.fraco">
+    <Setter Property="Foreground" Value="{DynamicResource TextoFraco}" />
+    <Setter Property="FontSize" Value="12" />
+  </Style>
+
+  <Style Selector="TextBlock.rotulo">
+    <Setter Property="Foreground" Value="{DynamicResource TextoFraco}" />
+    <Setter Property="FontSize" Value="11" />
+    <Setter Property="FontWeight" Value="Bold" />
+    <Setter Property="Margin" Value="2,0,0,4" />
+  </Style>
+
+  <Style Selector="TextBlock.numero">
+    <Setter Property="FontSize" Value="26" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+
+  <!-- Cartao de metrica e painel de conteudo usam a mesma superficie. -->
+  <Style Selector="Border.cartao">
+    <Setter Property="Background" Value="{DynamicResource Superficie}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Borda}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="Padding" Value="16,12" />
+  </Style>
+
+  <Style Selector="Border.painel">
+    <Setter Property="Background" Value="{DynamicResource Superficie}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Borda}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="12" />
+    <Setter Property="Padding" Value="18,16" />
+  </Style>
+
+  <Style Selector="Button">
+    <Setter Property="Background" Value="{DynamicResource Borda}" />
+    <Setter Property="Foreground" Value="{DynamicResource Texto}" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="Padding" Value="14,7" />
+  </Style>
+
+  <Style Selector="Button.primario">
+    <Setter Property="Background" Value="{DynamicResource Destaque}" />
+    <Setter Property="Foreground" Value="#FFFFFF" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+
+  <Style Selector="Button.perigo">
+    <Setter Property="Background" Value="{DynamicResource Perigo}" />
+    <Setter Property="Foreground" Value="#FFFFFF" />
+  </Style>
+
+  <Style Selector="Button.icone">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Padding" Value="8,6" />
+    <Setter Property="FontSize" Value="15" />
+  </Style>
+
+  <!-- Aba do topo, no lugar do menu lateral: e a navegacao que a interface
+       web sempre teve, e o operador ja conhece a posicao. -->
+  <Style Selector="RadioButton.aba">
+    <Setter Property="Foreground" Value="{DynamicResource TextoFraco}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="Padding" Value="16,9" />
+    <Setter Property="Margin" Value="0,0,6,0" />
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Name="moldura" Background="Transparent" CornerRadius="9"
+                Padding="{TemplateBinding Padding}">
+          <ContentPresenter Content="{TemplateBinding Content}"
+                            Foreground="{TemplateBinding Foreground}"
+                            FontWeight="{TemplateBinding FontWeight}"
+                            FontSize="{TemplateBinding FontSize}" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
+  </Style>
+
+  <Style Selector="RadioButton.aba:pointerover /template/ Border#moldura">
+    <Setter Property="Background" Value="{DynamicResource SuperficieAlta}" />
+  </Style>
+
+  <Style Selector="RadioButton.aba:checked /template/ Border#moldura">
+    <Setter Property="Background" Value="{DynamicResource SuperficieAlta}" />
+  </Style>
+
+  <Style Selector="RadioButton.aba:checked">
+    <Setter Property="Foreground" Value="{DynamicResource Destaque}" />
+  </Style>
+
+  <Style Selector="TextBox">
+    <Setter Property="Background" Value="{DynamicResource SuperficieAlta}" />
+    <Setter Property="Foreground" Value="{DynamicResource Texto}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Borda}" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="Padding" Value="8,6" />
+  </Style>
+
+  <Style Selector="ComboBox">
+    <Setter Property="Background" Value="{DynamicResource SuperficieAlta}" />
+    <Setter Property="Foreground" Value="{DynamicResource Texto}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Borda}" />
+    <Setter Property="CornerRadius" Value="8" />
+  </Style>
+
+  <Style Selector="DataGrid">
+    <Setter Property="Background" Value="{DynamicResource Superficie}" />
+    <Setter Property="Foreground" Value="{DynamicResource Texto}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Borda}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="GridLinesVisibility" Value="Horizontal" />
+    <Setter Property="HorizontalGridLinesBrush" Value="{DynamicResource Borda}" />
+  </Style>
+
+  <Style Selector="DataGridColumnHeader">
+    <Setter Property="Foreground" Value="{DynamicResource TextoFraco}" />
+    <Setter Property="FontSize" Value="11" />
+    <Setter Property="FontWeight" Value="Bold" />
+  </Style>
+
+  <!-- Selo: usado no "Online" do cabecalho e nos rotulos de tipo da lista. -->
+  <Style Selector="Border.selo">
+    <Setter Property="CornerRadius" Value="20" />
+    <Setter Property="Padding" Value="10,3" />
+  </Style>
+</Styles>

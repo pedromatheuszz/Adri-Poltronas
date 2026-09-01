@@ -1,0 +1,42 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:dto="clr-namespace:AdriPoltronas.Application.Dtos;assembly=AdriPoltronas.Application"
+        x:Class="AdriPoltronas.Desktop.Views.CobrancaDialog"
+        x:DataType="dto:PagamentoDto"
+        Title="Cobranca emitida"
+        Width="480" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner"
+        CanResize="False"
+        Background="{DynamicResource Fundo}">
+
+  <StackPanel Margin="20" Spacing="12">
+    <TextBlock Text="Cobranca emitida" Classes="titulo" />
+
+    <Border Classes="cartao">
+      <StackPanel Spacing="3">
+        <TextBlock Text="{Binding ClienteNome}" Classes="subtitulo" />
+        <TextBlock Text="{Binding ValorFormatado}" Classes="numero" FontSize="22" />
+        <TextBlock Classes="fraco"
+                   Text="{Binding DataVencimento, StringFormat='Vence em {0}'}" />
+      </StackPanel>
+    </Border>
+
+    <StackPanel Spacing="6" IsVisible="{Binding PixPayload, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+      <TextBlock Text="Pix copia e cola" Classes="fraco" />
+      <TextBox Name="CampoPix" Text="{Binding PixPayload}" IsReadOnly="True"
+               TextWrapping="Wrap" Height="80" />
+      <Button Content="Copiar codigo Pix" Click="AoCopiar"
+              Tag="{Binding #CampoPix}" HorizontalAlignment="Left" />
+    </StackPanel>
+
+    <StackPanel Spacing="6" IsVisible="{Binding BoletoUrl, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+      <TextBlock Text="Boleto" Classes="fraco" />
+      <TextBox Name="CampoBoleto" Text="{Binding BoletoUrl}" IsReadOnly="True" />
+      <Button Content="Copiar link do boleto" Click="AoCopiar"
+              Tag="{Binding #CampoBoleto}" HorizontalAlignment="Left" />
+    </StackPanel>
+
+    <Button Classes="primario" Content="Fechar" Click="AoFechar"
+            HorizontalAlignment="Right" />
+  </StackPanel>
+</Window>

@@ -10,9 +10,17 @@ import openpyxl
 from flask import Blueprint, request, jsonify, send_file
 
 import database
+import security
 import validators
 
 log = logging.getLogger("adri.clientes")
+
+# Teto de registros por importacao.
+#
+# MAX_CONTENT_LENGTH ja limita o corpo da requisicao, mas 10 MB de CSV ainda
+# sao centenas de milhares de linhas -- cada uma virando um INSERT dentro de
+# uma unica transacao SQLite, com o app travado enquanto isso.
+MAX_LINHAS_IMPORTACAO = 5000
 
 clientes_bp = Blueprint('clientes', __name__, url_prefix='/api/clientes')
 
@@ -32,7 +40,7 @@ def adicionar_cliente():
         cliente['nome'], cliente['cep'], cliente['rua'], cliente['bairro'],
         cliente['cidade'], cliente['entrega_retirada'], cliente.get('observacoes', '')
     )
-    return jsonify({"mensagem": "Salvo"}), 201
+    return jsonify({"mensagem": "Cliente cadastrado!"}), 201
 
 
 @clientes_bp.route('/<int:id_cliente>', methods=['PUT'])
@@ -40,12 +48,14 @@ def atualizar_cliente(id_cliente):
     cliente, erros = validators.validar_cliente(request.get_json(silent=True) or {})
     if erros:
         return jsonify({"erro": "Dados invalidos.", "detalhes": erros}), 400
-    database.atualizar_cliente(
+    linhas = database.atualizar_cliente(
         id_cliente, cliente['nome'], cliente['cep'], cliente['rua'],
         cliente['bairro'], cliente['cidade'], cliente['entrega_retirada'],
         cliente.get('observacoes', '')
     )
-    return jsonify({"mensagem": "Atualizado"}), 200
+    if linhas == 0:
+        return jsonify({"erro": "Cliente nao encontrado."}), 404
+    return jsonify({"mensagem": "Cliente atualizado!"}), 200
 
 
 @clientes_bp.route('/<int:id_cliente>', methods=['DELETE'])
@@ -53,7 +63,7 @@ def excluir_cliente(id_cliente):
     linhas = database.excluir_cliente(id_cliente)
     if linhas == 0:
         return jsonify({"erro": "Cliente nao encontrado."}), 404
-    return jsonify({"mensagem": "Excluido"}), 200
+    return jsonify({"mensagem": "Cliente excluido!"}), 200
 
 
 @clientes_bp.route('/importar', methods=['POST'])
@@ -61,7 +71,14 @@ def importar_clientes():
     if 'arquivo' not in request.files:
         return jsonify({"erro": "Nenhum arquivo enviado."}), 400
     arquivo = request.files['arquivo']
-    nome = arquivo.filename.lower()
+
+    # Extensao, tamanho e arquivo vazio antes de qualquer parsing: o openpyxl
+    # abre zip, e nao convem entregar a ele um arquivo nao verificado.
+    valido, erro_upload = security.validar_upload(arquivo)
+    if not valido:
+        return jsonify({"erro": erro_upload}), 400
+
+    nome = (arquivo.filename or '').lower()
     clientes = []
 
     try:
@@ -76,7 +93,8 @@ def importar_clientes():
                     'bairro': linha.get('bairro') or linha.get('Bairro') or linha.get('neighborhood') or '',
                     'cidade': linha.get('cidade') or linha.get('Cidade') or linha.get('city') or '',
                     'entrega_retirada': linha.get('entrega_retirada') or linha.get('Entrega/Retirada') or 'Entrega',
-                    'observacoes': linha.get('observacoes') or linha.get('Observações') or '',
+                    'observacoes': (linha.get('observacoes') or linha.get('Observacoes')
+                                    or linha.get('Observações') or ''),
                 })
         elif nome.endswith('.json'):
             dados = json.loads(arquivo.read().decode('utf-8'))
@@ -107,6 +125,12 @@ def importar_clientes():
 
     if not clientes:
         return jsonify({"erro": "Nenhum cliente encontrado no arquivo."}), 400
+
+    if len(clientes) > MAX_LINHAS_IMPORTACAO:
+        return jsonify({
+            "erro": f"Arquivo com {len(clientes)} linhas excede o limite de "
+                    f"{MAX_LINHAS_IMPORTACAO} por importacao. Divida em partes.",
+        }), 400
 
     clientes_validados = []
     erros_validacao = []

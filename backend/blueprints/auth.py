@@ -12,6 +12,7 @@ from flask import Blueprint, jsonify
 
 import database
 import config
+import microsoft
 
 log = logging.getLogger("adri.auth")
 
@@ -40,11 +41,10 @@ def auth_login():
     config._oauth_pending[state] = {'verifier': code_verifier, 'ts': agora}
     log.info("[LOGIN] state=%s", state)
 
-    scopes = "User.Read Files.ReadWrite"
     url = (
-        f"https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
+        f"{config.URL_AUTORIZACAO_MICROSOFT}"
         f"?client_id={config.CLIENT_ID}&response_type=code&redirect_uri={config.REDIRECT_URI}"
-        f"&response_mode=query&scope={urllib.parse.quote(scopes)}"
+        f"&response_mode=query&scope={urllib.parse.quote(config.ESCOPOS_MICROSOFT)}"
         f"&code_challenge={code_challenge}&code_challenge_method=S256"
         f"&state={urllib.parse.quote(state)}"
     )
@@ -54,10 +54,22 @@ def auth_login():
 
 @auth_bp.route('/status')
 def auth_status():
+    """
+    Estado real da conexao, e nao apenas "existe linha na tabela".
+
+    `obter_token_valido()` renova em silencio quando o token venceu e derruba
+    a sessao quando nao ha como renovar. E o que permite a tela so mostrar
+    "Conectado" quando exportar de fato vai funcionar -- antes ela afirmava
+    isso com base numa linha que podia guardar um token morto ha horas.
+    """
     sessao = database.obter_sessao()
-    if sessao:
-        return jsonify({"logado": True, "conta": sessao["conta"]})
-    return jsonify({"logado": False})
+    if not sessao:
+        return jsonify({"logado": False})
+
+    if microsoft.obter_token_valido() is None:
+        return jsonify({"logado": False, "motivo": "sessao_expirada"})
+
+    return jsonify({"logado": True, "conta": sessao["conta"]})
 
 
 @auth_bp.route('/logout', methods=['POST'])

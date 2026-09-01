@@ -4,12 +4,104 @@ import os
 import logging
 from dotenv import load_dotenv
 
-load_dotenv()
-
 log = logging.getLogger("adri.config")
+
+# Modelo gravado em %APPDATA% na primeira execucao, para que o app instalado
+# tenha um lugar previsivel onde receber credenciais.
+_MODELO_ENV = """# Configuracao do Adri Poltronas.
+# Este arquivo fica fora da pasta de instalacao de proposito: Program Files
+# nao e gravavel pelo usuario, e uma atualizacao do app sobrescreveria tudo.
+
+# Chave de assinatura de sessao do Flask.
+# Gere com: python -c "import secrets; print(secrets.token_hex(32))"
+ADRI_FLASK_SECRET=
+
+# IA - Gemini (fallback de sugestao de bairro quando o ViaCEP falha).
+GEMINI_API_KEY=
+
+# Pagamentos - Asaas.
+# ASAAS_SANDBOX=true  -> api-sandbox.asaas.com, exige chave $aact_hmlg_*
+# ASAAS_SANDBOX=false -> api.asaas.com, exige chave $aact_prod_*
+ASAAS_API_KEY=
+ASAAS_SANDBOX=true
+
+# Token do webhook Asaas, enviado por ele no header `asaas-access-token`.
+# Precisa ser forte e DIFERENTE da ASAAS_API_KEY.
+# Gere com: python -c "import secrets; print(secrets.token_urlsafe(32))"
+ASAAS_WEBHOOK_TOKEN=
+"""
+
+
+def caminho_env_do_usuario() -> str:
+    """
+    Caminho do .env do usuario: %APPDATA%/AdriPoltronas/.env.
+
+    Mesma pasta que ja abriga o banco e os logs. `load_dotenv()` sozinho
+    resolve a partir do CWD, que no app instalado e Program Files -- pasta sem
+    escrita para o usuario e sem .env nenhum. O executavel era entregue sem
+    nenhuma forma suportada de configurar ASAAS_API_KEY, ASAAS_WEBHOOK_TOKEN
+    ou GEMINI_API_KEY, e as integracoes nasciam desligadas.
+    """
+    appdata = os.environ.get('APPDATA')
+    if not appdata:
+        return ''
+    return os.path.join(appdata, 'AdriPoltronas', '.env')
+
+
+def garantir_modelo_env() -> str:
+    """
+    Cria o .env do usuario com o modelo comentado, se ainda nao existir.
+
+    Idempotente e nunca destrutivo: um arquivo ja preenchido e mantido como
+    esta. Retorna o caminho, ou '' se nao houver onde gravar.
+    """
+    caminho = caminho_env_do_usuario()
+    if not caminho:
+        return ''
+    if os.path.exists(caminho):
+        return caminho
+    try:
+        os.makedirs(os.path.dirname(caminho), exist_ok=True)
+        with open(caminho, 'w', encoding='utf-8') as arquivo:
+            arquivo.write(_MODELO_ENV)
+        log.info("Modelo de configuracao criado em %s", caminho)
+    except OSError as erro:
+        log.warning("Nao foi possivel criar %s: %s", caminho, erro)
+        return ''
+    return caminho
+
+
+def carregar_configuracao() -> None:
+    """
+    Carrega o .env do CWD e depois o do usuario.
+
+    A ordem define a precedencia: `load_dotenv` nao sobrescreve variaveis ja
+    definidas, entao o .env do repositorio (desenvolvimento) vence, e o de
+    %APPDATA% cobre o app instalado.
+    """
+    load_dotenv()
+    caminho_usuario = caminho_env_do_usuario()
+    if caminho_usuario and os.path.exists(caminho_usuario):
+        load_dotenv(caminho_usuario)
+
+
+carregar_configuracao()
 
 CLIENT_ID = os.environ.get('ADRI_MICROSOFT_CLIENT_ID', '14bc533a-a8a2-4e2b-9142-773dcd117269')
 REDIRECT_URI = "http://localhost:5000/callback"
+
+# Escopos pedidos no login Microsoft. Um lugar so: eles precisam ser
+# identicos na URL de autorizacao e na troca do code por token, e antes
+# estavam escritos como literal em auth.py e em app.py -- alterar um e
+# esquecer o outro devolve invalid_grant sem explicacao.
+#
+# `offline_access` e o que rende o refresh_token. Sem ele a Microsoft entrega
+# apenas um access_token de ~1 hora, e depois disso o operador tinha de
+# refazer o login no navegador para conseguir exportar uma planilha.
+ESCOPOS_MICROSOFT = "User.Read Files.ReadWrite offline_access"
+
+URL_TOKEN_MICROSOFT = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
+URL_AUTORIZACAO_MICROSOFT = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
 ASAAS_API_KEY = os.environ.get('ASAAS_API_KEY', '')
 ASAAS_SANDBOX = os.environ.get('ASAAS_SANDBOX', 'true').strip().lower() == 'true'
@@ -34,41 +126,50 @@ _CALLBACK_TEMPLATE = """\
 <meta charset="utf-8">
 <title>Adri Poltronas</title>
 <style>
-    :root { --ok: #10b981; --erro: #ef4444; }
+    /* Paleta espelhada de frontend/css/tokens.css. Esta pagina abre no
+       navegador do sistema, fora do app, entao nao alcanca a folha de
+       estilo -- os valores precisam estar aqui. Ao mexer na identidade
+       visual, os dois arquivos andam juntos. */
+    :root {
+        --ok: #4E6B3C; --ok-suave: #E7EDDF; --ok-borda: #C4D3B2;
+        --erro: #A63D2E; --erro-suave: #F7E4DF; --erro-borda: #E5BDB3;
+        --fundo: #F2EEE7; --superficie: #FBF9F5; --borda: #E0D8C9;
+        --texto: #2B2620; --texto-2: #6B6153; --texto-3: #9A8F7E;
+    }
     * { box-sizing: border-box; }
     body {
         margin: 0; min-height: 100vh;
         display: flex; align-items: center; justify-content: center;
-        font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-        background: linear-gradient(-45deg, #080d1a, #0f172a, #04060d);
-        color: #f8fafc; padding: 1.5rem;
+        font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+        background: var(--fundo);
+        color: var(--texto); padding: 1.5rem;
     }
     .cartao {
-        max-width: 460px; width: 100%; text-align: center;
-        background: rgba(30, 41, 59, 0.7);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: 20px; padding: 2.5rem 2rem;
-        box-shadow: 0 20px 45px rgba(0, 0, 0, 0.45);
-        animation: entrar 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+        max-width: 440px; width: 100%; text-align: center;
+        background: var(--superficie);
+        border: 1px solid var(--borda);
+        border-radius: 10px; padding: 2.5rem 2rem;
+        box-shadow: 0 4px 12px rgba(74, 58, 40, 0.08), 0 12px 32px rgba(74, 58, 40, 0.09);
+        animation: entrar 0.18s cubic-bezier(0, 0, 0.2, 1);
     }
-    @keyframes entrar { from { opacity: 0; transform: scale(0.9) translateY(16px); } }
+    @keyframes entrar { from { opacity: 0; transform: translateY(-6px); } }
     .icone {
-        width: 64px; height: 64px; margin: 0 auto 1.25rem;
+        width: 48px; height: 48px; margin: 0 auto 1.25rem;
         border-radius: 50%; display: flex; align-items: center; justify-content: center;
-        background: var(--cor-suave); border: 2px solid var(--cor-borda); color: var(--cor);
+        background: var(--cor-suave); border: 1px solid var(--cor-borda); color: var(--cor);
     }
-    h2 { font-size: 1.25rem; font-weight: 700; margin: 0 0 0.75rem; color: var(--cor); }
-    .mensagem { color: #cbd5e1; line-height: 1.6; margin: 0 0 0.5rem; font-size: 0.95rem; }
-    .instrucao { color: #94a3b8; font-size: 0.875rem; margin: 0; word-break: break-word; }
-    .rodape { color: #64748b; font-size: 0.8rem; margin: 1.75rem 0 0; }
+    h2 { font-size: 1.125rem; font-weight: 600; margin: 0 0 0.75rem; color: var(--cor); }
+    .mensagem { color: var(--texto); line-height: 1.5; margin: 0 0 0.5rem; font-size: 0.875rem; }
+    .instrucao { color: var(--texto-2); font-size: 0.8125rem; margin: 0; word-break: break-word; }
+    .rodape { color: var(--texto-3); font-size: 0.75rem; margin: 1.75rem 0 0; }
     @media (prefers-reduced-motion: reduce) { .cartao { animation: none; } }
 </style>
 </head>
 <body>
     <div class="cartao" style="
         --cor: {% if erro %}var(--erro){% else %}var(--ok){% endif %};
-        --cor-suave: rgba({% if erro %}239, 68, 68{% else %}16, 185, 129{% endif %}, 0.15);
-        --cor-borda: rgba({% if erro %}239, 68, 68{% else %}16, 185, 129{% endif %}, 0.3);">
+        --cor-suave: {% if erro %}var(--erro-suave){% else %}var(--ok-suave){% endif %};
+        --cor-borda: {% if erro %}var(--erro-borda){% else %}var(--ok-borda){% endif %};">
         <div class="icone">
             {% if erro %}
             <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>

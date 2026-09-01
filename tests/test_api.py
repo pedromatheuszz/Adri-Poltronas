@@ -70,7 +70,7 @@ def test_adicionar_cliente(client):
         content_type='application/json')
     assert response.status_code == 201
     data = json.loads(response.data)
-    assert data["mensagem"] == "Salvo"
+    assert data["mensagem"] == "Cliente cadastrado!"
 
 
 def test_adicionar_cliente_inválido(client):

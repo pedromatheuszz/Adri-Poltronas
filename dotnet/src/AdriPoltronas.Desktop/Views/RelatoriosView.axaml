@@ -1,0 +1,99 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:AdriPoltronas.Desktop.ViewModels"
+             xmlns:dto="clr-namespace:AdriPoltronas.Application.Dtos;assembly=AdriPoltronas.Application"
+             x:Class="AdriPoltronas.Desktop.Views.RelatoriosView"
+             x:DataType="vm:RelatoriosViewModel">
+
+  <Grid RowDefinitions="Auto,*">
+
+    <Border Grid.Row="0" Classes="painel" Margin="0,0,0,14">
+      <StackPanel Spacing="10">
+        <Grid ColumnDefinitions="*,10,*,10,*,10,*,10,*">
+          <StackPanel Grid.Column="0">
+            <TextBlock Text="TIPO" Classes="rotulo" />
+            <ComboBox ItemsSource="{Binding TiposDisponiveis}" SelectedItem="{Binding Tipo}"
+                      HorizontalAlignment="Stretch" />
+          </StackPanel>
+          <StackPanel Grid.Column="2">
+            <TextBlock Text="CIDADE" Classes="rotulo" />
+            <TextBox Text="{Binding Cidade}" Watermark="Todas" />
+          </StackPanel>
+          <StackPanel Grid.Column="4">
+            <TextBlock Text="DE" Classes="rotulo" />
+            <TextBox Text="{Binding DataInicio}" Watermark="AAAA-MM-DD" />
+          </StackPanel>
+          <StackPanel Grid.Column="6">
+            <TextBlock Text="ATE" Classes="rotulo" />
+            <TextBox Text="{Binding DataFim}" Watermark="AAAA-MM-DD" />
+          </StackPanel>
+          <StackPanel Grid.Column="8">
+            <TextBlock Text="FORMATO" Classes="rotulo" />
+            <ComboBox ItemsSource="{Binding FormatosDisponiveis}"
+                      SelectedItem="{Binding Formato}" HorizontalAlignment="Stretch" />
+          </StackPanel>
+        </Grid>
+
+        <StackPanel Orientation="Horizontal" Spacing="10">
+          <Button Classes="primario" Content="Visualizar"
+                  Command="{Binding VisualizarCommand}" IsEnabled="{Binding !Ocupado}" />
+          <Button Content="Exportar" Command="{Binding ExportarCommand}"
+                  IsEnabled="{Binding !Ocupado}" />
+          <TextBlock VerticalAlignment="Center" Classes="fraco" Margin="8,0,0,0"
+                     Text="{Binding Resumo.Total, StringFormat='{}{0} cliente(s)'}" />
+          <TextBlock VerticalAlignment="Center" Classes="fraco"
+                     Text="{Binding Resumo.TotalEntrega, StringFormat='entrega: {0}'}" />
+          <TextBlock VerticalAlignment="Center" Classes="fraco"
+                     Text="{Binding Resumo.TotalRetirada, StringFormat='retirada: {0}'}" />
+        </StackPanel>
+      </StackPanel>
+    </Border>
+
+    <Grid Grid.Row="1" ColumnDefinitions="*,14,320" Margin="0,0,0,16">
+      <Panel Grid.Column="0">
+        <DataGrid ItemsSource="{Binding Linhas}" IsReadOnly="True" CanUserSortColumns="True">
+          <DataGrid.Columns>
+            <DataGridTextColumn Header="Nome" Width="*"
+                                Binding="{Binding Nome, x:DataType=dto:LinhaDoRelatorio}" />
+            <DataGridTextColumn Header="Cidade" Width="Auto"
+                                Binding="{Binding Cidade, x:DataType=dto:LinhaDoRelatorio}" />
+            <DataGridTextColumn Header="Bairro" Width="Auto"
+                                Binding="{Binding Bairro, x:DataType=dto:LinhaDoRelatorio}" />
+            <DataGridTextColumn Header="Tipo" Width="Auto"
+                                Binding="{Binding Tipo, x:DataType=dto:LinhaDoRelatorio}" />
+            <DataGridTextColumn Header="Cadastro" Width="Auto"
+                                Binding="{Binding CriadoEm, x:DataType=dto:LinhaDoRelatorio}" />
+          </DataGrid.Columns>
+        </DataGrid>
+
+        <TextBlock IsVisible="{Binding SemResultado}" Classes="fraco"
+                   Text="Nenhum cliente atende aos filtros escolhidos."
+                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                   IsHitTestVisible="False" />
+      </Panel>
+
+      <Border Grid.Column="2" Classes="painel">
+        <Grid RowDefinitions="Auto,*">
+          <TextBlock Text="Desempenho por regiao" Classes="subtitulo" Margin="0,0,0,10" />
+          <ScrollViewer Grid.Row="1">
+            <ItemsControl ItemsSource="{Binding Regioes}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="dto:DesempenhoDaRegiao">
+                  <StackPanel Margin="0,0,0,10" Spacing="3">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Text="{Binding Cidade}" FontSize="13" />
+                      <TextBlock Grid.Column="1" Classes="fraco"
+                                 Text="{Binding PercentualDaBase, StringFormat='{}{0}%'}" />
+                    </Grid>
+                    <TextBlock Classes="fraco"
+                               Text="{Binding Clientes, StringFormat='{}{0} cliente(s)'}" />
+                  </StackPanel>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </ScrollViewer>
+        </Grid>
+      </Border>
+    </Grid>
+  </Grid>
+</UserControl>

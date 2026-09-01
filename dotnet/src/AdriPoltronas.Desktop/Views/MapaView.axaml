@@ -1,0 +1,47 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:AdriPoltronas.Desktop.ViewModels"
+             xmlns:ctl="clr-namespace:AdriPoltronas.Desktop.Controles"
+             x:Class="AdriPoltronas.Desktop.Views.MapaView"
+             x:DataType="vm:MapaViewModel">
+
+  <Grid RowDefinitions="Auto,Auto,*">
+
+    <!-- Aviso de privacidade acima do mapa, e nao escondido: o endereco do
+         cliente sai da maquina para virar coordenada. -->
+    <Border Grid.Row="0" Classes="cartao" Margin="0,0,0,12"
+            Background="{DynamicResource SuperficieAlta}">
+      <StackPanel Orientation="Horizontal" Spacing="10">
+        <TextBlock Text="&#x1F512;" FontSize="15" VerticalAlignment="Center" />
+        <TextBlock Text="{Binding AvisoDePrivacidade}" Classes="fraco"
+                   TextWrapping="Wrap" VerticalAlignment="Center" />
+      </StackPanel>
+    </Border>
+
+    <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="10"
+                Margin="0,0,0,12">
+      <Button Classes="primario" Content="Carregar mapa"
+              Command="{Binding CarregarCommand}" IsEnabled="{Binding !Ocupado}" />
+      <TextBlock VerticalAlignment="Center" Classes="fraco"
+                 Text="Arraste para mover, use a roda do mouse para aproximar." />
+    </StackPanel>
+
+    <Panel Grid.Row="2" Margin="0,0,0,16">
+      <Border CornerRadius="12" ClipToBounds="True"
+              BorderBrush="{DynamicResource Borda}" BorderThickness="1">
+        <ctl:ControleDeMapa Pontos="{Binding Pontos}" Fonte="{Binding Ladrilhos}" />
+      </Border>
+
+      <Border IsVisible="{Binding !Carregado}" IsHitTestVisible="False"
+              Background="{DynamicResource Superficie}" CornerRadius="10"
+              Padding="20,14" HorizontalAlignment="Center" VerticalAlignment="Center">
+        <StackPanel Spacing="6">
+          <TextBlock Text="Mapa nao carregado" Classes="subtitulo"
+                     HorizontalAlignment="Center" />
+          <TextBlock Text="Use o botao acima para localizar os enderecos."
+                     Classes="fraco" HorizontalAlignment="Center" />
+        </StackPanel>
+      </Border>
+    </Panel>
+  </Grid>
+</UserControl>

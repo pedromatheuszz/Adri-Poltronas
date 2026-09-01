@@ -1,6 +1,13 @@
 # backend/blueprints/webhook.py
-"""Blueprint de webhook Asaas."""
-import json
+"""
+Blueprint de webhook Asaas.
+
+Nota sobre o SQL daqui: literais de string usam aspas SIMPLES. Aspas duplas
+funcionavam por acidente -- o SQLite so as trata como string quando nao existe
+coluna com aquele nome, uma extensao de compatibilidade que pode ser desligada
+(SQLITE_DQS=0). Com uma coluna chamada `Recebido`, o UPDATE viraria outra coisa
+silenciosamente.
+"""
 import logging
 import hmac
 from flask import Blueprint, request, jsonify
@@ -41,38 +48,30 @@ def webhook_asaas():
         return jsonify({"erro": "Nao autorizado"}), 401
 
     dados = request.get_json(silent=True) or {}
-    log.info("[WEBHOOK] Recebido: %s", json.dumps(dados, ensure_ascii=False)[:500])
     tipo_evento = dados.get('event', '')
     pagamento_asaas = dados.get('payment', {})
     asaas_payment_id = pagamento_asaas.get('id', '')
+    log.info(
+        "[WEBHOOK] Evento Asaas recebido: tipo=%s pagamento=%s",
+        tipo_evento,
+        asaas_payment_id,
+    )
     if not asaas_payment_id:
         return jsonify({"mensagem": "OK"}), 200
     if tipo_evento in ('PAYMENT_RECEIVED', 'PAYMENT_CONFIRMED'):
-        with database.conectar() as conexao:
-            pagamento = conexao.execute(
-                'SELECT * FROM pagamentos WHERE asaas_payment_id=?', (asaas_payment_id,)
-            ).fetchone()
-            if pagamento:
-                conexao.execute(
-                    'UPDATE pagamentos SET status="Recebido", data_pagamento=datetime("now", "localtime") WHERE asaas_payment_id=?',
-                    (asaas_payment_id,)
-                )
-                conexao.execute(
-                    'INSERT INTO historico (cliente_id, cliente_nome, acao, detalhes) VALUES (?, ?, ?, ?)',
-                    (pagamento['cliente_id'], pagamento['cliente_nome'], 'PAGAMENTO',
-                     f'Pagamento confirmado via webhook: R$ {pagamento["valor"]:.2f}'),
-                )
-                log.info("[WEBHOOK] Pagamento %s confirmado via Asaas.", asaas_payment_id)
+        alterado = database.atualizar_pagamento_por_asaas(
+            asaas_payment_id,
+            'Recebido',
+            preencher_data_pagamento=True,
+        )
+        if alterado:
+            log.info("[WEBHOOK] Pagamento %s confirmado via Asaas.", asaas_payment_id)
     elif tipo_evento == 'PAYMENT_OVERDUE':
-        with database.conectar() as conexao:
-            conexao.execute(
-                'UPDATE pagamentos SET status="Atrasado" WHERE asaas_payment_id=? AND status="Pendente"',
-                (asaas_payment_id,)
-            )
+        database.atualizar_pagamento_por_asaas(
+            asaas_payment_id,
+            'Atrasado',
+            status_anterior='Pendente',
+        )
     elif tipo_evento == 'PAYMENT_DELETED':
-        with database.conectar() as conexao:
-            conexao.execute(
-                'UPDATE pagamentos SET status="Cancelado" WHERE asaas_payment_id=?',
-                (asaas_payment_id,)
-            )
+        database.atualizar_pagamento_por_asaas(asaas_payment_id, 'Cancelado')
     return jsonify({"mensagem": "OK"}), 200

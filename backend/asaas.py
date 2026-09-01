@@ -144,7 +144,7 @@ def chave_incompativel_com_ambiente() -> bool:
 def criar_cliente(nome, cpf_cnpj=None, email=None, telefone=None, cidade=None, uf=None, bairro=None, rua=None, cep=None):
     """
     Cria um cliente no Asaas. Retorna dict com 'id' do cliente Asaas ou '_erro'.
-    cpf_cnpj é obrigatório pela API, mas pode ser None (Asaas aceita sem doc).
+    cpf_cnpj pode ser None: a API Asaas aceita cadastro sem documento.
     """
     body = {"name": nome}
     if cpf_cnpj:

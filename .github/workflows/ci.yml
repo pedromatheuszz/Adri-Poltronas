@@ -8,7 +8,7 @@ on:
 
 jobs:
   test:
-    # A aplicacao e Windows-only (DPAPI via pywin32, pywebview/EdgeWebView2).
+    # A aplicacao e Windows-only (DPAPI via pywin32, instalador NSIS).
     # Rodar em ubuntu escondia o caminho de codigo que realmente vai a producao.
     runs-on: windows-latest
     strategy:
@@ -32,7 +32,7 @@ jobs:
         pip install -r backend/requirements.txt
 
     - name: Lint with ruff
-      run: ruff check backend/ tests/ main.py build.py
+      run: ruff check backend/ tests/ build.py
 
     - name: Run tests with coverage
       working-directory: backend
@@ -48,6 +48,76 @@ jobs:
         flags: unittests
         name: codecov-umbrella
       continue-on-error: true
+
+  electron:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: 'npm'
+
+    - name: Install Node dependencies
+      run: npm ci
+
+    - name: Typecheck (tsc --noEmit)
+      run: npm run typecheck
+
+    - name: Build main process
+      run: npm run build
+
+  qt:
+    # A janela Qt e uma interface alternativa a do Electron, sobre o mesmo
+    # backend. Compilar e rodar o ctest no CI evita que ela apodreca calada.
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Qt
+      uses: jurplel/install-qt-action@v4
+      with:
+        version: '6.8.3'
+        arch: 'win64_mingw'
+        tools: 'tools_mingw1310'
+        cache: true
+
+    - name: Configure, build and test
+      working-directory: qt-app
+      run: |
+        cmake -G "MinGW Makefiles" -S . -B build -DCMAKE_BUILD_TYPE=Release
+        cmake --build build -j 4
+        ctest --test-dir build --output-on-failure
+
+  dotnet:
+    # A solution .NET/Avalonia e multiplataforma; o CI compila no Linux para
+    # que uma dependencia acidental de Windows apareca aqui, e nao na primeira
+    # tentativa de publicar para outro sistema.
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+
+    - name: Restore
+      working-directory: dotnet
+      run: dotnet restore
+
+    - name: Build
+      working-directory: dotnet
+      run: dotnet build --no-restore --configuration Release
+
+    - name: Test
+      working-directory: dotnet
+      run: dotnet test --no-build --configuration Release --verbosity normal
 
   security:
     runs-on: ubuntu-latest

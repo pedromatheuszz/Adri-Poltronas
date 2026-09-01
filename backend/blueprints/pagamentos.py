@@ -15,11 +15,14 @@ pagamentos_bp = Blueprint('pagamentos', __name__, url_prefix='/api/pagamentos')
 
 @pagamentos_bp.route('', methods=['GET'])
 def listar_pagamentos():
-    cliente_id = request.args.get('cliente_id')
+    cliente_id_bruto = (request.args.get('cliente_id') or '').strip()
+    cliente_id = None
+    if cliente_id_bruto:
+        cliente_id = validators.inteiro_positivo(cliente_id_bruto)
+        if cliente_id is None:
+            return jsonify({"erro": "cliente_id invalido."}), 400
     status = request.args.get('status')
-    pagamentos = database.listar_pagamentos(
-        cliente_id=int(cliente_id) if cliente_id else None, status=status
-    )
+    pagamentos = database.listar_pagamentos(cliente_id=cliente_id, status=status)
     return jsonify(pagamentos)
 
 
@@ -41,9 +44,12 @@ def criar_pagamento():
     pagamento, erros = validators.validar_pagamento(request.get_json(silent=True) or {})
     if erros:
         return jsonify({"erro": "Dados invalidos.", "detalhes": erros}), 400
+    if not database.obter_cliente_por_id(pagamento['cliente_id']):
+        return jsonify({"erro": "Cliente nao encontrado."}), 404
     pagamento_id = database.salvar_pagamento(
         pagamento['cliente_id'], pagamento['cliente_nome'], pagamento['valor'],
         pagamento['descricao'], pagamento['data_vencimento'], pagamento['tipo_pagamento'],
+        status=pagamento['status'], data_pagamento=pagamento['data_pagamento'],
     )
     return jsonify({"mensagem": "Pagamento registrado!", "id": pagamento_id}), 201
 
@@ -51,14 +57,22 @@ def criar_pagamento():
 @pagamentos_bp.route('/<int:pagamento_id>', methods=['PUT'])
 def atualizar_pagamento(pagamento_id):
     dados = request.get_json(silent=True) or {}
-    pagamento, erros = validators.validar_pagamento(dados)
-    if erros:
-        return jsonify({"erro": "Dados invalidos.", "detalhes": erros}), 400
     existente = database.obter_pagamento_por_id(pagamento_id)
     if not existente:
         return jsonify({"erro": "Pagamento nao encontrado."}), 404
+
+    # Campos de estado ausentes no corpo sao herdados do registro atual.
+    # Sem isso o validador injetava 'Pendente' por padrao, e um PUT que so
+    # mudava a descricao revertia uma cobranca ja recebida -- apagando a
+    # receita do faturamento sem nenhum sinal para o usuario.
+    dados.setdefault('status', existente['status'])
+    dados.setdefault('data_pagamento', existente.get('data_pagamento', ''))
+
+    pagamento, erros = validators.validar_pagamento(dados)
+    if erros:
+        return jsonify({"erro": "Dados invalidos.", "detalhes": erros}), 400
     linhas = database.atualizar_pagamento(pagamento_id, **pagamento)
-    return jsonify({"mensagem": "Atualizado!", "linhas": linhas}), 200
+    return jsonify({"mensagem": "Pagamento atualizado!", "linhas": linhas}), 200
 
 
 @pagamentos_bp.route('/<int:pagamento_id>', methods=['DELETE'])
@@ -66,13 +80,25 @@ def excluir_pagamento(pagamento_id):
     existente = database.obter_pagamento_por_id(pagamento_id)
     if not existente:
         return jsonify({"erro": "Pagamento nao encontrado."}), 404
+    # A checagem vem ANTES da chamada ao Asaas. `excluir_pagamento()` so apaga
+    # cobrancas pendentes, entao cancelar remoto primeiro deixava a cobranca
+    # cancelada no gateway e viva no banco local -- divergencia permanente,
+    # sem nenhum caminho de volta pela interface.
+    if existente['status'] != 'Pendente':
+        return jsonify({"erro": "So e possivel cancelar pagamentos pendentes."}), 400
+
     if existente.get('asaas_payment_id') and asaas.esta_configurado():
         resultado = asaas.cancelar_pagamento(existente['asaas_payment_id'])
         if resultado.get('_erro'):
+            # Apagar localmente aqui seria pior que falhar: a cobranca segue
+            # viva no Asaas, o cliente ainda pode paga-la, e o registro que
+            # permitiria conciliar teria sumido.
             log.warning("Falha ao cancelar no Asaas: %s", resultado)
+            return jsonify({"erro": "Falha ao cancelar a cobranca no Asaas. Tente novamente."}), 502
+
     linhas = database.excluir_pagamento(pagamento_id)
     if linhas == 0:
-        return jsonify({"erro": "Nao foi possivel excluir (so e possivel cancelar pagamentos pendentes)."}), 400
+        return jsonify({"erro": "Nao foi possivel cancelar a cobranca. Tente novamente."}), 400
     return jsonify({"mensagem": "Pagamento cancelado!"}), 200
 
 
@@ -92,10 +118,10 @@ def gerar_cobranca():
     if not asaas.esta_configurado():
         return jsonify({"erro": "Integracao Asaas nao configurada. Defina ASAAS_API_KEY."}), 503
     dados = request.get_json(silent=True) or {}
-    pagamento_id = dados.get('pagamento_id')
-    if not pagamento_id:
-        return jsonify({"erro": "pagamento_id e obrigatorio."}), 400
-    pagamento = database.obter_pagamento_por_id(int(pagamento_id))
+    pagamento_id = validators.inteiro_positivo(dados.get('pagamento_id'))
+    if pagamento_id is None:
+        return jsonify({"erro": "pagamento_id e obrigatorio e deve ser um numero positivo."}), 400
+    pagamento = database.obter_pagamento_por_id(pagamento_id)
     if not pagamento:
         return jsonify({"erro": "Pagamento nao encontrado."}), 404
     cliente = database.obter_cliente_por_id(pagamento['cliente_id'])

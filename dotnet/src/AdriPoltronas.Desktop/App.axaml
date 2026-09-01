@@ -1,0 +1,27 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:AdriPoltronas.Desktop"
+             x:Class="AdriPoltronas.Desktop.App"
+             RequestedThemeVariant="Dark">
+
+  <!-- O ViewLocator liga ViewModel a View por convencao de nome. E o que
+       permite a navegacao trabalhar so com ViewModels. -->
+  <Application.DataTemplates>
+    <local:ViewLocator />
+  </Application.DataTemplates>
+
+  <Application.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceInclude Source="avares://AdriPoltronas.Desktop/Themes/Cores.axaml" />
+      </ResourceDictionary.MergedDictionaries>
+    </ResourceDictionary>
+  </Application.Resources>
+
+  <Application.Styles>
+    <FluentTheme />
+    <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml" />
+    <StyleInclude Source="avares://AdriPoltronas.Desktop/Themes/Estilos.axaml" />
+  </Application.Styles>
+
+</Application>

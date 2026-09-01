@@ -1,0 +1,136 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:AdriPoltronas.Desktop.ViewModels"
+             xmlns:ctl="clr-namespace:AdriPoltronas.Desktop.Controles"
+             xmlns:dto="clr-namespace:AdriPoltronas.Application.Dtos;assembly=AdriPoltronas.Application"
+             x:Class="AdriPoltronas.Desktop.Views.DashboardView"
+             x:DataType="vm:DashboardViewModel">
+
+  <ScrollViewer>
+    <StackPanel Spacing="16" Margin="0,0,0,20">
+
+      <!-- Cartoes de cadastro: as mesmas quatro contagens da interface web. -->
+      <UniformGrid Columns="4" Height="88">
+        <Border Classes="cartao" Margin="0,0,6,0">
+          <StackPanel VerticalAlignment="Center">
+            <TextBlock Text="{Binding Cadastro.TotalClientes}" Classes="numero" />
+            <TextBlock Text="Total de clientes" Classes="fraco" />
+          </StackPanel>
+        </Border>
+        <Border Classes="cartao" Margin="6,0">
+          <StackPanel VerticalAlignment="Center">
+            <TextBlock Text="{Binding Cadastro.TotalEntrega}" Classes="numero"
+                       Foreground="{DynamicResource Entrega}" />
+            <TextBlock Text="Entregas" Classes="fraco" />
+          </StackPanel>
+        </Border>
+        <Border Classes="cartao" Margin="6,0">
+          <StackPanel VerticalAlignment="Center">
+            <TextBlock Text="{Binding Cadastro.TotalRetirada}" Classes="numero"
+                       Foreground="{DynamicResource Retirada}" />
+            <TextBlock Text="Retiradas" Classes="fraco" />
+          </StackPanel>
+        </Border>
+        <Border Classes="cartao" Margin="6,0,0,0">
+          <StackPanel VerticalAlignment="Center">
+            <TextBlock Text="{Binding Cadastro.CadastrosRecentes}" Classes="numero" />
+            <TextBlock Text="{Binding RotuloDeRecentes}" Classes="fraco" />
+          </StackPanel>
+        </Border>
+      </UniformGrid>
+
+      <!-- Cartoes financeiros. -->
+      <UniformGrid Columns="4" Height="96">
+        <Border Classes="cartao" Margin="0,0,6,0">
+          <StackPanel VerticalAlignment="Center">
+            <TextBlock Text="{Binding Financeiro.FaturamentoDoMes, StringFormat=\{0:C2\}}"
+                       Classes="numero" FontSize="22" />
+            <TextBlock Text="Faturamento do mes" Classes="fraco" />
+            <TextBlock Text="{Binding VariacaoFormatada}" Classes="fraco"
+                       FontSize="11" Margin="0,2,0,0" />
+          </StackPanel>
+        </Border>
+        <Border Classes="cartao" Margin="6,0">
+          <StackPanel VerticalAlignment="Center">
+            <TextBlock Text="{Binding Financeiro.AReceber, StringFormat=\{0:C2\}}"
+                       Classes="numero" FontSize="22" />
+            <TextBlock Text="A receber" Classes="fraco" />
+          </StackPanel>
+        </Border>
+        <Border Classes="cartao" Margin="6,0">
+          <StackPanel VerticalAlignment="Center">
+            <TextBlock Text="{Binding Financeiro.EmAtraso, StringFormat=\{0:C2\}}"
+                       Classes="numero" FontSize="22"
+                       Foreground="{DynamicResource Perigo}" />
+            <TextBlock Text="Em atraso" Classes="fraco" />
+            <TextBlock Classes="fraco" FontSize="11" Margin="0,2,0,0"
+                       Text="{Binding Financeiro.QuantidadeEmAtraso, StringFormat='{}{0} cobranca(s)'}" />
+          </StackPanel>
+        </Border>
+        <Border Classes="cartao" Margin="6,0,0,0">
+          <StackPanel VerticalAlignment="Center">
+            <TextBlock Text="{Binding Financeiro.TicketMedioDoMes, StringFormat=\{0:C2\}}"
+                       Classes="numero" FontSize="22" />
+            <TextBlock Text="Ticket medio" Classes="fraco" />
+            <TextBlock Classes="fraco" FontSize="11" Margin="0,2,0,0"
+                       Text="{Binding Financeiro.QuantidadeDeRecebimentosNoMes, StringFormat='{}{0} recebimento(s)'}" />
+          </StackPanel>
+        </Border>
+      </UniformGrid>
+
+      <Border Classes="painel" Height="230">
+        <Grid RowDefinitions="Auto,*">
+          <TextBlock Text="Receita mensal" Classes="subtitulo" Margin="0,0,0,10" />
+          <ctl:GraficoDeLinha Grid.Row="1" Pontos="{Binding ReceitaMensal}" />
+        </Grid>
+      </Border>
+
+      <Grid ColumnDefinitions="*,14,*" Height="220">
+        <Border Grid.Column="0" Classes="painel">
+          <Grid RowDefinitions="Auto,*">
+            <TextBlock Text="Entrega x Retirada" Classes="subtitulo" Margin="0,0,0,10" />
+            <ctl:GraficoDeRosca Grid.Row="1" Pontos="{Binding EntregaVersusRetirada}" />
+          </Grid>
+        </Border>
+        <Border Grid.Column="2" Classes="painel">
+          <Grid RowDefinitions="Auto,*">
+            <TextBlock Text="Clientes por cidade" Classes="subtitulo" Margin="0,0,0,10" />
+            <ctl:GraficoDeBarras Grid.Row="1" Pontos="{Binding ClientesPorCidade}" />
+          </Grid>
+        </Border>
+      </Grid>
+
+      <Grid ColumnDefinitions="*,14,*" Height="220">
+        <Border Grid.Column="0" Classes="painel">
+          <Grid RowDefinitions="Auto,*">
+            <TextBlock Text="Cadastros por mes" Classes="subtitulo" Margin="0,0,0,10" />
+            <ctl:GraficoDeBarras Grid.Row="1" Pontos="{Binding CadastrosPorMes}" />
+          </Grid>
+        </Border>
+
+        <Border Grid.Column="2" Classes="painel">
+          <Grid RowDefinitions="Auto,*">
+            <TextBlock Text="Ultimos clientes" Classes="subtitulo" Margin="0,0,0,10" />
+            <ItemsControl Grid.Row="1" ItemsSource="{Binding UltimosClientes}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="dto:ClienteDto">
+                  <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,8">
+                    <StackPanel>
+                      <TextBlock Text="{Binding Nome}" FontSize="13" />
+                      <TextBlock Text="{Binding Cidade}" Classes="fraco" />
+                    </StackPanel>
+                    <TextBlock Grid.Column="1" Text="{Binding Tipo}" Classes="fraco"
+                               VerticalAlignment="Center" />
+                  </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </Grid>
+        </Border>
+      </Grid>
+
+      <Button Content="Atualizar" Command="{Binding RecarregarCommand}"
+              IsEnabled="{Binding !Ocupado}" HorizontalAlignment="Left" />
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

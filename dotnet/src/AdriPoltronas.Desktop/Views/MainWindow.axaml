@@ -1,0 +1,168 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:AdriPoltronas.Desktop.ViewModels"
+        x:Class="AdriPoltronas.Desktop.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="Adri Poltronas"
+        Width="1280" Height="820"
+        MinWidth="1000" MinHeight="640"
+        Background="{DynamicResource Fundo}">
+
+  <!-- Atalhos da janela: valem com o foco em qualquer controle. A janela nao
+       conhece as telas; ela pergunta por IAtalhosDeTela. -->
+  <Window.KeyBindings>
+    <KeyBinding Gesture="Ctrl+N" Command="{Binding AtalhoNovoCommand}" />
+    <KeyBinding Gesture="Ctrl+R" Command="{Binding AtalhoAtualizarCommand}" />
+    <KeyBinding Gesture="Escape"
+                Command="{Binding FecharPainelDeNotificacoesCommand}" />
+  </Window.KeyBindings>
+
+  <Grid RowDefinitions="Auto,Auto,*,Auto">
+
+    <!-- Cabecalho: identidade, selo de estado, sino e tema. Mesma ordem da
+         interface web, para quem ja usa o sistema nao ter de procurar. -->
+    <Border Grid.Row="0" Background="{DynamicResource Superficie}"
+            BorderBrush="{DynamicResource Borda}" BorderThickness="0,0,0,1"
+            Padding="24,14">
+      <Grid ColumnDefinitions="Auto,*,Auto">
+
+        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="12"
+                    VerticalAlignment="Center">
+          <Border Width="34" Height="34" CornerRadius="10"
+                  Background="{DynamicResource Destaque}">
+            <TextBlock Text="AP" Foreground="White" FontWeight="Bold"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Border>
+          <StackPanel VerticalAlignment="Center">
+            <TextBlock Text="Adri Poltronas" Classes="titulo" />
+            <TextBlock Text="{Binding SecaoAtual}" Classes="fraco" />
+          </StackPanel>
+        </StackPanel>
+
+        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="10"
+                    VerticalAlignment="Center">
+
+          <Border Classes="selo" Background="{DynamicResource Borda}"
+                  VerticalAlignment="Center">
+            <StackPanel Orientation="Horizontal" Spacing="7">
+              <Ellipse Width="8" Height="8" VerticalAlignment="Center"
+                       Fill="{DynamicResource Entrega}" />
+              <TextBlock Text="Local" FontSize="12" VerticalAlignment="Center" />
+            </StackPanel>
+          </Border>
+
+          <!-- Sino com contador. O selo so aparece quando ha algo por ler. -->
+          <Panel>
+            <Button Classes="icone" Content="&#x1F514;"
+                    ToolTip.Tip="Notificacoes"
+                    Command="{Binding AlternarPainelDeNotificacoesCommand}" />
+            <Border IsVisible="{Binding TemNaoLidas}"
+                    Background="{DynamicResource Perigo}" CornerRadius="9"
+                    MinWidth="18" Height="18" Padding="4,0"
+                    HorizontalAlignment="Right" VerticalAlignment="Top"
+                    Margin="0,-2,-2,0" IsHitTestVisible="False">
+              <TextBlock Text="{Binding NaoLidas}" Foreground="White" FontSize="10"
+                         FontWeight="Bold" HorizontalAlignment="Center"
+                         VerticalAlignment="Center" />
+            </Border>
+          </Panel>
+
+          <Button Classes="icone" ToolTip.Tip="Alternar tema"
+                  Command="{Binding AlternarTemaCommand}">
+            <Panel>
+              <TextBlock Text="&#x2600;" IsVisible="{Binding TemaEscuro}" />
+              <TextBlock Text="&#x1F319;" IsVisible="{Binding !TemaEscuro}" />
+            </Panel>
+          </Button>
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <!-- Abas. RadioButton num grupo: so uma fica marcada, e o proprio controle
+         cuida disso sem codigo na View. -->
+    <Border Grid.Row="1" Background="{DynamicResource Superficie}"
+            BorderBrush="{DynamicResource Borda}" BorderThickness="0,0,0,1"
+            Padding="20,8">
+      <StackPanel Orientation="Horizontal">
+        <RadioButton Classes="aba" GroupName="secao" IsChecked="True"
+                     Content="Dashboard" Command="{Binding AbrirDashboardCommand}" />
+        <RadioButton Classes="aba" GroupName="secao"
+                     Content="Clientes" Command="{Binding AbrirClientesCommand}" />
+        <RadioButton Classes="aba" GroupName="secao"
+                     Content="Mapa" Command="{Binding AbrirMapaCommand}" />
+        <RadioButton Classes="aba" GroupName="secao"
+                     Content="Pagamentos" Command="{Binding AbrirPagamentosCommand}" />
+        <RadioButton Classes="aba" GroupName="secao"
+                     Content="Relatorios" Command="{Binding AbrirRelatoriosCommand}" />
+      </StackPanel>
+    </Border>
+
+    <Panel Grid.Row="2">
+      <!-- O conteudo e um ViewModel; o ViewLocator escolhe a View. -->
+      <ContentControl Content="{Binding Conteudo}" Margin="24,18,24,0" />
+
+      <!-- Painel de notificacoes: sobreposto, nao empurra o conteudo. -->
+      <Border IsVisible="{Binding PainelDeNotificacoesAberto}"
+              HorizontalAlignment="Right" VerticalAlignment="Top"
+              Margin="0,0,24,0" Width="380" MaxHeight="520"
+              Background="{DynamicResource Superficie}"
+              BorderBrush="{DynamicResource Borda}" BorderThickness="1"
+              CornerRadius="12" Padding="16">
+        <Grid RowDefinitions="Auto,*,Auto">
+          <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,10">
+            <TextBlock Text="Notificacoes" Classes="subtitulo" />
+            <Button Grid.Column="1" Classes="icone" Content="&#x2715;"
+                    Command="{Binding FecharPainelDeNotificacoesCommand}" />
+          </Grid>
+
+          <ScrollViewer Grid.Row="1">
+            <StackPanel Spacing="6">
+              <TextBlock Text="Nenhum alerta no momento." Classes="fraco"
+                         Margin="0,16" HorizontalAlignment="Center"
+                         IsVisible="{Binding !TemNotificacoes}" />
+              <ItemsControl ItemsSource="{Binding Notificacoes}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <Border Background="{DynamicResource SuperficieAlta}"
+                            CornerRadius="10" Padding="10,8" Margin="0,0,0,6">
+                      <Grid ColumnDefinitions="Auto,*">
+                        <TextBlock Grid.Column="0" Text="{Binding Icone}"
+                                   FontSize="16" Margin="0,0,10,0"
+                                   VerticalAlignment="Top" />
+                        <StackPanel Grid.Column="1" Spacing="2">
+                          <TextBlock Text="{Binding Mensagem}" TextWrapping="Wrap"
+                                     FontSize="13" />
+                          <TextBlock Text="{Binding Detalhes}" Classes="fraco"
+                                     TextWrapping="Wrap" />
+                        </StackPanel>
+                      </Grid>
+                    </Border>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </ScrollViewer>
+
+          <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8"
+                      Margin="0,10,0,0">
+            <Button Content="Marcar como lidas"
+                    Command="{Binding MarcarNotificacoesLidasCommand}" />
+            <Button Content="Atualizar"
+                    Command="{Binding AtualizarNotificacoesCommand}" />
+          </StackPanel>
+        </Grid>
+      </Border>
+    </Panel>
+
+    <Border Grid.Row="3" Background="{DynamicResource Superficie}"
+            BorderBrush="{DynamicResource Borda}" BorderThickness="0,1,0,0"
+            Padding="24,7">
+      <Grid ColumnDefinitions="*,Auto">
+        <TextBlock Text="{Binding Conteudo.Mensagem}" Classes="fraco"
+                   VerticalAlignment="Center" />
+        <TextBlock Grid.Column="1" Classes="fraco" VerticalAlignment="Center"
+                   Text="Ctrl+N novo | Ctrl+F buscar | Ctrl+R atualizar | Esc fecha" />
+      </Grid>
+    </Border>
+  </Grid>
+</Window>

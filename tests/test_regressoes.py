@@ -7,7 +7,9 @@ na versão anterior do código.
 import os
 import sys
 import json
+import sqlite3
 import tempfile
+from contextlib import closing
 from datetime import timedelta
 
 import pytest
@@ -79,8 +81,16 @@ def test_notificacao_de_atraso_usa_nome_do_cliente(client):
 
 
 def test_notificacoes_sobrevivem_a_pagamento_sem_cliente_correspondente(client):
-    """O LEFT JOIN devolve nome_cliente NULL quando o cliente nao existe mais."""
-    database.salvar_pagamento(9999, "Cliente Removido", 100.00, "Orfao", '2020-01-01')
+    """Dados orfaos legados continuam legiveis, embora novos sejam bloqueados."""
+    # A API agora aplica foreign keys; o INSERT direto com a verificacao
+    # desligada reproduz somente o estado que pode existir em bancos antigos.
+    with closing(sqlite3.connect(database.DB_PATH)) as conexao, conexao:
+        conexao.execute("PRAGMA foreign_keys = OFF")
+        conexao.execute(
+            "INSERT INTO pagamentos (cliente_id, cliente_nome, valor, descricao, "
+            "data_vencimento) VALUES (?, ?, ?, ?, ?)",
+            (9999, "Cliente Removido", 100.00, "Orfao", '2020-01-01'),
+        )
 
     resposta = client.get('/api/notificacoes')
 
@@ -186,6 +196,18 @@ def test_webhook_aceita_token_valido_e_confirma_pagamento(client, monkeypatch):
 
     assert resposta.status_code == 200
     assert database.obter_pagamento_por_id(pagamento_id)['status'] == 'Recebido'
+
+
+def test_webhook_valido_nao_depende_de_sessao_microsoft(client, monkeypatch):
+    """O token proprio do Asaas autentica o webhook tambem fora de TESTING."""
+    monkeypatch.setattr(config, 'ASAAS_WEBHOOK_TOKEN', 'token_correto')
+    app_module.app.config['TESTING'] = False
+    try:
+        resposta = _post_webhook(client, {'asaas-access-token': 'token_correto'})
+    finally:
+        app_module.app.config['TESTING'] = True
+
+    assert resposta.status_code == 200
 
 
 # -----------------------------------------------------------------------------
@@ -322,6 +344,40 @@ def _ler_app_js():
         return arquivo.read()
 
 
+def _ler_template_principal():
+    caminho = os.path.join(os.path.dirname(__file__), '..', 'backend', 'templates', 'index.html')
+    with open(caminho, encoding='utf-8') as arquivo:
+        return arquivo.read()
+
+
+def _ler_css_principal():
+    caminho = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'css', 'style.css')
+    with open(caminho, encoding='utf-8') as arquivo:
+        return arquivo.read()
+
+
+def test_template_principal_usa_estrutura_html5_semantica():
+    html = _ler_template_principal()
+
+    assert html.lstrip().lower().startswith('<!doctype html>')
+    for tag in ('header', 'nav', 'main', 'section', 'article', 'search', 'dialog', 'footer'):
+        assert f'<{tag}' in html, f'Elemento HTML5 ausente: <{tag}>'
+
+    assert html.count('<dialog class="modal-overlay"') == 5
+    assert '<div class="modal-overlay"' not in html
+
+
+def test_dialogos_html5_usam_api_nativa_e_backdrop_css():
+    javascript = _ler_app_js()
+    css = _ler_css_principal()
+
+    assert '.showModal()' in javascript
+    assert "document.querySelector('dialog[open]')" in javascript
+    assert '.modal-overlay[open]' in css
+    assert '.modal-overlay::backdrop' in css
+    assert '[hidden] { display: none !important; }' in css
+
+
 def test_frontend_nao_usa_dialogos_nativos():
     """
     confirm()/alert() nativos ignoram o tema e exibem o endereco do servidor
@@ -362,10 +418,20 @@ def test_callback_de_erro_renderiza_como_erro(client):
     assert 'var(--ok)' not in corpo, "Tela de erro herdou o visual de sucesso"
 
 
-def test_callback_usa_o_tema_escuro_do_app(client):
+def test_callback_usa_a_paleta_do_app(client):
+    """
+    A tela de callback abre no navegador do sistema e nao alcanca
+    frontend/css/tokens.css, entao a paleta e duplicada em config.py. Este
+    teste e o que impede as duas de divergirem em silencio.
+
+    Atualizado junto com a renovacao visual: o app deixou de ser azul-escuro
+    e passou a ser claro e quente, e a tela de login seguiu junto. Antes daqui
+    o teste fixava `#0f172a`, o fundo do tema antigo.
+    """
     corpo = client.get('/callback').data.decode('utf-8')
 
-    assert '#0f172a' in corpo, "Callback nao usa o fundo escuro do app"
+    assert '#F2EEE7' in corpo, "Callback nao usa o fundo claro do app"
+    assert '#0f172a' not in corpo, "Callback ainda tem o fundo azul-escuro antigo"
     assert 'background:#f4f6f9' not in corpo, "Callback ainda tem o fundo claro antigo"
 
 
@@ -539,3 +605,111 @@ def test_relatorio_xlsx_e_gerado_pelo_endpoint(client):
 
     assert resposta.status_code == 200
     assert resposta.data[:2] == b'PK'  # xlsx e um zip
+
+
+# -----------------------------------------------------------------------------
+# Varredura profunda - incoerencias de logica entre camadas
+# -----------------------------------------------------------------------------
+def test_cobranca_sem_vencimento_nao_conta_como_atrasada(client):
+    """
+    'atrasado' tinha duas definicoes no mesmo dashboard.
+
+    O schema usa DEFAULT '' para data_vencimento, e no SQLite '' e menor que
+    qualquer data: obter_metricas_pagamentos() nao filtrava a string vazia e
+    somava essa cobranca como atrasada, enquanto obter_metricas_financeiras()
+    filtrava. Os dois cards do painel mostravam numeros diferentes.
+    """
+    cliente_id = _criar_cliente_com_pagamento(client, '2020-01-01')   # vencido: 250,00
+    database.salvar_pagamento(cliente_id, 'Cliente Teste', 100.00, 'Sem vencimento', '')
+
+    pagamentos = database.obter_metricas_pagamentos()
+    financeiras = database.obter_metricas_financeiras()
+
+    assert pagamentos['total_atrasado'] == 250.00
+    assert pagamentos['total_atrasado'] == financeiras['em_atraso']
+
+
+def test_cobranca_atrasada_continua_sendo_valor_a_receber(client):
+    """
+    Vencer nao quita nem cancela: o valor segue devido.
+
+    O webhook do Asaas grava status 'Atrasado' em PAYMENT_OVERDUE, e tanto
+    total_pendente quanto a_receber olhavam so para 'Pendente'. A cobranca
+    vencia e sumia do que o painel reportava como a receber.
+    """
+    cliente_id = _criar_cliente_com_pagamento(client, '2020-01-01')
+    antes = database.obter_metricas_financeiras()['a_receber']
+
+    with database.conectar() as conexao:
+        conexao.execute("UPDATE pagamentos SET status='Atrasado' WHERE cliente_id=?", (cliente_id,))
+
+    depois = database.obter_metricas_financeiras()
+    assert depois['a_receber'] == antes
+    assert database.obter_metricas_pagamentos()['total_pendente'] == antes
+
+
+def test_pagamento_para_cliente_inexistente_responde_404(client):
+    """
+    Antes subia IntegrityError da foreign key e virava 500 generico.
+
+    O mesmo caso em /api/entregas ja respondia 404, e o API_STANDARD.md
+    documenta 404 para "Cliente, pagamento ou entrega inexistente".
+    """
+    resposta = client.post('/api/pagamentos', headers={'Origin': ORIGEM_LOCAL},
+        data=json.dumps({
+            "cliente_id": 999999, "cliente_nome": "Fantasma", "valor": 10.0,
+            "descricao": "x", "data_vencimento": "2030-01-01", "tipo_pagamento": "Pix",
+        }), content_type='application/json')
+
+    assert resposta.status_code == 404
+    assert json.loads(resposta.data)['erro'] == "Cliente nao encontrado."
+
+
+def test_cliente_id_gigante_nao_vira_erro_interno(client):
+    """
+    validar_entrega ja usava inteiro_positivo(), que barra acima do INTEGER de
+    64 bits do SQLite; validar_pagamento fazia a checagem na mao e deixava
+    passar, e o sqlite3 levantava OverflowError -> 500.
+    """
+    resposta = client.post('/api/pagamentos', headers={'Origin': ORIGEM_LOCAL},
+        data=json.dumps({
+            "cliente_id": 10 ** 25, "cliente_nome": "X", "valor": 10.0,
+            "descricao": "x", "data_vencimento": "2030-01-01", "tipo_pagamento": "Pix",
+        }), content_type='application/json')
+
+    assert resposta.status_code == 400
+    assert "Cliente invalido." in json.loads(resposta.data)['detalhes']
+
+
+def test_entrega_cancelada_nao_gera_alerta(client):
+    """
+    As consultas de notificacao so excluiam 'Concluida', mas 'Cancelada' e um
+    status valido em blueprints/entregas.py: a entrega cancelada continuava
+    aparecendo como agendada e, passada a data, como ENTREGA ATRASADA.
+    """
+    cliente_id = _criar_cliente_com_pagamento(client, '2030-01-01')
+    entrega_id = database.agendar_entrega(cliente_id, 'Cliente Teste', '2020-01-01', '', 'Poltrona')
+
+    assert any(n['tipo'] == 'entrega_atrasada' for n in database.obter_notificacoes())
+
+    database.atualizar_status_entrega(entrega_id, 'Cancelada')
+
+    assert not any(n['tipo'] == 'entrega_atrasada' for n in database.obter_notificacoes())
+
+
+def test_erro_do_dashboard_nao_vaza_detalhe_interno(client, monkeypatch):
+    """
+    dashboard.py e notificacoes.py devolviam str(e) ao navegador, contra o
+    handler central de app.py e o API_STANDARD.md ("sem expor o stack trace").
+    """
+    def explode():
+        raise RuntimeError("caminho/interno/secreto.db travou")
+
+    monkeypatch.setattr(database, 'obter_dados_grafico_por_tipo', explode)
+    resposta = client.get('/api/dashboard/dados')
+
+    assert resposta.status_code == 500
+    corpo = json.loads(resposta.data)
+    assert corpo['erro'] == "Erro interno do servidor."
+    assert 'id' in corpo
+    assert 'secreto' not in resposta.get_data(as_text=True)

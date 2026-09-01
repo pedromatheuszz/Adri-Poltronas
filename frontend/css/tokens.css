@@ -1,0 +1,265 @@
+/* =============================================================================
+   ADRI POLTRONAS — CAMADA DE DESIGN SYSTEM
+   =============================================================================
+
+   Este arquivo contem SOMENTE tokens: nenhum seletor de componente, nenhuma
+   regra de layout. Ele e a unica fonte de verdade para cor, tipografia,
+   espacamento, raio, sombra e tempo de animacao. `style.css` consome estes
+   tokens e nao redefine valores crus.
+
+   Por que separado: o arquivo anterior misturava as duas coisas e, na pratica,
+   cada tela acabou com o seu proprio cinza e o seu proprio raio de borda.
+   Com a paleta isolada aqui, mudar a identidade do produto e mudar um arquivo.
+
+   DIRECAO ESTETICA
+   Poltronas sao um produto de conforto domestico, e o operador passa o dia
+   inteiro nesta tela. A paleta e de ateliê: papel, linho, areia, madeira e
+   grafite quente. Nada de azul-tecnologia, vidro fosco ou gradiente animado --
+   o antecessor tinha os tres, e eles cansam a vista em jornada longa.
+
+   O tema claro e o padrao. O escuro existe para turno noturno e continua
+   quente: marrom-carvao, nao azul-marinho.
+   ========================================================================== */
+
+/* -----------------------------------------------------------------------------
+   1. TEMA CLARO (PADRAO)
+   -------------------------------------------------------------------------- */
+:root,
+[data-theme="light"] {
+
+    /* --- Superficies -----------------------------------------------------
+       Quatro degraus, do fundo da janela ate o elemento mais elevado. A
+       diferenca entre eles e pequena de proposito: hierarquia por
+       luminosidade, nao por borda grossa. */
+    --cor-fundo:            #F2EEE7;  /* areia — fundo da janela            */
+    --cor-superficie:       #FBF9F5;  /* papel — cards, sidebar, modais     */
+    --cor-superficie-2:     #F1ECE3;  /* linho — inputs, cabecalho de tabela*/
+    --cor-superficie-3:     #E7E0D4;  /* bege  — hover, faixas alternadas   */
+    --cor-superficie-flutuante: #FFFFFF; /* dropdown/painel sobre conteudo  */
+
+    /* --- Bordas ---------------------------------------------------------- */
+    --cor-borda:            #E0D8C9;  /* divisao padrao                     */
+    --cor-borda-forte:      #C9BEA9;  /* campo de formulario, foco em repouso*/
+    --cor-borda-sutil:      #EDE7DC;  /* linha interna de tabela            */
+
+    /* --- Texto ------------------------------------------------------------
+       Grafite quente em vez de preto puro: preto sobre creme vibra. */
+    --cor-texto:            #2B2620;  /* titulo, valor, dado principal      */
+    --cor-texto-2:          #6B6153;  /* rotulo, apoio, coluna secundaria   */
+    /* Reservado a placeholder, campo desabilitado e ornamento. Texto que
+       carrega informacao usa --cor-texto-2: este tom fica em ~3,7:1 sobre
+       a superficie, suficiente para elemento de interface, curto para
+       corpo de texto. */
+    --cor-texto-3:          #8A8071;
+    --cor-texto-invertido:  #FBF9F5;  /* sobre fundo solido escuro/colorido */
+
+    /* --- Primaria: nogueira ----------------------------------------------
+       Marrom de madeira. Escolhido no lugar da terracota porque terracota
+       fica a um passo do vermelho de perigo -- num ERP, "Salvar" e "Excluir"
+       nao podem morar na mesma familia de cor. */
+    --cor-primaria:         #8A5A3B;
+    --cor-primaria-forte:   #6E4529;  /* hover/pressionado                  */
+    --cor-primaria-suave:   #F0E6DB;  /* fundo de estado selecionado        */
+    --cor-primaria-contorno:#DEC9B2;
+
+    /* --- Semanticas -------------------------------------------------------
+       Cada uma tem tres formas: solida (fundo de botao), texto (legivel
+       sobre creme) e suave (fundo de badge/alerta). */
+    --cor-sucesso:          #4E6B3C;
+    --cor-sucesso-texto:    #3D5730;
+    --cor-sucesso-suave:    #E7EDDF;
+    --cor-sucesso-contorno: #C4D3B2;
+
+    --cor-alerta:           #A8761C;
+    --cor-alerta-texto:     #855D12;
+    --cor-alerta-suave:     #F7EDD8;
+    --cor-alerta-contorno:  #E3CB98;
+
+    --cor-perigo:           #A63D2E;
+    --cor-perigo-texto:     #8C3123;
+    --cor-perigo-suave:     #F7E4DF;
+    --cor-perigo-contorno:  #E5BDB3;
+
+    --cor-info:             #4A6480;  /* azul-ardosia dessaturado           */
+    --cor-info-texto:       #3B5168;
+    --cor-info-suave:       #E4E9EF;
+    --cor-info-contorno:    #BCC8D6;
+
+    --cor-neutro-texto:     #6B6153;
+    --cor-neutro-suave:     #ECE7DE;
+    --cor-neutro-contorno:  #D8D0C2;
+
+    /* --- Interacao -------------------------------------------------------- */
+    --cor-hover:            #EDE7DC;  /* fundo de item sob o cursor         */
+    --cor-selecao:          #F0E6DB;  /* linha/aba selecionada              */
+    --cor-foco:             #8A5A3B;  /* anel de foco do teclado            */
+    --cor-foco-halo:        rgba(138, 90, 59, 0.20);
+
+    /* --- Sombras ----------------------------------------------------------
+       Tingidas de marrom, nao de preto: sombra cinza sobre creme suja o tom.
+       Tres degraus e o suficiente -- o antecessor tinha sete variacoes soltas
+       pelo arquivo. */
+    --sombra-sm: 0 1px 2px rgba(74, 58, 40, 0.06);
+    --sombra-md: 0 1px 3px rgba(74, 58, 40, 0.07), 0 4px 12px rgba(74, 58, 40, 0.05);
+    --sombra-lg: 0 4px 12px rgba(74, 58, 40, 0.08), 0 12px 32px rgba(74, 58, 40, 0.09);
+    --sombra-foco: 0 0 0 3px var(--cor-foco-halo);
+
+    color-scheme: light;
+}
+
+/* -----------------------------------------------------------------------------
+   2. TEMA ESCURO
+   Mesma estrutura, tons de carvao quente. Nao e um azul-noite: manter a
+   familia marrom faz o app parecer o mesmo produto nos dois modos.
+   -------------------------------------------------------------------------- */
+[data-theme="dark"] {
+    --cor-fundo:            #191613;
+    --cor-superficie:       #221E1A;
+    --cor-superficie-2:     #2A2521;
+    --cor-superficie-3:     #342E28;
+    --cor-superficie-flutuante: #2A2521;
+
+    --cor-borda:            #3A342C;
+    --cor-borda-forte:      #4E4639;
+    --cor-borda-sutil:      #302A24;
+
+    --cor-texto:            #F2ECE2;
+    --cor-texto-2:          #ACA091;
+    --cor-texto-3:          #7C7264;
+    --cor-texto-invertido:  #191613;
+
+    --cor-primaria:         #C08A62;
+    --cor-primaria-forte:   #D3A07A;
+    --cor-primaria-suave:   #3A2E24;
+    --cor-primaria-contorno:#59452F;
+
+    --cor-sucesso:          #8FA96F;
+    --cor-sucesso-texto:    #A8C089;
+    --cor-sucesso-suave:    #2A3122;
+    --cor-sucesso-contorno: #46512F;
+
+    --cor-alerta:           #D6A54A;
+    --cor-alerta-texto:     #E2B865;
+    --cor-alerta-suave:     #362B18;
+    --cor-alerta-contorno:  #5C4720;
+
+    --cor-perigo:           #D9796A;
+    --cor-perigo-texto:     #E59486;
+    --cor-perigo-suave:     #3A211D;
+    --cor-perigo-contorno:  #6B372D;
+
+    --cor-info:             #8FAAC6;
+    --cor-info-texto:       #A5BCD4;
+    --cor-info-suave:       #222B33;
+    --cor-info-contorno:    #3D4C5C;
+
+    --cor-neutro-texto:     #ACA091;
+    --cor-neutro-suave:     #302A24;
+    --cor-neutro-contorno:  #443C33;
+
+    --cor-hover:            #302A24;
+    --cor-selecao:          #3A2E24;
+    --cor-foco:             #C08A62;
+    --cor-foco-halo:        rgba(192, 138, 98, 0.25);
+
+    --sombra-sm: 0 1px 2px rgba(0, 0, 0, 0.30);
+    --sombra-md: 0 1px 3px rgba(0, 0, 0, 0.34), 0 4px 12px rgba(0, 0, 0, 0.26);
+    --sombra-lg: 0 4px 12px rgba(0, 0, 0, 0.36), 0 12px 32px rgba(0, 0, 0, 0.34);
+
+    color-scheme: dark;
+}
+
+/* -----------------------------------------------------------------------------
+   3. TIPOGRAFIA
+   Sete degraus, nao mais. Cada um tem um trabalho declarado ao lado; quando
+   nenhum serve, a resposta certa e reusar o mais proximo, nao criar o oitavo.
+   -------------------------------------------------------------------------- */
+:root {
+    --fonte-ui: 'Inter', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+    --fonte-mono: 'Cascadia Mono', 'Consolas', 'SF Mono', ui-monospace, monospace;
+
+    --texto-xs:   0.6875rem; /* 11px — legenda de badge, atalho de teclado   */
+    --texto-sm:   0.75rem;   /* 12px — rotulo de campo, cabecalho de tabela  */
+    --texto-md:   0.8125rem; /* 13px — apoio, celula secundaria             */
+    --texto-base: 0.875rem;  /* 14px — corpo, celula de tabela, input       */
+    --texto-lg:   1rem;      /* 16px — titulo de card                       */
+    --texto-xl:   1.125rem;  /* 18px — titulo de pagina                     */
+    --texto-2xl:  1.5rem;    /* 24px — valor de indicador                   */
+
+    --peso-normal: 400;
+    --peso-medio:  500;
+    --peso-semi:   600;
+    --peso-forte:  700;
+
+    --altura-apertada: 1.25;
+    --altura-padrao:   1.5;
+    --altura-solta:    1.65;
+
+    --espacamento-titulo: -0.011em; /* titulos respiram melhor levemente juntos */
+    --espacamento-caixa-alta: 0.06em;
+}
+
+/* -----------------------------------------------------------------------------
+   4. ESPACAMENTO
+   Escala de 4px. O layout inteiro sai daqui -- e o que impede a "margem de
+   17px" que aparece quando cada tela chuta o proprio valor.
+   -------------------------------------------------------------------------- */
+:root {
+    --esp-1:  0.25rem;  /*  4px */
+    --esp-2:  0.5rem;   /*  8px */
+    --esp-3:  0.75rem;  /* 12px */
+    --esp-4:  1rem;     /* 16px */
+    --esp-5:  1.25rem;  /* 20px */
+    --esp-6:  1.5rem;   /* 24px */
+    --esp-8:  2rem;     /* 32px */
+    --esp-10: 2.5rem;   /* 40px */
+    --esp-12: 3rem;     /* 48px */
+
+    /* Medidas estruturais de tela. */
+    --sidebar-largura:           248px;
+    --sidebar-largura-recolhida:  68px;
+    --largura-maxima-conteudo:  1560px;
+    --altura-header:              64px;
+    --altura-controle:            38px; /* botao e input compartilham a altura */
+    --altura-controle-sm:         30px;
+    --altura-linha-tabela:        44px;
+}
+
+/* -----------------------------------------------------------------------------
+   5. RAIOS
+   Discretos. Card com 24px de raio, como no antecessor, vira balao e rouba
+   area util nos cantos das tabelas.
+   -------------------------------------------------------------------------- */
+:root {
+    --raio-sm:   4px;   /* badge, checkbox, kbd            */
+    --raio-md:   6px;   /* botao, input, celula            */
+    --raio-lg:   10px;  /* card, modal, dropdown           */
+    --raio-xl:   14px;  /* painel grande, container do mapa*/
+    --raio-pill: 999px;
+}
+
+/* -----------------------------------------------------------------------------
+   6. MOVIMENTO
+   Curto e funcional. A animacao existe para explicar uma mudanca de estado,
+   nunca para enfeitar: num ERP ela e paga em milissegundos de espera a cada
+   clique, dezenas de vezes por hora.
+   -------------------------------------------------------------------------- */
+:root {
+    --tempo-rapido: 120ms;
+    --tempo-padrao: 180ms;
+    --tempo-lento:  260ms;
+    --curva: cubic-bezier(0.4, 0, 0.2, 1);
+    --curva-saida: cubic-bezier(0, 0, 0.2, 1);
+}
+
+/* -----------------------------------------------------------------------------
+   7. CAMADAS
+   Centralizadas para acabar com o leilao de z-index (o arquivo antigo tinha
+   9997, 9998, 9999, 10000 e 10001 espalhados).
+   -------------------------------------------------------------------------- */
+:root {
+    --z-dropdown:  200;  /* filtro                          */
+    --z-painel:    300;  /* notificacoes                    */
+    --z-modal:     400;  /* <dialog>                        */
+    --z-aviso:     500;  /* toast, indicador de sincronismo */
+}

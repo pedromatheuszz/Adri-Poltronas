@@ -29,6 +29,7 @@ dist/
 venv/
 env/
 ENV/
+.uv-cache/
 .python-version
 
 # --- Editores / IDEs ---
@@ -54,20 +55,32 @@ Thumbs.db
 *.pfx
 *.p12
 
-# --- PyWebview / Webview cache ---
-.webview/
-webview_cache/
+# --- Electron / Node ---
+node_modules/
+# Saida do `tsc` (o fonte versionado fica em electron/).
+dist-electron/
+# Instalador gerado pelo electron-builder.
+dist-instalador/
 
-# --- Builds do Inno Setup ---
-Output/
-Setup-*.exe
-*.iss.bak
+# --- Qt / CMake ---
+# Saida do CMake (o fonte versionado fica em qt-app/src).
+qt-app/build/
+
+# --- .NET / Avalonia ---
+# Saida de compilacao; o fonte versionado fica em dotnet/src e dotnet/tests.
+[Bb]in/
+[Oo]bj/
+*.user
+.vs/
+# Resultados de teste e cobertura do dotnet test.
+[Tt]est[Rr]esults/
 
 # --- Cobertura de testes ---
 .coverage
 .coverage.*
 htmlcov/
 .pytest_cache/
+.ruff_cache/
 .tox/
 
 # --- Documentação gerada ---
@@ -75,7 +88,6 @@ docs/_build/
 site/
 
 # --- Frontend: se houver build de assets ---
-node_modules/
 *.min.js
 *.min.css
 .DS_Store
@@ -89,3 +101,6 @@ uploads/
 _nul
 nul
 output.txt
+
+# Backups locais: contem o banco com dados reais de clientes.
+backup/

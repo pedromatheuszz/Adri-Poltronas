@@ -33,7 +33,7 @@ Objetos e métricas devolvem o objeto direto:
 Operações de escrita devolvem uma confirmação curta:
 
 ```json
-{ "mensagem": "Salvo" }
+{ "mensagem": "Cliente cadastrado!" }
 ```
 
 ### Erro

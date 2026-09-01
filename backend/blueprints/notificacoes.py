@@ -21,9 +21,12 @@ def api_obter_notificacoes():
             "total": len(notifs),
             "nao_lidas": nao_lidas,
         })
-    except Exception as e:
+    except Exception:
         log.exception("Erro ao obter notificacoes")
-        return jsonify({"notificacoes": [], "total": 0, "nao_lidas": 0, "erro": str(e)}), 500
+        return jsonify({
+            "notificacoes": [], "total": 0, "nao_lidas": 0,
+            "erro": "Nao foi possivel carregar as notificacoes.",
+        }), 500
 
 
 @notificacoes_bp.route('/notificacoes/lidas', methods=['POST'])

@@ -1,375 +1,736 @@
-﻿<!DOCTYPE html>
-<html lang="pt-BR" data-theme="dark">
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Adri Poltronas</title>
     <meta name="description" content="Sistema de gestao de clientes - Adri Poltronas">
-    <meta name="theme-color" content="#0f172a">
+    <meta name="theme-color" content="#F2EEE7">
+    <meta name="color-scheme" content="light dark">
     <link rel="icon" type="image/png" href="/Design-sem-nome-8-1024x1024.png">
     <link rel="manifest" href="/manifest.json">
-    <link rel="stylesheet" href="/css/style.css?v=v62">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+    <!-- A fonte vem antes das folhas do app para o texto nao repintar depois
+         do primeiro paint. `preconnect` abre a conexao com o host dos arquivos
+         .woff2 enquanto o CSS ainda esta sendo baixado. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet"
+          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+
+    <!-- Ordem obrigatoria: tokens.css declara as variaveis que style.css usa. -->
+    <link rel="stylesheet" href="/css/tokens.css?v=v75">
+    <link rel="stylesheet" href="/css/style.css?v=v75">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+          integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H"
+          crossorigin="anonymous" referrerpolicy="no-referrer" />
 </head>
 <body>
-    <div class="container">
-        <header class="main-header">
-            <div class="header-left"><h1>Adri Poltronas</h1></div>
-            <div class="header-right">
-                <div class="online-status online" id="onlineStatus" title="Conexao ativa">
-                    <span class="status-dot"></span> Online
-                </div>
-                <button class="btn-icon" onclick="abrirNotificacoes()" title="Notificacoes" id="btnNotificacoes">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-                    <span class="notif-badge" id="notifBadge" style="display:none;">0</span>
+    <div class="app-shell" id="appShell">
+
+        <!-- ================================================================
+             BARRA LATERAL
+             Substitui o cabecalho + a fila de abas horizontais. Num ERP a
+             navegacao e usada dezenas de vezes por sessao: em coluna ela cabe
+             sem competir com o conteudo e aceita novos modulos sem espremer os
+             existentes. Recolhida vira trilho de icones -- some o rotulo, nao
+             o alvo de clique, para a memoria muscular continuar valendo.
+             ================================================================ -->
+        <aside class="sidebar" id="sidebar" aria-label="Navegacao principal">
+
+            <div class="sidebar-head">
+                <img src="/Design-sem-nome-8-1024x1024.png" alt="" class="sidebar-logo" width="34" height="34">
+                <!-- Marca, nao titulo da pagina: o <h1> agora vive no cabecalho
+                     e nomeia o modulo aberto, que e o que muda. -->
+                <p class="sidebar-titulo">Adri Poltronas</p>
+                <button type="button" class="sidebar-toggle" id="btnSidebarToggle"
+                        onclick="alternarSidebar()" title="Recolher menu"
+                        aria-controls="sidebar" aria-expanded="true">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
+                    <span class="visually-hidden">Recolher menu</span>
                 </button>
-                <button class="btn-icon theme-toggle" onclick="toggleTheme()" title="Alternar tema" id="btnThemeToggle">
-                    <svg id="iconSun" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-                    <svg id="iconMoon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+            </div>
+
+            <!-- Padrao ARIA de abas em coluna: `tablist` / `tab` / `tabpanel`,
+                 agora com aria-orientation vertical para o leitor de tela
+                 anunciar setas Cima/Baixo em vez de Esquerda/Direita.
+
+                 Os rotulos de grupo sao `presentation`: dentro de um tablist,
+                 qualquer no que nao seja `tab` confunde a contagem que o leitor
+                 anuncia ("aba 3 de 7" quando ha 5 abas). -->
+            <nav class="sidebar-nav" id="navTabs" role="tablist"
+                 aria-orientation="vertical" aria-label="Secoes do sistema">
+
+            <p class="nav-grupo" role="presentation">Visao geral</p>
+            <button type="button" class="nav-tab active" role="tab" id="tab-dashboard"
+                    aria-selected="true" aria-controls="aba-dashboard" title="Dashboard"
+                    onclick="trocarAba('dashboard')">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+                <span class="nav-tab-rotulo">Dashboard</span>
+            </button>
+            <p class="nav-grupo" role="presentation">Comercial</p>
+            <button type="button" class="nav-tab" role="tab" id="tab-clientes" tabindex="-1"
+                    aria-selected="false" aria-controls="aba-clientes" title="Clientes"
+                    onclick="trocarAba('clientes')">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                <span class="nav-tab-rotulo">Clientes</span>
+            </button>
+            <button type="button" class="nav-tab" role="tab" id="tab-mapa" tabindex="-1"
+                    aria-selected="false" aria-controls="aba-mapa" title="Mapa"
+                    onclick="trocarAba('mapa')">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                <span class="nav-tab-rotulo">Mapa</span>
+            </button>
+            <p class="nav-grupo" role="presentation">Financeiro</p>
+            <button type="button" class="nav-tab" role="tab" id="tab-pagamentos" tabindex="-1"
+                    aria-selected="false" aria-controls="aba-pagamentos" title="Pagamentos"
+                    onclick="trocarAba('pagamentos')">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+                <span class="nav-tab-rotulo">Pagamentos</span>
+            </button>
+            <p class="nav-grupo" role="presentation">Analise</p>
+            <button type="button" class="nav-tab" role="tab" id="tab-relatorios" tabindex="-1"
+                    aria-selected="false" aria-controls="aba-relatorios" title="Relatorios"
+                    onclick="trocarAba('relatorios')">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                <span class="nav-tab-rotulo">Relatorios</span>
+            </button>
+            </nav>
+        </aside>
+
+        <!-- ================================================================
+             AREA DE TRABALHO
+             Coluna de altura fixa: cabecalho e rodape parados, so o miolo
+             rola. Antes a janela inteira rolava e o cabecalho saia de vista
+             assim que a tabela passava de uma tela.
+             ================================================================ -->
+        <div class="area-trabalho">
+
+        <header class="topbar">
+            <div class="topbar-texto">
+                <!-- Titulo e descricao sao trocados por trocarAba(): o
+                     cabecalho responde a pergunta "onde eu estou". -->
+                <h1 class="topbar-titulo" id="tituloPagina">Dashboard</h1>
+                <p class="topbar-descricao" id="descricaoPagina">Visao geral do cadastro e das financas</p>
+            </div>
+
+            <div class="topbar-acoes">
+                <!-- `output` e o elemento HTML5 para valor calculado pelo
+                     script; `aria-live` faz o leitor anunciar a queda da rede
+                     sem o operador precisar olhar para o canto da tela. -->
+                <output class="online-status online" id="onlineStatus"
+                        title="Conexao ativa" aria-live="polite">
+                    <span class="status-dot" aria-hidden="true"></span>
+                    <span class="online-rotulo">Online</span>
+                </output>
+
+                <button type="button" class="btn-icon" onclick="abrirNotificacoes()"
+                        title="Notificacoes" id="btnNotificacoes"
+                        aria-haspopup="dialog" aria-controls="notificacoesPanel"
+                        aria-expanded="false">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                    <span class="notif-badge" id="notifBadge" hidden>0</span>
+                    <span class="visually-hidden">Notificacoes</span>
                 </button>
-                <img src="/Design-sem-nome-8-1024x1024.png" alt="Logo Adri Poltronas" class="header-logo">
+
+                <button type="button" class="btn-icon theme-toggle" onclick="toggleTheme()"
+                        title="Alternar tema" id="btnThemeToggle" aria-pressed="false">
+                    <svg id="iconSun" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+                    <svg id="iconMoon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" hidden aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                    <span class="visually-hidden">Alternar tema</span>
+                </button>
             </div>
         </header>
 
-        <nav class="nav-tabs" id="navTabs">
-            <button class="nav-tab active" onclick="trocarAba('dashboard')">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
-                Dashboard
-            </button>
-            <button class="nav-tab" onclick="trocarAba('clientes')">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-                Clientes
-            </button>
-            <button class="nav-tab" onclick="trocarAba('mapa')">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>
-                Mapa
-            </button>
-            <button class="nav-tab" onclick="trocarAba('pagamentos')">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
-                Pagamentos
-            </button>
-            <button class="nav-tab" onclick="trocarAba('relatorios')">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-                Relatorios
-            </button>
-        </nav>
+        <div class="container">
 
         <main>
-            <!-- DASHBOARD -->
-            <section id="aba-dashboard" class="tab-content active">
+            <!-- ============================================================
+                 DASHBOARD
+                 Cada cartao virou `article`: e conteudo independente, que faz
+                 sentido lido fora do contexto da grade.
+                 ============================================================ -->
+            <section id="aba-dashboard" class="tab-content active"
+                     role="tabpanel" aria-labelledby="tab-dashboard" tabindex="0">
+
+                <h2 class="secao-titulo">Indicadores de cadastro</h2>
                 <div class="dashboard-grid">
-                    <div class="card card-metrica"><div class="metrica-icon" style="background:rgba(59,130,246,0.15);color:#3b82f6;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div><div class="metrica-info"><span class="metrica-valor" id="metricTotalClientes">{{ TOTAL }}</span><span class="metrica-label">Total Clientes</span></div></div>
-                    <div class="card card-metrica"><div class="metrica-icon" style="background:rgba(16,185,129,0.15);color:#10b981;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg></div><div class="metrica-info"><span class="metrica-valor" id="metricEntregas">{{ ENTREGAS }}</span><span class="metrica-label">Entregas</span></div></div>
-                    <div class="card card-metrica"><div class="metrica-icon" style="background:rgba(245,158,11,0.15);color:#f59e0b;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/></svg></div><div class="metrica-info"><span class="metrica-valor" id="metricRetiradas">{{ RETIRADAS }}</span><span class="metrica-label">Retiradas</span></div></div>
-                    <div class="card card-metrica"><div class="metrica-icon" style="background:rgba(139,92,246,0.15);color:#8b5cf6;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/></svg></div><div class="metrica-info"><span class="metrica-valor" id="metricCadastros30d">{{ NOVOS }}%</span><span class="metrica-label">Novos (30 dias)</span></div></div>
+                    <article class="card card-metrica">
+                        <div class="metrica-icon metrica-icon-primario" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div>
+                        <div class="metrica-info">
+                            <output class="metrica-valor" id="metricTotalClientes">0</output>
+                            <span class="metrica-label">Total Clientes</span>
+                        </div>
+                    </article>
+                    <article class="card card-metrica">
+                        <div class="metrica-icon metrica-icon-sucesso" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg></div>
+                        <div class="metrica-info">
+                            <output class="metrica-valor" id="metricEntregas">0</output>
+                            <span class="metrica-label">Entregas</span>
+                        </div>
+                    </article>
+                    <article class="card card-metrica">
+                        <div class="metrica-icon metrica-icon-alerta" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/></svg></div>
+                        <div class="metrica-info">
+                            <output class="metrica-valor" id="metricRetiradas">0</output>
+                            <span class="metrica-label">Retiradas</span>
+                        </div>
+                    </article>
+                    <article class="card card-metrica">
+                        <div class="metrica-icon metrica-icon-info" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/></svg></div>
+                        <div class="metrica-info">
+                            <output class="metrica-valor" id="metricCadastros30d">0</output>
+                            <span class="metrica-label">Novos (30 dias)</span>
+                        </div>
+                    </article>
                 </div>
 
-                <!-- Financeiro -->
+                <h2 class="secao-titulo">Indicadores financeiros</h2>
                 <div class="dashboard-grid">
-                    <div class="card card-metrica">
-                        <div class="metrica-icon" style="background:rgba(16,185,129,0.15);color:#10b981;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div>
+                    <article class="card card-metrica">
+                        <div class="metrica-icon metrica-icon-sucesso" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div>
                         <div class="metrica-info">
-                            <span class="metrica-valor" id="metricFaturamentoMes">R$ 0,00</span>
+                            <output class="metrica-valor" id="metricFaturamentoMes">R$ 0,00</output>
                             <span class="metrica-label">Faturamento do mes <span class="metrica-variacao" id="metricVariacao"></span></span>
-                            <span class="metrica-comparativo" id="metricMesAnterior"></span>
+                            <small class="metrica-comparativo" id="metricMesAnterior"></small>
                         </div>
-                    </div>
-                    <div class="card card-metrica">
-                        <div class="metrica-icon" style="background:rgba(59,130,246,0.15);color:#3b82f6;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
+                    </article>
+                    <article class="card card-metrica">
+                        <div class="metrica-icon metrica-icon-info" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
                         <div class="metrica-info">
-                            <span class="metrica-valor" id="metricAReceber">R$ 0,00</span>
+                            <output class="metrica-valor" id="metricAReceber">R$ 0,00</output>
                             <span class="metrica-label">A receber</span>
                         </div>
-                    </div>
-                    <div class="card card-metrica">
-                        <div class="metrica-icon" style="background:rgba(239,68,68,0.15);color:#ef4444;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></div>
+                    </article>
+                    <article class="card card-metrica">
+                        <div class="metrica-icon metrica-icon-perigo" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></div>
                         <div class="metrica-info">
-                            <span class="metrica-valor" id="metricEmAtraso">R$ 0,00</span>
+                            <output class="metrica-valor" id="metricEmAtraso">R$ 0,00</output>
                             <span class="metrica-label">Em atraso</span>
-                            <span class="metrica-comparativo" id="metricQtdAtraso"></span>
+                            <small class="metrica-comparativo" id="metricQtdAtraso"></small>
                         </div>
-                    </div>
-                    <div class="card card-metrica">
-                        <div class="metrica-icon" style="background:rgba(245,158,11,0.15);color:#f59e0b;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg></div>
+                    </article>
+                    <article class="card card-metrica">
+                        <div class="metrica-icon metrica-icon-primario" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></div>
                         <div class="metrica-info">
-                            <span class="metrica-valor" id="metricTicketMedio">R$ 0,00</span>
+                            <output class="metrica-valor" id="metricTicketMedio">R$ 0,00</output>
                             <span class="metrica-label">Ticket medio do mes</span>
-                            <span class="metrica-comparativo" id="metricQtdRecebimentos"></span>
+                            <small class="metrica-comparativo" id="metricQtdRecebimentos"></small>
                         </div>
-                    </div>
+                    </article>
                 </div>
 
-                <!-- Graficos -->
-                <div class="card grafico-card grafico-largo">
-                    <h3 class="grafico-titulo">Receita por mes</h3>
+                <!-- `figure`/`figcaption`: o canvas e a ilustracao, o titulo e
+                     a legenda dela. Antes era um `h3` solto acima de uma div. -->
+                <figure class="card grafico-card grafico-largo">
+                    <figcaption class="grafico-titulo">Receita por mes</figcaption>
                     <div class="grafico-area grafico-area-alta"><canvas id="chartReceitaMensal"></canvas></div>
-                </div>
+                </figure>
 
                 <div class="graficos-grid">
-                    <div class="card grafico-card">
-                        <h3 class="grafico-titulo">Entregas vs Retiradas</h3>
+                    <figure class="card grafico-card">
+                        <figcaption class="grafico-titulo">Entregas vs Retiradas</figcaption>
                         <div class="grafico-area"><canvas id="chartEntregaRetirada"></canvas></div>
-                    </div>
-                    <div class="card grafico-card">
-                        <h3 class="grafico-titulo">Clientes por cidade</h3>
+                    </figure>
+                    <figure class="card grafico-card">
+                        <figcaption class="grafico-titulo">Clientes por cidade</figcaption>
                         <div class="grafico-area"><canvas id="chartCidades"></canvas></div>
-                    </div>
-                    <div class="card grafico-card">
-                        <h3 class="grafico-titulo">Novos clientes (30 dias)</h3>
+                    </figure>
+                    <figure class="card grafico-card">
+                        <figcaption class="grafico-titulo">Novos clientes (30 dias)</figcaption>
                         <div class="grafico-area"><canvas id="chartTimeline"></canvas></div>
-                    </div>
-                    <div class="card grafico-card">
+                    </figure>
+                    <article class="card grafico-card">
                         <h3 class="grafico-titulo">Ultimos clientes</h3>
                         <div id="ultimosClientes" class="ultimos-clientes"></div>
-                    </div>
+                    </article>
                 </div>
             </section>
 
-            <!-- CLIENTES -->
-            <section id="aba-clientes" class="tab-content">
+            <!-- ============================================================
+                 CLIENTES
+                 ============================================================ -->
+            <section id="aba-clientes" class="tab-content" hidden
+                     role="tabpanel" aria-labelledby="tab-clientes" tabindex="0">
+
                 <section class="card">
-                    <h2 id="formTitle" style="margin-bottom:1.5rem;font-size:1.2rem;">
-                        <svg id="editIcon" class="title-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                    <h2 id="formTitle" class="card-title card-title-icone">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
+                        <!-- Trocado para o lapis quando o formulario entra em edicao. -->
+                        <svg id="editIcon" class="title-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                         <span id="formTitleText">Cadastro de Cliente</span>
                     </h2>
+
                     <form id="clienteForm">
                         <input type="hidden" id="clienteId">
-                        <div class="form-grid">
-                            <div class="input-group"><label>Nome Completo</label><input type="text" id="nome" required placeholder="Ex: Joao da Silva"></div>
-                            <div class="input-group"><label>CEP <button type="button" class="btn-ia" onclick="sugerirBairro()" title="Sugestao IA">&#10024; IA</button></label><input type="text" id="cep" required placeholder="00000-000" maxlength="9"></div>
-                            <div class="input-group"><label>Rua e numero</label><input type="text" id="rua" required placeholder="Ex: Rua das Flores, 123"></div>
-                            <div class="input-group"><label>Bairro</label><input type="text" id="bairro" required placeholder="Bairro"></div>
-                            <div class="input-group"><label>Cidade</label><input type="text" id="cidade" required placeholder="Cidade"></div>
-                            <div class="input-group"><label>Entrega / Retirada</label><select id="entregaRetirada" required><option value="Entrega">Entrega</option><option value="Retirada">Retirada</option></select></div>
+
+                        <!-- `fieldset`/`legend` agrupam os campos; `label for`
+                             substitui o label que envolvia o campo, para o
+                             clique no rotulo focar o input certo. -->
+                        <fieldset class="form-grid">
+                            <legend class="visually-hidden">Dados do cliente</legend>
+
+                            <div class="input-group">
+                                <label for="nome">Nome Completo</label>
+                                <input type="text" id="nome" name="nome" required
+                                       autocomplete="name" enterkeyhint="next"
+                                       placeholder="Ex: Joao da Silva">
+                            </div>
+
+                            <div class="input-group">
+                                <label for="cep">CEP
+                                    <button type="button" class="btn-ia" onclick="sugerirBairro()"
+                                            title="Consulta o CEP no ViaCEP (servico externo); se ele falhar, usa a IA para sugerir o bairro">
+                                        &#10024; IA
+                                    </button>
+                                </label>
+                                <input type="text" id="cep" name="cep" required
+                                       inputmode="numeric" autocomplete="postal-code"
+                                       maxlength="9" placeholder="00000-000">
+                            </div>
+
+                            <div class="input-group input-group-largo">
+                                <label for="rua">Rua e numero</label>
+                                <input type="text" id="rua" name="rua" required
+                                       autocomplete="address-line1"
+                                       placeholder="Ex: Rua das Flores, 123">
+                            </div>
+
+                            <div class="input-group">
+                                <label for="bairro">Bairro</label>
+                                <input type="text" id="bairro" name="bairro" required
+                                       autocomplete="address-level3" placeholder="Bairro">
+                            </div>
+
+                            <div class="input-group">
+                                <label for="cidade">Cidade</label>
+                                <input type="text" id="cidade" name="cidade" required
+                                       autocomplete="address-level2" placeholder="Cidade">
+                            </div>
+
+                            <div class="input-group">
+                                <label for="entregaRetirada">Entrega / Retirada</label>
+                                <select id="entregaRetirada" name="entregaRetirada" required>
+                                    <option value="Entrega">Entrega</option>
+                                    <option value="Retirada">Retirada</option>
+                                </select>
+                            </div>
+                        </fieldset>
+
+                        <div class="input-group input-group-obs">
+                            <label for="observacoes">Observacoes</label>
+                            <textarea id="observacoes" name="observacoes" rows="3" maxlength="1000"
+                                      placeholder="Notas sobre o cliente, preferencias, horarios especiais..."></textarea>
+                            <!-- `output` ligado ao campo que ele mede. -->
+                            <output class="obs-counter" id="obsCount" for="observacoes">0/1000</output>
                         </div>
-                        <div class="input-group input-group-obs"><label>Observacoes</label><textarea id="observacoes" rows="3" placeholder="Notas sobre o cliente, preferencias, horarios especiais..." maxlength="1000"></textarea><span id="obsCount" class="obs-counter">0/1000</span></div>
-                        <div class="form-actions"><button type="submit" class="btn btn-primary" id="btnSalvar">Salvar Cliente</button><button type="button" class="btn btn-cancelar" id="btnCancelar">Cancelar Edicao</button></div>
+
+                        <div class="form-actions">
+                            <button type="submit" class="btn btn-primary" id="btnSalvar">Salvar Cliente</button>
+                            <button type="button" class="btn btn-cancelar" id="btnCancelar">Cancelar</button>
+                        </div>
                     </form>
                 </section>
+
                 <section class="card">
-                    <div style="display:flex;gap:1rem;align-items:center;justify-content:space-between;margin-bottom:1.5rem;flex-wrap:wrap;">
-                        <div class="input-group search-bar" style="flex:1;"><input type="text" id="inputPesquisa" placeholder="Pesquisar por nome ou cidade..." autocomplete="off"></div>
-                        <div style="position:relative;">
-                            <button type="button" class="btn-select-mode" id="btnFiltro" onclick="toggleFiltro()">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                    <h2 class="secao-titulo">Clientes cadastrados</h2>
+
+                    <div class="lista-toolbar">
+                        <!-- `search` e o elemento HTML5 da regiao de busca. -->
+                        <search class="input-group search-bar">
+                            <label class="visually-hidden" for="inputPesquisa">Pesquisar clientes</label>
+                            <input type="search" id="inputPesquisa" autocomplete="off"
+                                   enterkeyhint="search"
+                                   placeholder="Pesquisar por nome ou cidade...">
+                        </search>
+
+                        <div class="filtro-wrapper">
+                            <button type="button" class="btn-select-mode" id="btnFiltro"
+                                    onclick="toggleFiltro()" aria-expanded="false"
+                                    aria-controls="filtroDropdown">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
                                 <span id="txtBtnFiltro">Filtrar</span>
-                                <span id="badgeFiltroCount" class="filtro-badge" style="display:none;">0</span>
+                                <span id="badgeFiltroCount" class="filtro-badge" hidden>0</span>
                             </button>
+
                             <div class="filtro-dropdown" id="filtroDropdown">
-                                <div class="filtro-header"><span>Filtros</span><button type="button" class="filtro-limpar" onclick="limparFiltros()">Limpar</button></div>
-                                <div class="filtro-section"><div class="filtro-label">Tipo</div>
-                                    <label class="filtro-option"><input type="checkbox" name="filtroTipo" value="Entrega" checked><span class="badge-entrega" style="font-size:0.75rem;">Entrega</span></label>
-                                    <label class="filtro-option"><input type="checkbox" name="filtroTipo" value="Retirada" checked><span class="badge-retirada" style="font-size:0.75rem;">Retirada</span></label>
+                                <div class="filtro-header">
+                                    <span>Filtros</span>
+                                    <button type="button" class="filtro-limpar" onclick="limparFiltros()">Limpar</button>
                                 </div>
-                                <div class="filtro-section"><div class="filtro-label">Cidade</div><div id="filtroCidadesContainer"></div></div>
-                                <button type="button" class="btn btn-primary" style="width:100%;margin-top:0.5rem;font-size:0.85rem;padding:0.5rem;" onclick="aplicarFiltros()">Aplicar Filtros</button>
+
+                                <fieldset class="filtro-section">
+                                    <legend class="filtro-label">Tipo</legend>
+                                    <label class="filtro-option">
+                                        <input type="checkbox" name="filtroTipo" value="Entrega" checked>
+                                        <span class="badge-entrega">Entrega</span>
+                                    </label>
+                                    <label class="filtro-option">
+                                        <input type="checkbox" name="filtroTipo" value="Retirada" checked>
+                                        <span class="badge-retirada">Retirada</span>
+                                    </label>
+                                </fieldset>
+
+                                <fieldset class="filtro-section">
+                                    <legend class="filtro-label">Cidade</legend>
+                                    <div id="filtroCidadesContainer"></div>
+                                </fieldset>
+
+                                <button type="button" class="btn btn-primary btn-bloco"
+                                        onclick="aplicarFiltros()">Aplicar Filtros</button>
                             </div>
                         </div>
-                        <button type="button" class="btn-select-mode" id="btnModoSelecao" onclick="toggleModoSelecao()">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+
+                        <button type="button" class="btn-select-mode" id="btnModoSelecao"
+                                onclick="toggleModoSelecao()" aria-pressed="false">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
                             <span id="txtBtnSelecao">Selecionar Clientes</span>
                         </button>
                     </div>
-                    <div style="overflow-x:hidden;padding-bottom:10px;">
-                        <table><thead><tr><th class="col-checkbox"><input type="checkbox" id="selectAll"></th><th class="col-nome">Nome</th><th class="col-cidade">Cidade</th><th class="col-bairro">Bairro</th><th class="col-tipo">Entrega/Retirada</th><th class="col-acoes" style="text-align:right;">Acoes</th></tr></thead><tbody id="tabelaClientes"></tbody></table>
+
+                    <div class="tabela-rolagem">
+                        <table>
+                            <caption class="visually-hidden">Clientes cadastrados</caption>
+                            <thead>
+                                <tr>
+                                    <th scope="col" class="col-checkbox">
+                                        <label class="visually-hidden" for="selectAll">Selecionar todos</label>
+                                        <input type="checkbox" id="selectAll">
+                                    </th>
+                                    <th scope="col" class="col-nome">Nome</th>
+                                    <th scope="col" class="col-cidade">Cidade</th>
+                                    <th scope="col" class="col-bairro">Bairro</th>
+                                    <th scope="col" class="col-tipo">Entrega/Retirada</th>
+                                    <th scope="col" class="col-acoes">Acoes</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tabelaClientes"></tbody>
+                        </table>
                     </div>
-                    <div class="actions-excel" style="display:flex;justify-content:flex-end;gap:0.75rem;margin-top:1rem;flex-wrap:wrap;">
-                        <button type="button" class="btn btn-microsoft" id="btnConectarMicrosoft" onclick="conectarMicrosoft()"><img src="/img/excel.png" alt="Microsoft" style="width:18px;height:18px;object-fit:contain;"><span id="txtBtnConectar">Conectar Microsoft</span></button>
-                        <button type="button" class="btn btn-excel" id="btnEnviarExcel" onclick="enviarParaExcel()" disabled><img src="/img/excel.png" alt="Excel" style="width:18px;height:18px;object-fit:contain;"> Enviar Excel</button>
-                    </div>
+
+                    <footer class="actions-excel">
+                        <button type="button" class="btn btn-microsoft" id="btnConectarMicrosoft" onclick="conectarMicrosoft()">
+                            <img src="/img/excel.png" alt="" width="18" height="18">
+                            <span id="txtBtnConectar">Conectar Microsoft</span>
+                        </button>
+                        <button type="button" class="btn btn-excel" id="btnEnviarExcel" onclick="enviarParaExcel()" disabled>
+                            <img src="/img/excel.png" alt="" width="18" height="18">
+                            Enviar para Excel
+                        </button>
+                    </footer>
                 </section>
             </section>
 
-            <!-- MAPA -->
-            <section id="aba-mapa" class="tab-content">
-                <div class="card" style="padding:1rem;">
-                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
-                        <h2 style="margin:0;font-size:1.1rem;display:flex;align-items:center;gap:0.5rem;">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-                            Mapa de Clientes
-                        </h2>
+            <!-- ============================================================
+                 MAPA
+                 ============================================================ -->
+            <section id="aba-mapa" class="tab-content" hidden
+                     role="tabpanel" aria-labelledby="tab-mapa" tabindex="0">
+                <section class="card card-mapa">
+                    <h2 class="card-title card-title-icone">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                        Mapa de Clientes
+                    </h2>
 
-                    </div>
-                    <div id="mapaClientes" class="mapa-container"></div>
-                </div>
+                    <p class="aviso-dados-externos">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                        Para posicionar os marcadores, o endereco de cada cliente e
+                        consultado no ViaCEP e no Nominatim (OpenStreetMap), servicos
+                        externos. Os resultados ficam guardados neste computador.
+                    </p>
+
+                    <div id="mapaClientes" class="mapa-container" role="application"
+                         aria-label="Mapa com a localizacao dos clientes"></div>
+                </section>
             </section>
 
-            <!-- PAGAMENTOS -->
-            <section id="aba-pagamentos" class="tab-content">
-                <div class="card">
-                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.5rem;flex-wrap:wrap;gap:1rem;">
-                        <h2 style="margin:0;font-size:1.2rem;display:flex;align-items:center;gap:0.5rem;">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+            <!-- ============================================================
+                 PAGAMENTOS
+                 ============================================================ -->
+            <section id="aba-pagamentos" class="tab-content" hidden
+                     role="tabpanel" aria-labelledby="tab-pagamentos" tabindex="0">
+                <section class="card">
+                    <div class="secao-topo">
+                        <h2 class="card-title card-title-icone">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
                             Pagamentos
                         </h2>
-                        <button class="btn" onclick="abrirModalNovoRecebimento()" style="background:linear-gradient(135deg,#10b981,#059669);box-shadow:0 4px 15px rgba(16,185,129,0.3);display:flex;align-items:center;gap:0.5rem;">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                        <button type="button" class="btn btn-primary" onclick="abrirModalNovoRecebimento()">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                             Novo Recebimento
                         </button>
                     </div>
-                    <div style="display:flex;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
-                        <div class="input-group" style="flex:1;"><input type="text" id="pagFiltroCliente" placeholder="Filtrar por cliente..."></div>
-                        <select id="pagFiltroStatus" style="padding:0.75rem;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-secondary);color:var(--text-primary);">
-                            <option value="">Todos os status</option>
-                            <option value="Pendente">Pendente</option>
-                            <option value="Recebido">Recebido</option>
-                            <option value="Atrasado">Atrasado</option>
-                            <option value="Cancelado">Cancelado</option>
-                        </select>
-                        <button class="btn btn-primary" onclick="carregarPagamentos()">Carregar</button>
+
+                    <div class="lista-toolbar">
+                        <search class="input-group search-bar">
+                            <label class="visually-hidden" for="pagFiltroCliente">Filtrar por cliente</label>
+                            <input type="search" id="pagFiltroCliente" placeholder="Filtrar por cliente...">
+                        </search>
+                        <div class="input-group">
+                            <label class="visually-hidden" for="pagFiltroStatus">Filtrar por status</label>
+                            <select id="pagFiltroStatus">
+                                <option value="">Todos os status</option>
+                                <option value="Pendente">Pendente</option>
+                                <option value="Recebido">Recebido</option>
+                                <option value="Atrasado">Atrasado</option>
+                                <option value="Cancelado">Cancelado</option>
+                            </select>
+                        </div>
+                        <button type="button" class="btn btn-primary" onclick="carregarPagamentos()">Carregar</button>
                     </div>
-                    <div style="overflow-x:auto;padding-bottom:10px;">
+
+                    <div class="tabela-rolagem">
                         <table>
+                            <caption class="visually-hidden">Lancamentos financeiros</caption>
                             <thead>
                                 <tr>
-                                    <th>Cliente</th>
-                                    <th>Valor</th>
-                                    <th>Descricao</th>
-                                    <th>Status</th>
-                                    <th>Tipo</th>
-                                    <th>Data</th>
-                                    <th style="text-align:right;">Ações</th>
+                                    <th scope="col">Cliente</th>
+                                    <th scope="col">Valor</th>
+                                    <th scope="col">Descricao</th>
+                                    <th scope="col">Status</th>
+                                    <th scope="col">Tipo</th>
+                                    <th scope="col">Data</th>
+                                    <th scope="col" class="col-acoes">Acoes</th>
                                 </tr>
                             </thead>
                             <tbody id="tabelaPagamentos"></tbody>
                         </table>
                     </div>
-                    <div id="pagMetricas" style="margin-top:1.5rem;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem;">
-                        <div class="card card-metrica" style="padding:1rem;">
-                            <div class="metrica-icon" style="background:rgba(16,185,129,0.15);color:#10b981;">
-                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-                            </div>
+
+                    <div id="pagMetricas" class="dashboard-grid dashboard-grid-compacta">
+                        <article class="card card-metrica">
+                            <div class="metrica-icon metrica-icon-sucesso" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg></div>
                             <div class="metrica-info">
-                                <span class="metrica-valor" id="pagTotalRecebido">R$ 0,00</span>
+                                <output class="metrica-valor" id="pagTotalRecebido">R$ 0,00</output>
                                 <span class="metrica-label">Recebido</span>
                             </div>
-                        </div>
-                        <div class="card card-metrica" style="padding:1rem;">
-                            <div class="metrica-icon" style="background:rgba(59,130,246,0.15);color:#3b82f6;">
-                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                            </div>
+                        </article>
+                        <article class="card card-metrica">
+                            <div class="metrica-icon metrica-icon-info" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
                             <div class="metrica-info">
-                                <span class="metrica-valor" id="pagTotalPendente">R$ 0,00</span>
+                                <output class="metrica-valor" id="pagTotalPendente">R$ 0,00</output>
                                 <span class="metrica-label">Pendente</span>
                             </div>
-                        </div>
-                        <div class="card card-metrica" style="padding:1rem;">
-                            <div class="metrica-icon" style="background:rgba(239,68,68,0.15);color:#ef4444;">
-                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                            </div>
+                        </article>
+                        <article class="card card-metrica">
+                            <div class="metrica-icon metrica-icon-perigo" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/></svg></div>
                             <div class="metrica-info">
-                                <span class="metrica-valor" id="pagTotalAtrasado">R$ 0,00</span>
+                                <output class="metrica-valor" id="pagTotalAtrasado">R$ 0,00</output>
                                 <span class="metrica-label">Atrasado</span>
                             </div>
-                        </div>
+                        </article>
                     </div>
-                </div>
+                </section>
             </section>
 
-            <!-- RELATORIOS -->
-            <section id="aba-relatorios" class="tab-content">
-                <div class="card">
-                    <h2 style="margin:0 0 1.5rem;font-size:1.2rem;display:flex;align-items:center;gap:0.5rem;">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            <!-- ============================================================
+                 RELATORIOS
+                 ============================================================ -->
+            <section id="aba-relatorios" class="tab-content" hidden
+                     role="tabpanel" aria-labelledby="tab-relatorios" tabindex="0">
+                <section class="card">
+                    <h2 class="card-title card-title-icone">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
                         Relatorios Personalizados
                     </h2>
-                    <div class="form-grid" style="margin-bottom:1.5rem;">
-                        <div class="input-group"><label>Filtro por Tipo</label><select id="relFiltroTipo"><option value="">Todos</option><option value="Entrega">Entrega</option><option value="Retirada">Retirada</option></select></div>
-                        <div class="input-group"><label>Filtro por Cidade</label><input type="text" id="relFiltroCidade" placeholder="Ex: Joinville"></div>
-                        <div class="input-group"><label>Data Inicio</label><input type="date" id="relDataInicio"></div>
-                        <div class="input-group"><label>Data Fim</label><input type="date" id="relDataFim"></div>
-                        <div class="input-group"><label>Formato</label><select id="relFormato"><option value="csv">CSV</option><option value="xlsx">Excel (XLSX)</option></select></div>
-                    </div>
-                    <div style="display:flex;gap:0.75rem;flex-wrap:wrap;">
-                        <button class="btn btn-primary" onclick="carregarRelatorio()">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+
+                    <fieldset class="form-grid">
+                        <legend class="visually-hidden">Filtros do relatorio</legend>
+                        <div class="input-group">
+                            <label for="relFiltroTipo">Filtro por Tipo</label>
+                            <select id="relFiltroTipo">
+                                <option value="">Todos</option>
+                                <option value="Entrega">Entrega</option>
+                                <option value="Retirada">Retirada</option>
+                            </select>
+                        </div>
+                        <div class="input-group">
+                            <label for="relFiltroCidade">Filtro por Cidade</label>
+                            <input type="text" id="relFiltroCidade" placeholder="Ex: Joinville">
+                        </div>
+                        <div class="input-group">
+                            <label for="relDataInicio">Data Inicio</label>
+                            <input type="date" id="relDataInicio">
+                        </div>
+                        <div class="input-group">
+                            <label for="relDataFim">Data Fim</label>
+                            <input type="date" id="relDataFim">
+                        </div>
+                        <div class="input-group">
+                            <label for="relFormato">Formato</label>
+                            <select id="relFormato">
+                                <option value="csv">CSV</option>
+                                <option value="xlsx">Excel (XLSX)</option>
+                            </select>
+                        </div>
+                    </fieldset>
+
+                    <div class="form-actions">
+                        <button type="button" class="btn btn-primary" onclick="carregarRelatorio()">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                             Visualizar
                         </button>
-                        <button class="btn" onclick="exportarRelatorio()" style="background:linear-gradient(135deg,#059669,#10b981);">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        <button type="button" class="btn btn-secundario" onclick="exportarRelatorio()">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                             Exportar Relatorio
                         </button>
                     </div>
-                    <div id="relatorioContador" style="margin-top:1rem;font-size:0.85rem;color:var(--text-muted);"></div>
-                </div>
-                <div class="card" id="relatorioPreviewCard" style="display:none;">
+
+                    <output id="relatorioContador" class="relatorio-contador"></output>
+                </section>
+
+                <section class="card" id="relatorioPreviewCard" hidden>
                     <h3 class="card-title">Preview dos Dados</h3>
-                    <div style="overflow-x:auto;">
-                        <table><thead><tr><th>Nome</th><th>Cidade</th><th>Bairro</th><th>Tipo</th><th>CEP</th><th>Criado em</th></tr></thead><tbody id="relatorioTabela"></tbody></table>
+                    <div class="tabela-rolagem">
+                        <table>
+                            <caption class="visually-hidden">Previa do relatorio</caption>
+                            <thead>
+                                <tr>
+                                    <th scope="col">Nome</th>
+                                    <th scope="col">Cidade</th>
+                                    <th scope="col">Bairro</th>
+                                    <th scope="col">Tipo</th>
+                                    <th scope="col">CEP</th>
+                                    <th scope="col">Criado em</th>
+                                </tr>
+                            </thead>
+                            <tbody id="relatorioTabela"></tbody>
+                        </table>
                     </div>
-                </div>
-                <div class="card"><h3 class="card-title">Performance por Regiao</h3><div id="relatorioRegioes"></div></div>
+                </section>
+
+                <section class="card">
+                    <h3 class="card-title">Performance por Regiao</h3>
+                    <div id="relatorioRegioes"></div>
+                </section>
             </section>
         </main>
-    </div>
+        </div><!-- /.container -->
 
-    <!-- Notificacoes Panel -->
-    <div id="notificacoesPanel" class="notificacoes-panel">
-        <div class="notificacoes-header">
-            <div style="display:flex;align-items:center;gap:0.5rem;">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        <!-- Barra de status com os atalhos. Dentro da area de trabalho, e nao
+             fixa sobre a pagina: assim ela nunca cobre a ultima linha de uma
+             tabela longa. -->
+        <footer class="keyboard-shortcuts-bar" id="shortcutsBar">
+            <span><kbd>Ctrl</kbd>+<kbd>N</kbd> Novo</span>
+            <span><kbd>Ctrl</kbd>+<kbd>F</kbd> Buscar</span>
+            <span><kbd>Ctrl</kbd>+<kbd>E</kbd> Exportar</span>
+            <span><kbd>Ctrl</kbd>+<kbd>B</kbd> Backup</span>
+            <span><kbd>Ctrl</kbd>+<kbd>I</kbd> Importar</span>
+            <span><kbd>Esc</kbd> Cancelar</span>
+        </footer>
+
+        </div><!-- /.area-trabalho -->
+    </div><!-- /.app-shell -->
+
+    <!-- ================================================================
+         PAINEL DE NOTIFICACOES
+         ================================================================ -->
+    <aside id="notificacoesPanel" class="notificacoes-panel"
+           role="dialog" aria-label="Notificacoes" aria-modal="false">
+        <header class="notificacoes-header">
+            <div class="notificacoes-titulo">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
                 <span>Notificacoes</span>
-                <span id="notifCounter" class="notif-counter">0 notificacao(es)</span>
+                <output id="notifCounter" class="notif-counter">0 notificacao(es)</output>
             </div>
-            <button class="notif-close" onclick="fecharNotificacoes()">&#10005;</button>
-        </div>
+            <button type="button" class="notif-close" onclick="fecharNotificacoes()"
+                    aria-label="Fechar notificacoes">&#10005;</button>
+        </header>
+
         <div id="notificacoesLista" class="notificacoes-lista"></div>
-        <div class="notif-footer">
-            <button id="btnMarcarTodasLidas" class="btn notif-btn-rodape notif-btn-lidas" style="display:none;">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+
+        <footer class="notif-footer">
+            <button type="button" id="btnMarcarTodasLidas" class="btn notif-btn-rodape notif-btn-lidas" hidden>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
                 Marcar todas como lidas
             </button>
-            <button class="btn notif-btn-rodape notif-btn-atualizar" onclick="atualizarNotificacoes()">Atualizar</button>
-        </div>
-    </div>
+            <button type="button" class="btn notif-btn-rodape notif-btn-atualizar" onclick="atualizarNotificacoes()">Atualizar</button>
+        </footer>
+    </aside>
 
-    <div id="syncIndicator"></div>
-    <div id="toast"></div>
+    <!-- Avisos transitorios: `aria-live` anuncia sem roubar o foco. -->
+    <div id="syncIndicator" role="status" aria-live="polite"></div>
+    <div id="toast" role="status" aria-live="polite"></div>
+    <output id="pendingBadge" class="pending-badge" hidden>0</output>
 
-    <!-- Modal de confirmacao (generico: exclusao, cancelamento, desconexao...) -->
-    <div class="modal-overlay" id="modalConfirmar" role="alertdialog" aria-modal="true" aria-labelledby="modalConfirmarTitulo" aria-describedby="modalConfirmarMsg">
+    <!-- ================================================================
+         JANELAS MODAIS
+
+         `dialog` no lugar das divs sobrepostas: o navegador cuida do foco
+         preso dentro da janela, do fechamento com Esc e do fundo escurecido
+         (`::backdrop`). Antes tudo isso era imitado a mao no CSS e no JS, e o
+         foco continuava passeando pela pagina atras do modal.
+
+         As classes `modal-overlay` e `modal-box` permanecem porque sao o
+         contrato que o restante do codigo usa para achar estes elementos.
+         ================================================================ -->
+    <dialog class="modal-overlay" id="modalConfirmar"
+            aria-labelledby="modalConfirmarTitulo" aria-describedby="modalConfirmarMsg">
         <div class="modal-box" data-variante="perigo">
             <div class="modal-icon" id="modalConfirmarIcone" aria-hidden="true"></div>
-            <div class="modal-title" id="modalConfirmarTitulo">Confirmar</div>
-            <div class="modal-msg" id="modalConfirmarMsg"></div>
+            <h2 class="modal-title" id="modalConfirmarTitulo">Confirmar</h2>
+            <p class="modal-msg" id="modalConfirmarMsg"></p>
             <div class="modal-actions">
                 <button type="button" class="modal-btn modal-btn-cancelar" id="modalConfirmarCancelar">Cancelar</button>
                 <button type="button" class="modal-btn modal-btn-confirmar" id="modalConfirmarOk">Confirmar</button>
             </div>
         </div>
-    </div>
+    </dialog>
 
-    <!-- Modal nome arquivo -->
-    <div class="modal-overlay" id="modalNomeArquivo"><div class="modal-box" style="max-width:460px;"><div class="modal-title">Nome do Arquivo</div><div class="modal-msg">Digite o nome desejado para a planilha:</div><input type="text" id="inputNomeArquivo" value="Clientes_AdriPoltronas" class="modal-input"><div class="modal-actions"><button class="modal-btn modal-btn-cancelar" id="modalNomeCancelar">Cancelar</button><button class="modal-btn" id="modalNomeConfirmar" style="background:linear-gradient(135deg,#2563eb,#3b82f6);box-shadow:0 4px 15px rgba(37,99,235,0.3);">Exportar</button></div></div></div>
+    <dialog class="modal-overlay" id="modalNomeArquivo" aria-labelledby="modalNomeTitulo">
+        <div class="modal-box modal-box-estreita">
+            <h2 class="modal-title" id="modalNomeTitulo">Nome do Arquivo</h2>
+            <p class="modal-msg">Digite o nome desejado para o arquivo.</p>
+            <label class="visually-hidden" for="inputNomeArquivo">Nome do arquivo</label>
+            <input type="text" class="modal-input" id="inputNomeArquivo" placeholder="backup-clientes">
+            <div class="modal-actions">
+                <button type="button" class="modal-btn modal-btn-cancelar" id="modalNomeCancelar">Cancelar</button>
+                <button type="button" class="modal-btn modal-btn-confirmar" id="modalNomeConfirmar">Salvar</button>
+            </div>
+        </div>
+    </dialog>
 
-    <!-- Modal importacao -->
-    <div class="modal-overlay" id="modalImportar"><div class="modal-box" style="max-width:520px;"><div class="modal-title">Importar Clientes em Lote</div><div class="modal-msg">Suporta CSV, JSON ou XLSX. Colunas: nome, cep, rua, bairro, cidade, entrega_retirada, observacoes.</div><input type="file" id="inputArquivoImportar" accept=".csv,.json,.xlsx,.xls" class="modal-input"><div id="importarResultado" style="display:none;margin-bottom:1rem;padding:1rem;border-radius:10px;"></div><div class="modal-actions"><button class="modal-btn modal-btn-cancelar" id="modalImportarCancelar">Cancelar</button><button class="modal-btn" onclick="executarImportacao()" style="background:linear-gradient(135deg,#8b5cf6,#a78bfa);box-shadow:0 4px 15px rgba(139,92,246,0.3);">Importar</button></div></div></div>
+    <dialog class="modal-overlay" id="modalImportar" aria-labelledby="modalImportarTitulo">
+        <div class="modal-box modal-box-media">
+            <h2 class="modal-title" id="modalImportarTitulo">Importar Clientes em Lote</h2>
+            <p class="modal-msg">Suporta CSV, JSON e XLSX. A primeira linha deve conter os nomes das colunas.</p>
+            <label class="visually-hidden" for="inputArquivoImportar">Arquivo para importar</label>
+            <input type="file" class="modal-input" id="inputArquivoImportar" accept=".csv,.json,.xlsx">
+            <div id="importarResultado" class="importar-resultado" role="status" aria-live="polite"></div>
+            <div class="modal-actions">
+                <button type="button" class="modal-btn modal-btn-cancelar" id="modalImportarCancelar">Fechar</button>
+            </div>
+        </div>
+    </dialog>
 
-    <!-- Modal Novo Recebimento -->
-    <div class="modal-overlay" id="modalNovoRecebimento">
+    <dialog class="modal-overlay" id="modalNovoRecebimento" aria-labelledby="modalRecebimentoTitulo">
         <div class="modal-box payment-modal">
-            <div class="modal-title">Registrar Recebimento</div>
-            <div class="modal-msg">Preencha os dados do recebimento manualmente.</div>
+            <h2 class="modal-title" id="modalRecebimentoTitulo">Registrar Recebimento</h2>
+            <p class="modal-msg">Preencha os dados do recebimento manualmente.</p>
+
             <form id="formNovoRecebimento">
                 <div class="input-group">
-                    <label>Cliente *</label>
+                    <label for="recClienteId">Cliente *</label>
                     <select id="recClienteId" required>
                         <option value="">Selecione um cliente...</option>
                     </select>
                 </div>
+
                 <div class="form-grid-modal">
                     <div class="input-group">
-                        <label>Valor (R$) *</label>
-                        <input type="number" id="recValor" required min="0.01" step="0.01" placeholder="0,00">
+                        <label for="recValor">Valor (R$) *</label>
+                        <input type="number" id="recValor" required min="0.01" step="0.01"
+                               inputmode="decimal" placeholder="0,00">
                     </div>
                     <div class="input-group">
-                        <label>Data do Recebimento *</label>
+                        <label for="recDataPagamento">Data do Recebimento *</label>
                         <input type="date" id="recDataPagamento" required>
                     </div>
                 </div>
+
                 <div class="form-grid-modal">
                     <div class="input-group">
-                        <label>Tipo de Pagamento</label>
+                        <label for="recTipoPagamento">Tipo de Pagamento</label>
                         <select id="recTipoPagamento">
                             <option value="Pix">Pix</option>
                             <option value="Boleto">Boleto</option>
@@ -379,39 +740,46 @@
                         </select>
                     </div>
                     <div class="input-group">
-                        <label>Status</label>
+                        <label for="recStatus">Status</label>
                         <select id="recStatus">
                             <option value="Recebido">Recebido</option>
                             <option value="Pendente">Pendente</option>
                         </select>
                     </div>
                 </div>
+
                 <div class="input-group">
-                    <label>Descricao / Observacao</label>
+                    <label for="recDescricao">Descricao / Observacao</label>
                     <input type="text" id="recDescricao" placeholder="Ex: Parcela 1/3, Produto XYZ...">
                 </div>
+
                 <div class="modal-actions">
                     <button type="button" class="modal-btn modal-btn-cancelar" onclick="fecharModalNovoRecebimento()">Cancelar</button>
-                    <button type="submit" class="modal-btn modal-btn-confirmar" style="background:linear-gradient(135deg,#10b981,#059669);box-shadow:0 4px 15px rgba(16,185,129,0.3);">Registrar Recebimento</button>
+                    <button type="submit" class="modal-btn modal-btn-confirmar modal-btn-sucesso">Registrar</button>
                 </div>
             </form>
         </div>
-    </div>
+    </dialog>
 
-    <!-- Atalhos teclado -->
-    <div class="keyboard-shortcuts-bar" id="shortcutsBar">
-        <span><kbd>Ctrl</kbd>+<kbd>N</kbd> Novo</span>
-        <span><kbd>Ctrl</kbd>+<kbd>F</kbd> Buscar</span>
-        <span><kbd>Ctrl</kbd>+<kbd>E</kbd> Exportar</span>
-        <span><kbd>Ctrl</kbd>+<kbd>B</kbd> Backup</span>
-        <span><kbd>Ctrl</kbd>+<kbd>I</kbd> Importar</span>
-        <span><kbd>Esc</kbd> Cancelar</span>
-    </div>
+    <!-- A cobranca Pix/boleto: o codigo ja a procurava, mas ela nunca existiu
+         no documento -- clicar em "gerar cobranca" falhava em silencio. -->
+    <dialog class="modal-overlay" id="modalCobranca" aria-labelledby="modalCobrancaTitulo">
+        <div class="modal-box modal-box-media">
+            <h2 class="modal-title" id="modalCobrancaTitulo">Cobranca emitida</h2>
+            <div id="cobrancaConteudo" class="cobranca-conteudo"></div>
+            <div class="modal-actions">
+                <button type="button" class="modal-btn modal-btn-cancelar" onclick="fecharModalCobranca()">Fechar</button>
+            </div>
+        </div>
+    </dialog>
 
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-    <script src="/js/offline.js"></script>
-    <script src="/js/app.js?v=v55"></script>
-
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+            integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH"
+            crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"
+            integrity="sha384-e6nUZLBkQ86NJ6TVVKAeSaK8jWa3NhkYWZFomE39AvDbQWeie9PlQqM3pmYW5d1g"
+            crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="/js/offline.js?v=v75"></script>
+    <script src="/js/app.js?v=v75"></script>
 </body>
 </html>

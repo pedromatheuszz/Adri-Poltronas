@@ -1,4 +1,4 @@
-# Code Signing para AdriPoltronasApp.exe
+# Code Signing para o instalador da Adri Poltronas
 
 > **Status atual**: o executável **NÃO está assinado digitalmente**. Quando um usuário
 > baixa e tenta abrir, o Windows SmartScreen exibe o aviso azul
@@ -46,7 +46,26 @@ física. Verifique antes de comprar.
 
 ---
 
-## Como assinar o `AdriPoltronasApp.exe`
+## O que precisa ser assinado
+
+Desde a migração para o Electron, o build gera três artefatos:
+
+| Artefato | Onde | Assinar? |
+|----------|------|----------|
+| `dist-instalador/AdriPoltronasSetup-<versão>.exe` | electron-builder (NSIS) | **Sim** — é o que o usuário baixa |
+| `dist-instalador/win-unpacked/Adri Poltronas.exe` | electron-builder | Sim (o electron-builder assina junto) |
+| `dist/AdriPoltronasBackend/AdriPoltronasBackend.exe` | PyInstaller | Opcional — não é executado diretamente pelo usuário |
+
+O caminho mais simples é deixar o **electron-builder** assinar tudo: ele chama o
+`signtool` sozinho quando encontra as variáveis `CSC_LINK` e `CSC_KEY_PASSWORD`.
+
+```cmd
+set CSC_LINK=C:\caminho\certificado.pfx
+set CSC_KEY_PASSWORD=senha-do-certificado
+python build.py installer
+```
+
+## Como assinar manualmente com `signtool`
 
 ### Pré-requisitos
 - Windows 10/11 com **Windows SDK** instalado (vem com Visual Studio Build Tools)
@@ -60,7 +79,7 @@ física. Verifique antes de comprar.
 
 2. **Verifique se o certificado está instalado**:
    ```cmd
-   signtool sign /sm /a /fd SHA256 "C:\caminho\AdriPoltronasApp.exe"
+   signtool sign /sm /a /fd SHA256 "C:\caminho\AdriPoltronasSetup-1.0.0.exe"
    ```
    - `/sm` = seleciona do repositório de usuário
    - `/a` = seleciona automaticamente o certificado disponível
@@ -68,24 +87,26 @@ física. Verifique antes de comprar.
 
 3. **Com timestamp** (importante — sem ele a assinatura expira com o certificado):
    ```cmd
-   signtool sign /sm /a /fd SHA256 /tr http://timestamp.sectigo.com /td SHA256 "C:\caminho\AdriPoltronasApp.exe"
+   signtool sign /sm /a /fd SHA256 /tr http://timestamp.sectigo.com /td SHA256 "C:\caminho\AdriPoltronasSetup-1.0.0.exe"
    ```
    - `/tr` = URL do servidor de timestamp
    - `/td SHA256` = algoritmo do timestamp
 
 4. **Verifique a assinatura**:
    ```cmd
-   signtool verify /pa "C:\caminho\AdriPoltronasApp.exe"
+   signtool verify /pa "C:\caminho\AdriPoltronasSetup-1.0.0.exe"
    ```
    Deve retornar: `Successfully verified`.
 
-5. **Para assinar o instalador Inno Setup também** (recomendado):
-   - Em `setup.iss`, adicione após `[Setup]`:
-     ```ini
-     SignTool=signtool sign /sm /a /fd SHA256 /tr http://timestamp.sectigo.com /td SHA256 $f
-     SignedUninstaller=yes
-     ```
-   - O Inno Setup chama `signtool` automaticamente durante a build.
+5. **Assinatura automática pelo electron-builder** (recomendado em vez do passo manual):
+   - Defina `CSC_LINK` (caminho do `.pfx`) e `CSC_KEY_PASSWORD` antes de rodar
+     `python build.py installer`.
+   - Para usar um certificado já instalado no repositório do Windows (token USB,
+     comum em certificados EV), use `WIN_CSC_LINK` vazio e configure
+     `"win": { "certificateSubjectName": "Nome no certificado" }` no `package.json`.
+
+   > O antigo instalador Inno Setup (`setup.iss`) foi removido junto com o
+   > WebView2; a diretiva `SignTool=` dele não existe mais.
 
 ### Variáveis de ambiente úteis (CI/CD)
 ```cmd
@@ -95,19 +116,27 @@ set CSC_KEY_PASSWORD=senha-do-certificado
 
 ---
 
-## Integração com o build (PyInstaller)
+## Integração com o build
 
-O PyInstaller não assina diretamente, mas você pode:
+### Opção A: deixar o electron-builder assinar
+```cmd
+set CSC_LINK=C:\caminho\certificado.pfx
+set CSC_KEY_PASSWORD=senha
+python build.py installer
+```
+O `signtool` é chamado pelo electron-builder para o `.exe` da aplicação e para
+o instalador NSIS, com timestamp.
 
-### Opção A: script `build.bat`
+### Opção B: assinar também o backend do PyInstaller
 ```bat
 @echo off
-pyinstaller AdriPoltronasApp.spec --clean
-signtool sign /sm /a /fd SHA256 /tr http://timestamp.sectigo.com /td SHA256 dist\AdriPoltronasApp\AdriPoltronasApp.exe
+python build.py build
+signtool sign /sm /a /fd SHA256 /tr http://timestamp.sectigo.com /td SHA256 dist\AdriPoltronasBackend\AdriPoltronasBackend.exe
+npm run dist
 echo Build + sign OK.
 ```
 
-### Opção B: GitHub Actions (exemplo)
+### Opção C: GitHub Actions (exemplo)
 ```yaml
 - name: Sign Windows binary
   uses: sigstore/cosign-installer@main
@@ -115,7 +144,7 @@ echo Build + sign OK.
     cosign-release: 'v2.0.0'
 - name: Sign executable
   run: |
-    signtool sign /fd SHA256 /tr http://timestamp.sectigo.com /td SHA256 /f ${{ secrets.CERT_FILE }} /p ${{ secrets.CERT_PASSWORD }} dist/AdriPoltronasApp/AdriPoltronasApp.exe
+    signtool sign /fd SHA256 /tr http://timestamp.sectigo.com /td SHA256 /f ${{ secrets.CERT_FILE }} /p ${{ secrets.CERT_PASSWORD }} "dist-instalador/AdriPoltronasSetup-1.0.0.exe"
   env:
     CERT_FILE: ${{ github.workspace }}/certs/cert.pfx
 ```
@@ -157,4 +186,4 @@ echo Build + sign OK.
 
 - [Microsoft: Authenticode Signing](https://learn.microsoft.com/en-us/windows/win32/seccrypto/authenticode-signing)
 - [signtool documentation](https://learn.microsoft.com/en-us/windows/win32/secccode/signtool)
-- [Inno Setup: SignTool](https://jrsoftware.org/ishelp/topic_setup_signtool.htm)
+- [electron-builder: Code Signing](https://www.electron.build/code-signing)

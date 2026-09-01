@@ -1,0 +1,88 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:AdriPoltronas.Desktop.ViewModels"
+             xmlns:conv="clr-namespace:AdriPoltronas.Desktop.Converters"
+             xmlns:dto="clr-namespace:AdriPoltronas.Application.Dtos;assembly=AdriPoltronas.Application"
+             x:Class="AdriPoltronas.Desktop.Views.ClientesView"
+             x:DataType="vm:ClientesViewModel">
+
+  <UserControl.Resources>
+    <conv:TipoParaCorConverter x:Key="TipoParaCor" />
+  </UserControl.Resources>
+
+  <Grid RowDefinitions="Auto,Auto,*">
+
+    <!-- Busca e filtro. O texto digitado alimenta TermoDeBusca, e o proprio
+         ViewModel adia a consulta. -->
+    <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto" Margin="0,0,0,10">
+      <TextBox Grid.Column="0" Text="{Binding TermoDeBusca}"
+               Watermark="Buscar por nome, cidade ou bairro..." />
+      <ComboBox Grid.Column="1" Margin="8,0,0,0" Width="130"
+                ItemsSource="{Binding TiposDisponiveis}"
+                SelectedItem="{Binding FiltroDeTipo}" />
+      <Button Grid.Column="2" Content="Atualizar" Margin="8,0,0,0"
+              Command="{Binding RecarregarCommand}" IsEnabled="{Binding !Ocupado}" />
+    </Grid>
+
+    <!-- Acoes de cadastro a esquerda, de arquivo a direita: e o agrupamento da
+         interface web, e evita clicar em "Importar" querendo "Novo". -->
+    <Grid Grid.Row="1" ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,14">
+      <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
+        <Button Classes="primario" Content="Novo" Command="{Binding NovoCommand}"
+                IsEnabled="{Binding !Ocupado}" />
+        <Button Content="Editar" Command="{Binding EditarCommand}"
+                IsEnabled="{Binding !Ocupado}" />
+        <Button Classes="perigo" Content="Excluir" Command="{Binding ExcluirCommand}"
+                IsEnabled="{Binding !Ocupado}" />
+      </StackPanel>
+
+      <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+        <Button Content="Importar" Command="{Binding ImportarCommand}"
+                IsEnabled="{Binding !Ocupado}" />
+        <Button Content="Exportar" Command="{Binding ExportarCommand}"
+                IsEnabled="{Binding !Ocupado}" />
+        <Button Content="Backup" Command="{Binding BackupCommand}"
+                IsEnabled="{Binding !Ocupado}" />
+      </StackPanel>
+    </Grid>
+
+    <Panel Grid.Row="2" Margin="0,0,0,16">
+      <DataGrid ItemsSource="{Binding Clientes}"
+                SelectedItem="{Binding Selecionado}"
+                IsReadOnly="True"
+                CanUserSortColumns="True">
+        <DataGrid.Columns>
+          <DataGridTextColumn Header="Nome" Width="*"
+                              Binding="{Binding Nome, x:DataType=dto:ClienteDto}" />
+          <DataGridTemplateColumn Header="Tipo" Width="Auto">
+            <DataGridTemplateColumn.CellTemplate>
+              <DataTemplate x:DataType="dto:ClienteDto">
+                <!-- Verde para entrega, ambar para retirada: as mesmas cores dos
+                     badges da interface web. -->
+                <TextBlock Text="{Binding Tipo}" Margin="10,0"
+                           VerticalAlignment="Center"
+                           Foreground="{Binding Tipo, Converter={StaticResource TipoParaCor}}" />
+              </DataTemplate>
+            </DataGridTemplateColumn.CellTemplate>
+          </DataGridTemplateColumn>
+          <DataGridTextColumn Header="Cidade" Width="Auto"
+                              Binding="{Binding Cidade, x:DataType=dto:ClienteDto}" />
+          <DataGridTextColumn Header="Bairro" Width="Auto"
+                              Binding="{Binding Bairro, x:DataType=dto:ClienteDto}" />
+          <DataGridTextColumn Header="Rua" Width="*"
+                              Binding="{Binding Rua, x:DataType=dto:ClienteDto}" />
+        </DataGrid.Columns>
+      </DataGrid>
+
+      <!-- Estado vazio: diz o que fazer, em vez de deixar uma grade em branco. -->
+      <StackPanel IsVisible="{Binding ListaVazia}" Spacing="6"
+                  HorizontalAlignment="Center" VerticalAlignment="Center"
+                  IsHitTestVisible="False">
+        <TextBlock Text="Nenhum cliente encontrado" Classes="subtitulo"
+                   HorizontalAlignment="Center" />
+        <TextBlock Text="Ajuste a busca ou cadastre um cliente com Ctrl+N."
+                   Classes="fraco" HorizontalAlignment="Center" />
+      </StackPanel>
+    </Panel>
+  </Grid>
+</UserControl>

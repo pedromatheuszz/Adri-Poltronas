@@ -1,0 +1,62 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:AdriPoltronas.Desktop.ViewModels"
+        xmlns:dto="clr-namespace:AdriPoltronas.Application.Dtos;assembly=AdriPoltronas.Application"
+        x:Class="AdriPoltronas.Desktop.Views.PagamentoDialog"
+        x:DataType="vm:PagamentoFormViewModel"
+        Title="Novo recebimento"
+        Width="440" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner"
+        CanResize="False"
+        Background="{DynamicResource Fundo}">
+
+  <StackPanel Margin="20" Spacing="10">
+    <TextBlock Text="Novo recebimento" Classes="titulo" Margin="0,0,0,6" />
+
+    <TextBlock Text="Cliente" Classes="fraco" />
+    <ComboBox ItemsSource="{Binding Clientes}" SelectedItem="{Binding Cliente}"
+              HorizontalAlignment="Stretch">
+      <ComboBox.ItemTemplate>
+        <DataTemplate x:DataType="dto:ClienteDto">
+          <TextBlock Text="{Binding Nome}" />
+        </DataTemplate>
+      </ComboBox.ItemTemplate>
+    </ComboBox>
+
+    <Grid ColumnDefinitions="*,12,*">
+      <StackPanel Grid.Column="0" Spacing="4">
+        <TextBlock Text="Valor" Classes="fraco" />
+        <TextBox Text="{Binding Valor}" Watermark="0,00" />
+      </StackPanel>
+      <StackPanel Grid.Column="2" Spacing="4">
+        <TextBlock Text="Vencimento" Classes="fraco" />
+        <TextBox Text="{Binding DataVencimento}" Watermark="AAAA-MM-DD" />
+      </StackPanel>
+    </Grid>
+
+    <TextBlock Text="Descricao" Classes="fraco" />
+    <TextBox Text="{Binding Descricao}" Watermark="Poltrona reclinavel, 2 pecas..." />
+
+    <Grid ColumnDefinitions="*,12,*">
+      <StackPanel Grid.Column="0" Spacing="4">
+        <TextBlock Text="Forma" Classes="fraco" />
+        <ComboBox ItemsSource="{Binding TiposDisponiveis}" SelectedItem="{Binding Tipo}"
+                  HorizontalAlignment="Stretch" />
+      </StackPanel>
+      <StackPanel Grid.Column="2" Spacing="4">
+        <TextBlock Text="Situacao" Classes="fraco" />
+        <ComboBox ItemsSource="{Binding StatusDisponiveis}" SelectedItem="{Binding Status}"
+                  HorizontalAlignment="Stretch" />
+      </StackPanel>
+    </Grid>
+
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"
+                Spacing="8" Margin="0,10,0,0">
+      <Button Content="Cancelar" Click="AoCancelar" />
+      <!-- Unica checagem da tela: cliente escolhido e valor maior que zero. O
+           resto e conferido no Domain e volta como mensagem. -->
+      <Button Classes="primario" Content="Salvar" Click="AoSalvar"
+              IsEnabled="{Binding PodeSalvar}" />
+    </StackPanel>
+  </StackPanel>
+</Window>

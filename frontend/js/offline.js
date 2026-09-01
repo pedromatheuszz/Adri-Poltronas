@@ -11,6 +11,16 @@ var OfflineManager = (function() {
   var dbReady = null; // Promise que resolve quando DB está pronto
   var isOnline = navigator.onLine;
 
+  // Um item que falha por validacao (4xx) nunca vai passar; um que falha por
+  // erro do servidor (5xx) pode passar depois. O teto existe para o segundo
+  // caso -- sem ele, um item problematico era reenviado a cada reconexao,
+  // indefinidamente.
+  var MAX_TENTATIVAS_SYNC = 5;
+
+  // Guarda de concorrencia: o evento `online` e uma chamada manual podiam
+  // disparar duas sincronizacoes ao mesmo tempo e duplicar POSTs de criacao.
+  var sincronizacaoEmCurso = false;
+
   // ===========================================================================
   // Inicialização
   // ===========================================================================
@@ -159,6 +169,20 @@ var OfflineManager = (function() {
   }
 
   // ===========================================================================
+  // Atualizar operação pendente (persiste o contador de tentativas)
+  // ===========================================================================
+  async function atualizarPendingAction(item) {
+    await aguardarDB();
+    return new Promise(function(resolve, reject) {
+      if (!db) { reject(new Error('IndexedDB nao inicializado')); return; }
+      var tx = db.transaction('pending-sync', 'readwrite');
+      var request = tx.objectStore('pending-sync').put(item);
+      request.onsuccess = function() { resolve(); };
+      request.onerror = function() { reject(request.error); };
+    });
+  }
+
+  // ===========================================================================
   // Contar pendências
   // ===========================================================================
   async function getPendingCount() {
@@ -212,6 +236,37 @@ var OfflineManager = (function() {
     });
   }
 
+  async function sincronizarCache(clientes) {
+    // Substitui o conteudo do cache pela lista do servidor.
+    //
+    // `cacheClientes` so faz put(): um cliente criado offline (id negativo)
+    // continuava no IndexedDB depois de sincronizado com o id real -- e
+    // aparecia duplicado na tela -- enquanto clientes excluidos no servidor
+    // nunca sumiam do cache.
+    //
+    // Com pendencias ainda na fila, porem, o servidor NAO e a verdade
+    // completa: as alteracoes locais ainda nao chegaram nele. Nesse caso a
+    // poda e adiada para nao apagar o que o usuario acabou de registrar.
+    var pendentes = await getPendingCount();
+    if (pendentes > 0) {
+      return cacheClientes(clientes);
+    }
+
+    await aguardarDB();
+    return new Promise(function(resolve, reject) {
+      if (!db) { reject(new Error('IndexedDB nao inicializado')); return; }
+      var tx = db.transaction('cached-clients', 'readwrite');
+      var store = tx.objectStore('cached-clients');
+      store.clear();
+      clientes.forEach(function(cliente) { store.put(cliente); });
+      tx.oncomplete = function() {
+        console.log('[Offline] Cache sincronizado:', clientes.length);
+        resolve();
+      };
+      tx.onerror = function() { reject(tx.error); };
+    });
+  }
+
   async function getCachedClientes() {
     await aguardarDB();
     return new Promise(function(resolve, reject) {
@@ -237,75 +292,109 @@ var OfflineManager = (function() {
   // ===========================================================================
   // Sincronização automática
   // ===========================================================================
+  async function enviarPendencia(item) {
+    var dados = item.dados;
+    if (item.action === 'create') {
+      return fetch('/api/clientes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(dados)
+      });
+    }
+    if (item.action === 'update') {
+      return fetch('/api/clientes/' + dados.id, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(dados)
+      });
+    }
+    if (item.action === 'delete') {
+      return fetch('/api/clientes/' + dados.id, { method: 'DELETE' });
+    }
+    return null;
+  }
+
   async function syncPendingActions() {
-    if (!navigator.onLine) {
-      console.log('[Offline] Sem conexao, sincronizacao adiada');
+    if (sincronizacaoEmCurso) {
+      console.log('[Offline] Sincronizacao ja em andamento');
       return;
     }
+    sincronizacaoEmCurso = true;
+    try {
+      return await _sincronizar();
+    } finally {
+      sincronizacaoEmCurso = false;
+    }
+  }
 
+  async function _sincronizar() {
     var pending = await getPendingActions();
     if (pending.length === 0) {
       console.log('[Offline] Nenhuma operacao pendente');
-      return;
+      return { sincronizados: 0, descartados: 0, adiados: 0 };
     }
 
     console.log('[Offline] Sincronizando', pending.length, 'operacoes...');
     showSyncIndicator('Sincronizando ' + pending.length + ' operacoes...');
 
     var sincronizados = 0;
-    var erros = 0;
+    var descartados = 0;
+    var adiados = 0;
 
     for (var i = 0; i < pending.length; i++) {
       var item = pending[i];
+      var response;
+
       try {
-        var response;
-        var dados = item.dados;
-
-        if (item.action === 'create') {
-          response = await fetch('/api/clientes', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(dados)
-          });
-        } else if (item.action === 'update') {
-          response = await fetch('/api/clientes/' + dados.id, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(dados)
-          });
-        } else if (item.action === 'delete') {
-          response = await fetch('/api/clientes/' + dados.id, {
-            method: 'DELETE'
-          });
-        }
-
-        if (response && response.ok) {
-          await removePendingAction(item.id);
-          sincronizados++;
-        } else {
-          erros++;
-          console.error('[Offline] Erro ao sincronizar item:', item.id);
-        }
+        response = await enviarPendencia(item);
       } catch (e) {
-        erros++;
-        console.error('[Offline] Erro ao sincronizar:', e);
+        // Falha de REDE: o backend esta fora do ar. Nao e culpa do payload,
+        // entao nao consome tentativa -- e nao adianta tentar os proximos.
+        console.warn('[Offline] Backend indisponivel, sincronizacao adiada:', e);
+        adiados = pending.length - i;
+        break;
+      }
+
+      if (response && response.ok) {
+        await removePendingAction(item.id);
+        sincronizados++;
+        continue;
+      }
+
+      if (response && response.status >= 400 && response.status < 500) {
+        // Erro permanente (validacao, id inexistente): reenviar nunca vai
+        // mudar o resultado. Sai da fila para nao ser retentado a cada
+        // reconexao, para sempre.
+        console.error('[Offline] Descartando pendencia invalida:', item.id, response.status);
+        await removePendingAction(item.id);
+        descartados++;
+        continue;
+      }
+
+      // Erro do servidor (5xx) ou action desconhecida: pode passar depois.
+      item.tentativas = (item.tentativas || 0) + 1;
+      if (item.tentativas >= MAX_TENTATIVAS_SYNC) {
+        console.error('[Offline] Pendencia excedeu', MAX_TENTATIVAS_SYNC, 'tentativas:', item.id);
+        await removePendingAction(item.id);
+        descartados++;
+      } else {
+        await atualizarPendingAction(item);
+        adiados++;
       }
     }
 
     var mensagem = 'Sincronizacao concluida: ' + sincronizados + ' enviados';
-    if (erros > 0) {
-      mensagem += ', ' + erros + ' erros';
-    }
+    if (descartados > 0) mensagem += ', ' + descartados + ' descartados';
+    if (adiados > 0) mensagem += ', ' + adiados + ' adiados';
 
     showSyncIndicator(mensagem);
     updatePendingCount();
 
-    // Recarregar lista de clientes
     if (typeof carregarClientes === 'function') {
       carregarClientes();
     }
 
-    return { sincronizados: sincronizados, erros: erros };
+    return { sincronizados: sincronizados, descartados: descartados, adiados: adiados };
   }
 
   // ===========================================================================
@@ -354,15 +443,17 @@ var OfflineManager = (function() {
     var indicator = document.getElementById('onlineStatus');
     if (!indicator) return;
 
-    if (isOnline) {
-      indicator.className = 'online-status online';
-      indicator.innerHTML = '<span class="status-dot"></span> Online';
-      indicator.title = 'Conexao ativa - dados sincronizados';
-    } else {
-      indicator.className = 'online-status offline';
-      indicator.innerHTML = '<span class="status-dot"></span> Offline';
-      indicator.title = 'Sem conexao - dados serao sincronizados depois';
-    }
+    // O rotulo precisa de um elemento proprio (.online-rotulo). Como texto
+    // solto ele nao podia ser alvo de seletor nenhum: nem a barra lateral
+    // recolhida nem a regra de <=480px conseguiam escode-lo, e a palavra
+    // vazava do indicador circular.
+    var conectado = isOnline;
+    indicator.className = 'online-status ' + (conectado ? 'online' : 'offline');
+    indicator.innerHTML = '<span class="status-dot" aria-hidden="true"></span>'
+      + '<span class="online-rotulo">' + (conectado ? 'Online' : 'Offline') + '</span>';
+    indicator.title = conectado
+      ? 'Conexao ativa - dados sincronizados'
+      : 'Sem conexao - dados serao sincronizados depois';
   }
 
   function updatePendingCount() {
@@ -370,11 +461,11 @@ var OfflineManager = (function() {
       var badge = document.getElementById('pendingBadge');
       if (badge) {
         if (count > 0) {
-          badge.style.display = 'flex';
+          badge.hidden = false;
           badge.textContent = count;
           badge.title = count + ' operacao(oes) pendente(s)';
         } else {
-          badge.style.display = 'none';
+          badge.hidden = true;
         }
       }
     });
@@ -429,6 +520,7 @@ var OfflineManager = (function() {
     removePendingAction: removePendingAction,
     getPendingCount: getPendingCount,
     cacheClientes: cacheClientes,
+    sincronizarCache: sincronizarCache,
     getCachedClientes: getCachedClientes,
     syncPendingActions: syncPendingActions,
     isOnline: function() { return isOnline; }

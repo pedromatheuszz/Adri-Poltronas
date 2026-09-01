@@ -1,10 +1,16 @@
 import sqlite3
 import os
 import logging
-from datetime import datetime
 
 import security
 import asaas
+import notificacoes_db
+from erp.core.auditoria import registrar_evento
+from erp.core.schema_fallback import garantir_schema_fallback
+from erp.financeiro.servico_pagamentos import aplicar_evento_asaas
+from notificacoes_db import MAX_NOTIFICACOES_POR_TIPO  # noqa: F401
+
+log_db = logging.getLogger("adri.db")
 
 
 
@@ -29,12 +35,15 @@ def obter_caminho_banco() -> str:
 
 
 DB_PATH = obter_caminho_banco()
-_log_db = logging.getLogger("adri.db")
 
 
 def conectar_bd() -> sqlite3.Connection:
     conexao = sqlite3.connect(DB_PATH, timeout=10)
     conexao.row_factory = sqlite3.Row
+    # SQLite nao aplica foreign keys por padrao em cada nova conexao. Sem este
+    # pragma, as constraints presentes no schema eram apenas decorativas.
+    conexao.execute("PRAGMA foreign_keys = ON")
+    conexao.execute("PRAGMA busy_timeout = 10000")
     return conexao
 
 
@@ -57,115 +66,7 @@ def conectar():
 
 def criar_tabela():
     with conectar() as conexao:
-        cursor = conexao.cursor()
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS clientes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                nome TEXT NOT NULL,
-                cep TEXT,
-                rua TEXT,
-                bairro TEXT,
-                cidade TEXT,
-                entrega_retirada TEXT NOT NULL DEFAULT 'Entrega',
-                observacoes TEXT DEFAULT '',
-                criado_em TEXT DEFAULT (datetime('now', 'localtime')),
-                atualizado_em TEXT DEFAULT (datetime('now', 'localtime'))
-            )
-        ''')
-        for coluna, tipo_default in [
-            ("entrega_retirada", "TEXT NOT NULL DEFAULT 'Entrega'"),
-            ("observacoes", "TEXT DEFAULT ''"),
-            ("criado_em", "TEXT"),
-            ("atualizado_em", "TEXT"),
-        ]:
-            try:
-                cursor.execute(f"ALTER TABLE clientes ADD COLUMN {coluna} {tipo_default}")
-                if coluna in ('criado_em', 'atualizado_em'):
-                    cursor.execute(f"UPDATE clientes SET {coluna} = datetime('now', 'localtime') WHERE {coluna} IS NULL")
-            except Exception:
-                pass
-
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS sessao (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                token TEXT NOT NULL,
-                conta TEXT NOT NULL
-            )
-        ''')
-
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS historico (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                cliente_id INTEGER,
-                cliente_nome TEXT,
-                acao TEXT NOT NULL,
-                detalhes TEXT DEFAULT '',
-                data_hora TEXT DEFAULT (datetime('now', 'localtime'))
-            )
-        ''')
-
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS pagamentos (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                cliente_id INTEGER NOT NULL,
-                cliente_nome TEXT DEFAULT '',
-                valor REAL NOT NULL DEFAULT 0,
-                descricao TEXT DEFAULT '',
-                status TEXT NOT NULL DEFAULT 'Pendente',
-                data_pagamento TEXT DEFAULT '',
-                data_vencimento TEXT DEFAULT '',
-                criado_em TEXT DEFAULT (datetime('now', 'localtime')),
-                tipo_pagamento TEXT NOT NULL DEFAULT 'Pix',
-                asaas_payment_id TEXT DEFAULT '',
-                pix_payload TEXT DEFAULT '',
-                pix_qr_code TEXT DEFAULT '',
-                boleto_url TEXT DEFAULT '',
-                nosso_numero TEXT DEFAULT ''
-            )
-        ''')
-        for coluna, tipo_default in [
-            ("data_vencimento", "TEXT DEFAULT ''"),
-            ("tipo_pagamento", "TEXT NOT NULL DEFAULT 'Pix'"),
-            ("asaas_payment_id", "TEXT DEFAULT ''"),
-            ("pix_payload", "TEXT DEFAULT ''"),
-            ("pix_qr_code", "TEXT DEFAULT ''"),
-            ("boleto_url", "TEXT DEFAULT ''"),
-            ("nosso_numero", "TEXT DEFAULT ''"),
-        ]:
-            try:
-                cursor.execute(f"ALTER TABLE pagamentos ADD COLUMN {coluna} {tipo_default}")
-            except Exception:
-                pass
-
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS clientes_asaas (
-                cliente_id INTEGER PRIMARY KEY,
-                asaas_customer_id TEXT NOT NULL DEFAULT ''
-            )
-        ''')
-
-        # As notificacoes sao derivadas de consultas, nao armazenadas. O estado
-        # de "lida" precisa entao de uma chave estavel por notificacao
-        # (tipo:id_da_entidade), guardada aqui.
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS notificacoes_lidas (
-                chave TEXT PRIMARY KEY,
-                lida_em TEXT DEFAULT (datetime('now', 'localtime'))
-            )
-        ''')
-
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS entregas_agendadas (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                cliente_id INTEGER NOT NULL,
-                cliente_nome TEXT DEFAULT '',
-                data_entrega TEXT NOT NULL,
-                hora_entrega TEXT DEFAULT '',
-                descricao TEXT DEFAULT '',
-                status TEXT NOT NULL DEFAULT 'Pendente',
-                criado_em TEXT DEFAULT (datetime('now', 'localtime'))
-            )
-        ''')
+        garantir_schema_fallback(conexao)
 
 
 def salvar_cliente(nome, cep, rua, bairro, cidade, entrega_retirada, observacoes=''):
@@ -179,6 +80,14 @@ def salvar_cliente(nome, cep, rua, bairro, cidade, entrega_retirada, observacoes
             'INSERT INTO historico (cliente_id, cliente_nome, acao, detalhes) VALUES (?, ?, ?, ?)',
             (cliente_id, nome, 'CRIACAO', 'Cliente cadastrado'),
         )
+        novo = conexao.execute('SELECT * FROM clientes WHERE id=?', (cliente_id,)).fetchone()
+        registrar_evento(
+            conexao,
+            acao="crm.cliente.criado",
+            entidade="cliente",
+            entidade_id=cliente_id,
+            valores_novos=novo,
+        )
         return cliente_id
 
 
@@ -188,11 +97,14 @@ def listar_clientes(busca=''):
         if termo:
             like = f'%{termo}%'
             linhas = conexao.execute(
-                'SELECT * FROM clientes WHERE nome LIKE ? OR cidade LIKE ? OR bairro LIKE ? ORDER BY id DESC',
+                'SELECT * FROM clientes WHERE ativo=1 AND '
+                '(nome LIKE ? OR cidade LIKE ? OR bairro LIKE ?) ORDER BY id DESC',
                 (like, like, like),
             ).fetchall()
         else:
-            linhas = conexao.execute('SELECT * FROM clientes ORDER BY id DESC').fetchall()
+            linhas = conexao.execute(
+                'SELECT * FROM clientes WHERE ativo=1 ORDER BY id DESC'
+            ).fetchall()
     resultado = []
     for linha in linhas:
         try:
@@ -224,48 +136,92 @@ def listar_clientes(busca=''):
 
 def obter_cliente_por_id(id_cliente):
     with conectar() as conexao:
-        linha = conexao.execute('SELECT * FROM clientes WHERE id=?', (id_cliente,)).fetchone()
+        linha = conexao.execute(
+            'SELECT * FROM clientes WHERE id=? AND ativo=1', (id_cliente,)
+        ).fetchone()
         if not linha:
             return None
         return dict(linha)
 
 
-def atualizar_cliente(id_cliente, nome, cep, rua, bairro, cidade, entrega_retirada, observacoes=''):
+def atualizar_cliente(id_cliente, nome, cep, rua, bairro, cidade, entrega_retirada, observacoes='') -> int:
+    """
+    Atualiza um cliente. Devolve 1 se atualizou, 0 se o id nao existe.
+
+    O retorno existe para o endpoint distinguir os dois casos: antes o UPDATE
+    em um id inexistente nao afetava linha nenhuma, mas a funcao seguia
+    gravando historico e o PUT respondia 200 "Atualizado" -- alem de deixar
+    linhas fantasma de ATUALIZACAO para clientes que nunca existiram.
+    """
     with conectar() as conexao:
-        antigo = conexao.execute('SELECT * FROM clientes WHERE id=?', (id_cliente,)).fetchone()
+        antigo = conexao.execute(
+            'SELECT * FROM clientes WHERE id=? AND ativo=1', (id_cliente,)
+        ).fetchone()
+        if not antigo:
+            return 0
         conexao.execute(
-            'UPDATE clientes SET nome=?, cep=?, rua=?, bairro=?, cidade=?, entrega_retirada=?, observacoes=?, atualizado_em=datetime(\'now\', \'localtime\') WHERE id=?',
+            'UPDATE clientes SET nome=?, cep=?, rua=?, bairro=?, cidade=?, '
+            'entrega_retirada=?, observacoes=?, '
+            'atualizado_em=datetime(\'now\', \'localtime\') '
+            'WHERE id=? AND ativo=1',
             (nome, cep, rua, bairro, cidade, entrega_retirada, observacoes, id_cliente),
         )
         detalhes_parts = []
-        if antigo:
-            novos_vals = {
-                'nome': nome, 'cep': cep, 'rua': rua,
-                'bairro': bairro, 'cidade': cidade,
-                'entrega_retirada': entrega_retirada, 'observacoes': observacoes,
-            }
-            for campo, label in [('nome', 'Nome'), ('cep', 'CEP'), ('rua', 'Rua'),
-                                  ('bairro', 'Bairro'), ('cidade', 'Cidade'),
-                                  ('entrega_retirada', 'Tipo'), ('observacoes', 'Obs')]:
-                val_novo = novos_vals[campo]
-                val_antigo = antigo[campo] or ''
-                if str(val_novo) != str(val_antigo):
-                    detalhes_parts.append(f"{label}: '{val_antigo}' -> '{val_novo}'")
+        novos_vals = {
+            'nome': nome, 'cep': cep, 'rua': rua,
+            'bairro': bairro, 'cidade': cidade,
+            'entrega_retirada': entrega_retirada, 'observacoes': observacoes,
+        }
+        for campo, label in [('nome', 'Nome'), ('cep', 'CEP'), ('rua', 'Rua'),
+                             ('bairro', 'Bairro'), ('cidade', 'Cidade'),
+                             ('entrega_retirada', 'Tipo'), ('observacoes', 'Obs')]:
+            val_novo = novos_vals[campo]
+            val_antigo = antigo[campo] or ''
+            if str(val_novo) != str(val_antigo):
+                detalhes_parts.append(f"{label}: '{val_antigo}' -> '{val_novo}'")
         detalhes = '; '.join(detalhes_parts) if detalhes_parts else 'Atualização sem alterações detectadas'
         conexao.execute(
             'INSERT INTO historico (cliente_id, cliente_nome, acao, detalhes) VALUES (?, ?, ?, ?)',
             (id_cliente, nome, 'ATUALIZACAO', detalhes),
         )
+        novo = conexao.execute('SELECT * FROM clientes WHERE id=?', (id_cliente,)).fetchone()
+        registrar_evento(
+            conexao,
+            acao="crm.cliente.atualizado",
+            entidade="cliente",
+            entidade_id=id_cliente,
+            valores_anteriores=antigo,
+            valores_novos=novo,
+        )
+        return 1
 
 
 def excluir_cliente(id_cliente) -> int:
+    """Inativa o cliente sem apagar seu historico ou vinculos empresariais."""
     with conectar() as conexao:
-        antigo = conexao.execute('SELECT * FROM clientes WHERE id=?', (id_cliente,)).fetchone()
-        cursor = conexao.execute('DELETE FROM clientes WHERE id=?', (id_cliente,))
+        antigo = conexao.execute(
+            'SELECT * FROM clientes WHERE id=? AND ativo=1', (id_cliente,)
+        ).fetchone()
+        if not antigo:
+            return 0
+        cursor = conexao.execute(
+            "UPDATE clientes SET ativo=0, excluido_em=datetime('now', 'localtime'), "
+            "atualizado_em=datetime('now', 'localtime') WHERE id=? AND ativo=1",
+            (id_cliente,),
+        )
         if antigo and cursor.rowcount > 0:
             conexao.execute(
                 'INSERT INTO historico (cliente_id, cliente_nome, acao, detalhes) VALUES (?, ?, ?, ?)',
                 (id_cliente, antigo['nome'], 'EXCLUSAO', f"Cliente excluído: {antigo['nome']}, {antigo['cidade'] or ''}, {antigo['bairro'] or ''}"),
+            )
+            novo = conexao.execute('SELECT * FROM clientes WHERE id=?', (id_cliente,)).fetchone()
+            registrar_evento(
+                conexao,
+                acao="crm.cliente.inativado",
+                entidade="cliente",
+                entidade_id=id_cliente,
+                valores_anteriores=antigo,
+                valores_novos=novo,
             )
         return cursor.rowcount
 
@@ -281,7 +237,9 @@ def importar_clientes_em_lote(clientes_lista):
             if not nome or not cep:
                 erros += 1
                 continue
-            existente = conexao.execute('SELECT id FROM clientes WHERE nome=? AND cep=?', (nome, cep)).fetchone()
+            existente = conexao.execute(
+                'SELECT id FROM clientes WHERE nome=? AND cep=? AND ativo=1', (nome, cep)
+            ).fetchone()
             if existente:
                 duplicados += 1
                 continue
@@ -294,6 +252,15 @@ def importar_clientes_em_lote(clientes_lista):
                 'INSERT INTO historico (cliente_id, cliente_nome, acao, detalhes) VALUES (?, ?, ?, ?)',
                 (cliente_id, nome, 'IMPORTACAO', 'Importado em lote'),
             )
+            novo = conexao.execute('SELECT * FROM clientes WHERE id=?', (cliente_id,)).fetchone()
+            registrar_evento(
+                conexao,
+                acao="crm.cliente.importado",
+                entidade="cliente",
+                entidade_id=cliente_id,
+                valores_novos=novo,
+                contexto_extra={"operacao": "importacao_em_lote"},
+            )
             sucessos += 1
     return {"sucessos": sucessos, "duplicados": duplicados, "erros": erros}
 
@@ -303,22 +270,80 @@ def excluir_sessao():
         conexao.execute('DELETE FROM sessao')
 
 
-def salvar_sessao(token, conta):
+def salvar_sessao(token, conta, refresh_token=None, expira_em=None):
+    """
+    Grava a sessao Microsoft, substituindo a anterior.
+
+    `refresh_token` e `expira_em` sao opcionais para nao quebrar chamadas
+    antigas de dois argumentos; quando ausentes, a sessao se comporta como
+    antes -- vale ate o Graph recusar o token.
+    """
     with conectar() as conexao:
         conexao.execute('DELETE FROM sessao')
-        token_cifrado = security.cifrar(token)
-        conexao.execute('INSERT INTO sessao (token, conta) VALUES (?, ?)', (token_cifrado, conta))
+        conexao.execute(
+            'INSERT INTO sessao (token, conta, refresh_token, expira_em) VALUES (?, ?, ?, ?)',
+            (
+                security.cifrar(token),
+                conta,
+                # O refresh_token e credencial de longa duracao: vale mais que
+                # o access_token e e cifrado pelo mesmo caminho.
+                security.cifrar(refresh_token) if refresh_token else None,
+                int(expira_em) if expira_em else None,
+            ),
+        )
+
+
+def _decifrar_campo(valor):
+    """Decifra tolerando o formato antigo (Fernet) alem do atual."""
+    if not valor:
+        return None
+    claro = security.decifrar(valor)
+    if claro is None:
+        claro = security.fernet_decifrar(valor)
+    return claro
 
 
 def obter_sessao():
     with conectar() as conexao:
-        linha = conexao.execute('SELECT token, conta FROM sessao LIMIT 1').fetchone()
-        if linha:
-            token_decifrado = security.decifrar(linha['token'])
-            if token_decifrado is None:
-                return None
-            return {"token": token_decifrado, "conta": linha["conta"]}
-    return None
+        linha = conexao.execute(
+            'SELECT token, conta, refresh_token, expira_em FROM sessao LIMIT 1'
+        ).fetchone()
+        if not linha:
+            return None
+
+        token_decifrado = _decifrar_campo(linha['token'])
+        if token_decifrado is None:
+            log_db.warning("[SESSAO] Falha ao decifrar token da sessao.")
+            return None
+
+        return {
+            "token": token_decifrado,
+            "conta": linha["conta"],
+            # Ausente nas sessoes gravadas antes desta coluna existir.
+            "refresh_token": _decifrar_campo(linha["refresh_token"]),
+            "expira_em": linha["expira_em"],
+        }
+
+
+def atualizar_token_sessao(token, expira_em, refresh_token=None):
+    """
+    Troca o access_token da sessao vigente sem tocar na conta.
+
+    A Microsoft pode devolver um refresh_token novo na renovacao (rotacao);
+    quando devolve, ele substitui o anterior. Quando nao devolve, o antigo
+    continua valendo e nao pode ser apagado.
+    """
+    with conectar() as conexao:
+        if refresh_token:
+            conexao.execute(
+                'UPDATE sessao SET token=?, expira_em=?, refresh_token=?',
+                (security.cifrar(token), int(expira_em), security.cifrar(refresh_token)),
+            )
+        else:
+            conexao.execute(
+                'UPDATE sessao SET token=?, expira_em=?',
+                (security.cifrar(token), int(expira_em)),
+            )
 
 
 def obter_caminho_banco_absoluto() -> str:
@@ -340,18 +365,34 @@ def listar_pagamentos(cliente_id=None, status=None):
     return [dict(linha) for linha in linhas]
 
 
-def salvar_pagamento(cliente_id, cliente_nome, valor, descricao, data_vencimento, tipo_pagamento='Pix'):
-    """Cria um novo pagamento e retorna o ID."""
+def salvar_pagamento(cliente_id, cliente_nome, valor, descricao, data_vencimento,
+                     tipo_pagamento='Pix', status='Pendente', data_pagamento=''):
+    """
+    Cria um novo pagamento e retorna o ID.
+
+    `status`/`data_pagamento` sao parametros porque a tela de recebimento
+    registra dinheiro que JA entrou. Fixar 'Pendente' aqui fazia esse
+    lancamento nascer vencido e ser contado como atrasado no mesmo instante.
+    """
     with conectar() as conexao:
         conexao.execute(
-            'INSERT INTO pagamentos (cliente_id, cliente_nome, valor, descricao, status, data_vencimento, tipo_pagamento) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?)',
-            (cliente_id, cliente_nome, valor, descricao, 'Pendente', data_vencimento, tipo_pagamento),
+            'INSERT INTO pagamentos (cliente_id, cliente_nome, valor, descricao, status, data_vencimento, tipo_pagamento, data_pagamento) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            (cliente_id, cliente_nome, valor, descricao, status, data_vencimento, tipo_pagamento, data_pagamento),
         )
         pagamento_id = conexao.execute('SELECT last_insert_rowid()').fetchone()[0]
+        acao = 'Recebimento registrado' if status == 'Recebido' else 'Cobranca criada'
         conexao.execute(
             'INSERT INTO historico (cliente_id, cliente_nome, acao, detalhes) VALUES (?, ?, ?, ?)',
-            (cliente_id, cliente_nome, 'PAGAMENTO', f'Cobranca criada: R$ {valor:.2f} ({tipo_pagamento})'),
+            (cliente_id, cliente_nome, 'PAGAMENTO', f'{acao}: R$ {valor:.2f} ({tipo_pagamento})'),
+        )
+        novo = conexao.execute('SELECT * FROM pagamentos WHERE id=?', (pagamento_id,)).fetchone()
+        registrar_evento(
+            conexao,
+            acao="financeiro.recebivel.criado",
+            entidade="pagamento",
+            entidade_id=pagamento_id,
+            valores_novos=novo,
         )
         return pagamento_id
 
@@ -369,6 +410,11 @@ def atualizar_pagamento(pagamento_id, **kwargs):
     sets = ', '.join(f'{k}=?' for k in campos)
     vals = list(campos.values()) + [pagamento_id]
     with conectar() as conexao:
+        antigo = conexao.execute(
+            'SELECT * FROM pagamentos WHERE id=?', (pagamento_id,)
+        ).fetchone()
+        if not antigo:
+            return 0
         conexao.execute(f'UPDATE pagamentos SET {sets} WHERE id=?', vals)
         linhas = conexao.execute('SELECT changes()').fetchone()[0]
         if 'status' in campos and campos['status'] == 'Recebido':
@@ -379,21 +425,59 @@ def atualizar_pagamento(pagamento_id, **kwargs):
                     (pagamento['cliente_id'], pagamento['cliente_nome'], 'PAGAMENTO',
                      f'Pagamento confirmado: R$ {pagamento["valor"]:.2f}'),
                 )
+        if linhas:
+            novo = conexao.execute(
+                'SELECT * FROM pagamentos WHERE id=?', (pagamento_id,)
+            ).fetchone()
+            registrar_evento(
+                conexao,
+                acao="financeiro.recebivel.atualizado",
+                entidade="pagamento",
+                entidade_id=pagamento_id,
+                valores_anteriores=antigo,
+                valores_novos=novo,
+            )
         return linhas
 
 
 def excluir_pagamento(pagamento_id) -> int:
-    """Exclui um pagamento pendente."""
+    """
+    Cancela uma cobranca removendo o registro, e so se ela ainda estiver
+    Pendente. Devolve quantas linhas foram apagadas (0 ou 1).
+    """
     with conectar() as conexao:
         pagamento = conexao.execute('SELECT * FROM pagamentos WHERE id=?', (pagamento_id,)).fetchone()
-        cursor = conexao.execute('DELETE FROM pagamentos WHERE id=? AND status="Pendente"', (pagamento_id,))
+        cursor = conexao.execute("DELETE FROM pagamentos WHERE id=? AND status='Pendente'", (pagamento_id,))
         if pagamento and cursor.rowcount > 0:
             conexao.execute(
                 'INSERT INTO historico (cliente_id, cliente_nome, acao, detalhes) VALUES (?, ?, ?, ?)',
                 (pagamento['cliente_id'], pagamento['cliente_nome'], 'PAGAMENTO',
                  f'Cobranca cancelada: R$ {pagamento["valor"]:.2f}'),
             )
+            registrar_evento(
+                conexao,
+                acao="financeiro.recebivel.cancelado",
+                entidade="pagamento",
+                entidade_id=pagamento_id,
+                valores_anteriores=pagamento,
+            )
         return cursor.rowcount
+
+
+def atualizar_pagamento_por_asaas(
+    asaas_payment_id: str,
+    novo_status: str,
+    *,
+    preencher_data_pagamento: bool = False,
+    status_anterior: str | None = None,
+) -> int:
+    return aplicar_evento_asaas(
+        conectar,
+        asaas_payment_id,
+        novo_status,
+        preencher_data_pagamento=preencher_data_pagamento,
+        status_anterior=status_anterior,
+    )
 
 
 def obter_pagamento_por_id(pagamento_id):
@@ -418,7 +502,23 @@ def obter_ou_criar_cliente_asaas(cliente_id, nome, cpf_cnpj=None, email=None, ci
                 'INSERT OR REPLACE INTO clientes_asaas (cliente_id, asaas_customer_id) VALUES (?, ?)',
                 (cliente_id, asaas_id),
             )
+            registrar_evento(
+                conexao,
+                acao="crm.cliente.integracao_asaas_vinculada",
+                entidade="cliente_asaas",
+                entidade_id=cliente_id,
+                valores_novos={
+                    "cliente_id": cliente_id,
+                    "asaas_customer_id": asaas_id,
+                },
+            )
         return asaas_id
+
+
+# Cobrancas que ainda representam dinheiro a entrar. 'Atrasado' continua
+# sendo um valor a receber: vencer nao quita nem cancela a cobranca. Os
+# dois blocos de metricas do dashboard leem daqui para nao divergirem.
+_STATUS_A_RECEBER = "('Pendente', 'Atrasado')"
 
 
 def obter_metricas_pagamentos():
@@ -428,16 +528,20 @@ def obter_metricas_pagamentos():
             "SELECT COALESCE(SUM(valor), 0) FROM pagamentos WHERE status='Recebido'"
         ).fetchone()[0]
         total_pendente = conexao.execute(
-            "SELECT COALESCE(SUM(valor), 0) FROM pagamentos WHERE status='Pendente'"
+            "SELECT COALESCE(SUM(valor), 0) FROM pagamentos "
+            f"WHERE status IN {_STATUS_A_RECEBER}"
         ).fetchone()[0]
         total_atrasado = conexao.execute(
-            "SELECT COALESCE(SUM(valor), 0) FROM pagamentos WHERE status='Pendente' AND data_vencimento < date('now', 'localtime')"
+            "SELECT COALESCE(SUM(valor), 0) FROM pagamentos "
+            f"WHERE status IN {_STATUS_A_RECEBER} "
+            "AND data_vencimento != '' AND date(data_vencimento) < date('now', 'localtime')"
         ).fetchone()[0]
         qtd_recebido = conexao.execute(
             "SELECT COUNT(*) FROM pagamentos WHERE status='Recebido'"
         ).fetchone()[0]
         qtd_pendente = conexao.execute(
-            "SELECT COUNT(*) FROM pagamentos WHERE status='Pendente'"
+            "SELECT COUNT(*) FROM pagamentos "
+            f"WHERE status IN {_STATUS_A_RECEBER}"
         ).fetchone()[0]
     return {
         'total_recebido': total_recebido or 0,
@@ -481,7 +585,8 @@ def obter_metricas_financeiras(meses_historico=6):
         ).fetchone()[0] or 0
 
         a_receber = conexao.execute(
-            "SELECT COALESCE(SUM(valor), 0) FROM pagamentos WHERE status = 'Pendente'"
+            "SELECT COALESCE(SUM(valor), 0) FROM pagamentos "
+            f"WHERE status IN {_STATUS_A_RECEBER}"
         ).fetchone()[0] or 0
 
         em_atraso = conexao.execute(
@@ -537,7 +642,8 @@ def obter_dados_grafico_por_tipo():
     """Retorna contagem de clientes por tipo (Entrega/Retirada) para gráfico de pizza."""
     with conectar() as conexao:
         linhas = conexao.execute(
-            "SELECT entrega_retirada, COUNT(*) as total FROM clientes GROUP BY entrega_retirada"
+            "SELECT entrega_retirada, COUNT(*) as total FROM clientes "
+            "WHERE ativo=1 GROUP BY entrega_retirada"
         ).fetchall()
         return {row['entrega_retirada']: row['total'] for row in linhas}
 
@@ -546,7 +652,9 @@ def obter_dados_grafico_cidades(limite=10):
     """Retorna top N cidades com mais clientes para gráfico de barras."""
     with conectar() as conexao:
         linhas = conexao.execute(
-            "SELECT cidade, COUNT(*) as total FROM clientes WHERE cidade IS NOT NULL AND cidade != '' GROUP BY cidade ORDER BY total DESC LIMIT ?",
+            "SELECT cidade, COUNT(*) as total FROM clientes WHERE ativo=1 "
+            "AND cidade IS NOT NULL AND cidade != '' "
+            "GROUP BY cidade ORDER BY total DESC LIMIT ?",
             (limite,)
         ).fetchall()
         return [(row['cidade'], row['total']) for row in linhas]
@@ -556,7 +664,9 @@ def obter_dados_grafico_timeline(dias=30):
     """Retorna cadastros por dia nos últimos N dias para gráfico de linha."""
     with conectar() as conexao:
         linhas = conexao.execute(
-            "SELECT date(criado_em) as dia, COUNT(*) as total FROM clientes WHERE criado_em >= date('now', '-' || ? || ' days', 'localtime') GROUP BY dia ORDER BY dia",
+            "SELECT date(criado_em) as dia, COUNT(*) as total FROM clientes "
+            "WHERE ativo=1 AND criado_em >= date('now', '-' || ? || ' days', 'localtime') "
+            "GROUP BY dia ORDER BY dia",
             (dias,)
         ).fetchall()
         return [(row['dia'], row['total']) for row in linhas]
@@ -566,7 +676,8 @@ def obter_clientes_para_mapa():
     """Retorna clientes individuais com CEP para geolocalizacao no mapa."""
     with conectar() as conexao:
         linhas = conexao.execute(
-            "SELECT id, nome, cep, rua, bairro, cidade, entrega_retirada FROM clientes WHERE cep IS NOT NULL AND cep != '' ORDER BY id DESC"
+            "SELECT id, nome, cep, rua, bairro, cidade, entrega_retirada "
+            "FROM clientes WHERE ativo=1 AND cep IS NOT NULL AND cep != '' ORDER BY id DESC"
         ).fetchall()
         return [{
             "id": row["id"],
@@ -581,7 +692,7 @@ def obter_clientes_para_mapa():
 
 def listar_clientes_filtrados(tipo='', cidade='', data_inicio='', data_fim=''):
     """Retorna clientes filtrados por tipo, cidade e período para relatórios."""
-    query = 'SELECT * FROM clientes WHERE 1=1'
+    query = 'SELECT * FROM clientes WHERE ativo=1'
     params = []
     if tipo:
         query += ' AND entrega_retirada=?'
@@ -614,7 +725,8 @@ def obter_perfis_regiao():
             "SELECT cidade, COUNT(*) as total, "
             "SUM(CASE WHEN entrega_retirada='Entrega' THEN 1 ELSE 0 END) as entregas, "
             "SUM(CASE WHEN entrega_retirada='Retirada' THEN 1 ELSE 0 END) as retiradas "
-            "FROM clientes WHERE cidade IS NOT NULL AND cidade != '' GROUP BY cidade ORDER BY total DESC"
+            "FROM clientes WHERE ativo=1 AND cidade IS NOT NULL AND cidade != '' "
+            "GROUP BY cidade ORDER BY total DESC"
         ).fetchall()
     return [{
         "cidade": row["cidade"], "total": row["total"],
@@ -626,7 +738,8 @@ def obter_ultimos_clientes(limite=5):
     """Retorna os últimos N clientes cadastrados."""
     with conectar() as conexao:
         linhas = conexao.execute(
-            'SELECT id, nome, cidade, bairro, entrega_retirada, criado_em FROM clientes ORDER BY id DESC LIMIT ?',
+            'SELECT id, nome, cidade, bairro, entrega_retirada, criado_em '
+            'FROM clientes WHERE ativo=1 ORDER BY id DESC LIMIT ?',
             (limite,)
         ).fetchall()
         return [{
@@ -639,11 +752,20 @@ def obter_ultimos_clientes(limite=5):
 def obter_metricas_dashboard():
     try:
         with conectar() as conexao:
-            total_clientes = conexao.execute('SELECT COUNT(*) FROM clientes').fetchone()[0] or 0
-            total_entrega = conexao.execute("SELECT COUNT(*) FROM clientes WHERE entrega_retirada='Entrega'").fetchone()[0] or 0
-            total_retirada = conexao.execute("SELECT COUNT(*) FROM clientes WHERE entrega_retirada='Retirada'").fetchone()[0] or 0
+            total_clientes = conexao.execute(
+                'SELECT COUNT(*) FROM clientes WHERE ativo=1'
+            ).fetchone()[0] or 0
+            total_entrega = conexao.execute(
+                "SELECT COUNT(*) FROM clientes WHERE ativo=1 AND entrega_retirada='Entrega'"
+            ).fetchone()[0] or 0
+            total_retirada = conexao.execute(
+                "SELECT COUNT(*) FROM clientes WHERE ativo=1 AND entrega_retirada='Retirada'"
+            ).fetchone()[0] or 0
             try:
-                cadastros_30d = conexao.execute("SELECT COUNT(*) FROM clientes WHERE criado_em >= datetime('now', '-30 days', 'localtime')").fetchone()[0] or 0
+                cadastros_30d = conexao.execute(
+                    "SELECT COUNT(*) FROM clientes WHERE ativo=1 AND "
+                    "criado_em >= datetime('now', '-30 days', 'localtime')"
+                ).fetchone()[0] or 0
             except Exception:
                 cadastros_30d = 0
             return {
@@ -653,7 +775,7 @@ def obter_metricas_dashboard():
                 "cadastros_30d": cadastros_30d,
             }
     except Exception:
-        _log_db.exception("Erro ao obter metricas do dashboard")
+        log_db.exception("Erro ao obter metricas do dashboard")
         return {"total_clientes": 0, "total_entrega": 0, "total_retirada": 0, "cadastros_30d": 0}
 
 
@@ -666,7 +788,18 @@ def agendar_entrega(cliente_id, cliente_nome, data_entrega, hora_entrega='', des
             'INSERT INTO entregas_agendadas (cliente_id, cliente_nome, data_entrega, hora_entrega, descricao) VALUES (?, ?, ?, ?, ?)',
             (cliente_id, cliente_nome, data_entrega, hora_entrega, descricao),
         )
-        return conexao.execute('SELECT last_insert_rowid()').fetchone()[0]
+        entrega_id = conexao.execute('SELECT last_insert_rowid()').fetchone()[0]
+        novo = conexao.execute(
+            'SELECT * FROM entregas_agendadas WHERE id=?', (entrega_id,)
+        ).fetchone()
+        registrar_evento(
+            conexao,
+            acao="operacional.entrega.agendada",
+            entidade="entrega",
+            entidade_id=entrega_id,
+            valores_novos=novo,
+        )
+        return entrega_id
 
 
 def listar_entregas_agendadas(status=None):
@@ -683,154 +816,46 @@ def listar_entregas_agendadas(status=None):
 
 def atualizar_status_entrega(entrega_id, novo_status):
     with conectar() as conexao:
+        antigo = conexao.execute(
+            'SELECT * FROM entregas_agendadas WHERE id=?', (entrega_id,)
+        ).fetchone()
+        if not antigo:
+            return 0
         conexao.execute('UPDATE entregas_agendadas SET status=? WHERE id=?', (novo_status, entrega_id))
-        return conexao.execute('SELECT changes()').fetchone()[0]
+        linhas = conexao.execute('SELECT changes()').fetchone()[0]
+        if linhas:
+            novo = conexao.execute(
+                'SELECT * FROM entregas_agendadas WHERE id=?', (entrega_id,)
+            ).fetchone()
+            registrar_evento(
+                conexao,
+                acao="operacional.entrega.status_alterado",
+                entidade="entrega",
+                entidade_id=entrega_id,
+                valores_anteriores=antigo,
+                valores_novos=novo,
+            )
+        return linhas
 
 
+# ---------------------------------------------------------------------------
+# Notificacoes
+#
+# A implementacao vive em `notificacoes_db.py`. Os involucros abaixo existem
+# porque os blueprints e os testes chamam `database.obter_notificacoes(...)`, e
+# sao eles que injetam a fabrica de conexao deste modulo -- mantendo valido o
+# ponto de extensao que os testes usam ao substituir `database.DB_PATH`.
+# ---------------------------------------------------------------------------
 def obter_notificacoes():
     """Gera lista inteligente de notificacoes do sistema."""
-    notifs = []
-    with conectar() as conexao:
-        # 1. Entregas agendadas para hoje
-        entregas_hoje = conexao.execute(
-            "SELECT * FROM entregas_agendadas WHERE date(data_entrega) = date('now', 'localtime') AND status != 'Concluida'"
-        ).fetchall()
-        for e in entregas_hoje:
-            notifs.append({
-                'tipo': 'entrega_hoje',
-                'chave': f"entrega_hoje:{e['id']}",
-                'prioridade': 'alta',
-                'icone': '📦',
-                'msg': f"Entrega agendada para HOJE: {e['cliente_nome']}" + (f" as {e['hora_entrega']}" if e['hora_entrega'] else ''),
-                'detalhes': e['descricao'] or '',
-                'entrega_id': e['id'],
-                'data': e['data_entrega']
-            })
-
-        # 2. Entregas proximas (3 dias)
-        entregas_proximas = conexao.execute(
-            "SELECT * FROM entregas_agendadas WHERE date(data_entrega) > date('now', 'localtime') AND date(data_entrega) <= date('now', '+3 days', 'localtime') AND status != 'Concluida'"
-        ).fetchall()
-        for e in entregas_proximas:
-            notifs.append({
-                'tipo': 'entrega_proxima',
-                'chave': f"entrega_proxima:{e['id']}",
-                'prioridade': 'media',
-                'icone': '📋',
-                'msg': f"Entrega proxima: {e['cliente_nome']} em {e['data_entrega']}",
-                'detalhes': e['descricao'] or '',
-                'entrega_id': e['id'],
-                'data': e['data_entrega']
-            })
-
-        # 3. Entregas atrasadas
-        entregas_atrasadas = conexao.execute(
-            "SELECT * FROM entregas_agendadas WHERE date(data_entrega) < date('now', 'localtime') AND status != 'Concluida'"
-        ).fetchall()
-        for e in entregas_atrasadas:
-            notifs.append({
-                'tipo': 'entrega_atrasada',
-                'chave': f"entrega_atrasada:{e['id']}",
-                'prioridade': 'critica',
-                'icone': '🚨',
-                'msg': f"ENTREGA ATRASADA: {e['cliente_nome']} (era {e['data_entrega']})",
-                'detalhes': e['descricao'] or '',
-                'entrega_id': e['id'],
-                'data': e['data_entrega']
-            })
-
-        # 4. Clientes inativos (sem atualizacao ha mais de 90 dias)
-        clientes_inativos = conexao.execute(
-            "SELECT id, nome, cidade, atualizado_em FROM clientes WHERE atualizado_em < datetime('now', '-90 days', 'localtime') OR atualizado_em IS NULL ORDER BY atualizado_em ASC"
-        ).fetchall()
-        for c in clientes_inativos:
-            dias = ''
-            if c['atualizado_em']:
-                try:
-                    dt = datetime.strptime(c['atualizado_em'], '%Y-%m-%d %H:%M:%S')
-                    dias = (datetime.now() - dt).days
-                except Exception:
-                    dias = '?'
-            notifs.append({
-                'tipo': 'cliente_inativo',
-                'chave': f"cliente_inativo:{c['id']}",
-                'prioridade': 'baixa',
-                'icone': '👤',
-                'msg': f"{c['nome']} sem atualizacao ha {dias} dias",
-                'detalhes': c['cidade'] or '',
-                'cliente_id': c['id'],
-                'data': c['atualizado_em'] or ''
-            })
-
-        # 5. Pagamentos atrasados
-        pagamentos_atrasados = conexao.execute(
-            "SELECT p.*, c.nome as nome_cliente FROM pagamentos p LEFT JOIN clientes c ON p.cliente_id = c.id WHERE p.data_vencimento < date('now', 'localtime') AND p.status = 'Pendente'"
-        ).fetchall()
-        for p in pagamentos_atrasados:
-            notifs.append({
-                'tipo': 'pagamento_atrasado',
-                'chave': f"pagamento_atrasado:{p['id']}",
-                'prioridade': 'alta',
-                'icone': '💰',
-                'msg': f"Pagamento R$ {p['valor']:.2f} de {p['nome_cliente'] or p['cliente_nome']} atrasado!",
-                'detalhes': f"Vencimento: {p['data_vencimento']}",
-                'pagamento_id': p['id'],
-                'data': p['data_vencimento']
-            })
-
-        # 6. Pagamentos vencendo hoje
-        pagamentos_hoje = conexao.execute(
-            "SELECT p.*, c.nome as nome_cliente FROM pagamentos p LEFT JOIN clientes c ON p.cliente_id = c.id WHERE date(p.data_vencimento) = date('now', 'localtime') AND p.status = 'Pendente'"
-        ).fetchall()
-        for p in pagamentos_hoje:
-            notifs.append({
-                'tipo': 'pagamento_hoje',
-                'chave': f"pagamento_hoje:{p['id']}",
-                'prioridade': 'media',
-                'icone': '💳',
-                'msg': f"Pagamento R$ {p['valor']:.2f} de {p['nome_cliente'] or p['cliente_nome']} vence HOJE!",
-                'detalhes': '',
-                'pagamento_id': p['id'],
-                'data': p['data_vencimento']
-            })
-
-        # Marca quais ja foram lidas. Notificacoes lidas continuam na lista
-        # (o fato subjacente nao mudou), mas nao contam para o badge.
-        lidas = {linha['chave'] for linha in
-                 conexao.execute('SELECT chave FROM notificacoes_lidas').fetchall()}
-
-    for n in notifs:
-        n['lida'] = n.get('chave') in lidas
-
-    # Nao lidas primeiro; dentro de cada grupo, por prioridade.
-    ordem = {'critica': 0, 'alta': 1, 'media': 2, 'baixa': 3}
-    notifs.sort(key=lambda n: (n['lida'], ordem.get(n.get('prioridade', 'baixa'), 4)))
-    return notifs
+    return notificacoes_db.obter_notificacoes(conectar)
 
 
 def marcar_notificacoes_lidas(chaves) -> int:
     """Marca as chaves informadas como lidas. Idempotente."""
-    chaves = [str(c).strip() for c in (chaves or []) if str(c).strip()]
-    if not chaves:
-        return 0
-    with conectar() as conexao:
-        conexao.executemany(
-            'INSERT OR IGNORE INTO notificacoes_lidas (chave) VALUES (?)',
-            [(c,) for c in chaves],
-        )
-        return len(chaves)
+    return notificacoes_db.marcar_notificacoes_lidas(conectar, chaves)
 
 
 def desmarcar_notificacoes_lidas(chaves=None) -> int:
-    """Remove o estado de lida. Sem chaves, limpa todas."""
-    with conectar() as conexao:
-        if chaves is None:
-            cursor = conexao.execute('DELETE FROM notificacoes_lidas')
-        else:
-            chaves = [str(c).strip() for c in chaves if str(c).strip()]
-            if not chaves:
-                return 0
-            marcadores = ','.join('?' * len(chaves))
-            cursor = conexao.execute(
-                f'DELETE FROM notificacoes_lidas WHERE chave IN ({marcadores})', chaves)
-        return cursor.rowcount
+    """Volta notificacoes para nao lidas. Sem chaves, limpa todas."""
+    return notificacoes_db.desmarcar_notificacoes_lidas(conectar, chaves)

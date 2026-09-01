@@ -1,17 +1,47 @@
 # Build & Development Guide - Adri Poltronas
 
+## Arquitetura
+
+O app tem dois processos:
+
+| Processo | O que faz | Onde mora |
+|----------|-----------|-----------|
+| **Electron** (Node/TypeScript) | Abre a janela principal e aponta para o backend | `electron/` -> compilado em `dist-electron/` |
+| **Flask** (Python) | API, banco SQLite, migrations, integracoes | `backend/` -> entrypoint `backend/servidor.py` |
+| **Qt** (C++) | Janela alternativa, opcional, sobre o mesmo backend | `qt-app/` -> ver [qt-app/README.md](qt-app/README.md) |
+| **.NET / Avalonia** (C#) | Aplicativo desktop em camadas; le o mesmo banco | `dotnet/` -> ver [dotnet/README.md](dotnet/README.md) |
+
+O Electron sobe o Python como processo filho, espera a porta `127.0.0.1:5000`
+responder e so entao mostra a janela. Ao fechar a janela, o filho e encerrado.
+
+> A porta e fixa porque o `redirect_uri` do OAuth da Microsoft esta registrado
+> no Azure como `http://localhost:5000/callback`.
+
+O motor de exibicao anterior era o WebView2, embutido via pywebview. Ele foi
+removido: alem de depender do runtime da Microsoft instalado na maquina, o
+`fetch()` para hosts externos falhava nele, o que quebrava a geocodificacao do
+mapa (ViaCEP/Nominatim). O Electron traz o proprio Chromium e nao tem o problema.
+
+## Pre-requisitos
+
+- Python 3.10+ (o CI cobre 3.10, 3.11 e 3.12)
+- Node.js 20+ (o CI usa 22)
+- Opcional, so para a janela Qt: Qt 6.8+ com MinGW e CMake 3.21+
+- Para o aplicativo Avalonia: .NET SDK 8.0+
+
 ## Quick Start
 
 ### Instalação de Dependências
 ```bash
-# Usando Python script
+# Usando Python script (instala Python + Node)
 python build.py install-deps
 
-# Ou usando Makefile (Linux/macOS)
+# Ou usando Makefile
 make install-deps
 
-# Ou pip direto
+# Ou direto
 pip install -r backend/requirements.txt
+npm install
 ```
 
 ### Executar Testes
@@ -28,23 +58,44 @@ python build.py lint
 make lint
 ```
 
-### Build da Aplicação (PyInstaller)
+### Build (dois estágios)
 ```bash
-python build.py build
+# Estágio 1: PyInstaller empacota o backend (sem janela)
+python build.py build      # -> dist/AdriPoltronasBackend/
+
+# Estágio 2: electron-builder gera o instalador NSIS
+python build.py installer  # -> dist-instalador/
 # ou
-make build
+make installer
 ```
 
 ### Desenvolvimento Local
 ```bash
-# Executar a aplicação
-python build.py test && python main.py
-
-# Ou com Makefile
+# App completo (compila o TypeScript e abre a janela)
+npm start
+# ou
 make run
 
-# Modo debug Flask
+# Só o backend, sem janela, em http://127.0.0.1:5000/
+python backend/servidor.py
+# ou
 make dev
+
+# Checagem de tipos do processo principal do Electron
+npm run typecheck
+
+# Janela alternativa em Qt (compila + ctest)
+python build.py qt
+# ou
+make qt
+
+# Aplicativo .NET/Avalonia (restore + build + test)
+python build.py dotnet
+# ou
+make dotnet
+
+# Executar o aplicativo Avalonia
+make run-dotnet
 ```
 
 ### Limpeza
@@ -66,7 +117,10 @@ Script Python que funciona em Windows, Linux e macOS. Ideal para CI/CD e desenvo
 - `python build.py lint` - Verifica estilo
 - `python build.py install-deps` - Instala dependências
 - `python build.py clean` - Limpa arquivos gerados
-- `python build.py build` - Build completo
+- `python build.py build` - Empacota o backend com PyInstaller
+- `python build.py installer` - Build + electron-builder (instalador)
+- `python build.py qt` - Compila e testa a janela Qt
+- `python build.py dotnet` - Restaura, compila e testa a solution .NET
 - `python build.py help` - Mostra ajuda
 
 #### Makefile (Linux/macOS)
@@ -75,8 +129,13 @@ Tradicional Makefile para Unix-like systems.
 **Targets:**
 - `make test` - Testes
 - `make lint` - Lint
-- `make build` - Build completo
-- `make run` - Executar aplicação
+- `make build` - Empacota o backend
+- `make installer` - Instalador completo
+- `make qt` - Compila e testa a janela Qt
+- `make dotnet` - Compila e testa a solution .NET/Avalonia
+- `make run` - Executar aplicação (janela Electron)
+- `make run-qt` - Executar a janela Qt
+- `make run-dotnet` - Executar o aplicativo Avalonia
 - `make dev` - Modo desenvolvimento
 - `make clean` - Limpeza
 - `make help` - Ajuda
@@ -87,8 +146,11 @@ O GitHub Actions está configurado para:
 
 1. **Lint** - Verifica estilo com ruff
 2. **Testes** - Executa pytest com Python 3.10, 3.11, 3.12
-3. **Segurança** - Verifica vulnerabilidades com pip-audit e safety
-4. **Coverage** - Enviia relatórios para Codecov (opcional)
+3. **Electron** - `npm ci`, `tsc --noEmit` e build do processo principal
+4. **Qt** - CMake + ctest da janela alternativa
+5. **.NET** - `dotnet restore`, `build` e `test` (roda no Linux, para pegar dependência acidental de Windows)
+6. **Segurança** - Verifica vulnerabilidades com pip-audit e scan de segredos
+7. **Coverage** - Envia relatórios para Codecov (opcional)
 
 Arquivo: `.github/workflows/ci.yml`
 
@@ -112,8 +174,21 @@ python -m pytest ../tests --cov=. --cov-report=html
 ### Estrutura do Projeto
 ```
 Adri Poltronas/
-├── main.py                 # Entry point
+├── package.json            # Manifesto do Electron + config do electron-builder
+├── tsconfig.json           # TypeScript (strict) do processo principal
+├── electron/
+│   ├── main.ts             # Janela, single-instance, links externos
+│   └── backend.ts          # Sobe/encerra o processo Flask
+├── dotnet/                 # Aplicativo C#/Avalonia em camadas
+│   ├── AdriPoltronas.sln
+│   ├── src/                # Domain, Application, Infrastructure, Desktop
+│   └── tests/              # xUnit, um projeto por camada
+├── qt-app/                 # Janela alternativa em C++/Qt (opcional)
+│   ├── CMakeLists.txt
+│   ├── src/                # ProcessoBackend, ClienteApi, JanelaPrincipal...
+│   └── tests/              # QtTest, rodados pelo ctest
 ├── backend/
+│   ├── servidor.py         # Entry point do backend (headless)
 │   ├── app.py              # Flask app (core)
 │   ├── blueprints/         # Modularização de rotas
 │   ├── database.py         # SQLite ORM
@@ -134,6 +209,7 @@ Adri Poltronas/
 │   └── test_validators.py  # Testes de validação
 ├── migrations/             # Alembic migrations
 ├── docs/
+├── AdriPoltronasBackend.spec  # PyInstaller (backend, console)
 ├── build.py                # Build script
 └── Makefile
 ```
@@ -198,6 +274,31 @@ make test
 - Verificar se PyInstaller está instalado
 - Verificar se icone_sistema.ico existe
 - Ver logs em `build/` directory
+
+### A janela abre em branco
+O backend não subiu. Rode `python backend/servidor.py` sozinho para ver o erro
+— o Electron repassa a saída do filho prefixada com `[backend]` no console.
+
+### electron-builder falha com `Cannot create symbolic link`
+O pacote `winCodeSign` traz dois symlinks de dylibs do macOS, e criar symlink no
+Windows exige privilégio de administrador ou o Modo Desenvolvedor ligado. Extraia
+o cache manualmente, sem a pasta `darwin` (inútil num build Windows):
+
+```bash
+CACHE="$LOCALAPPDATA/electron-builder/Cache/winCodeSign"
+node_modules/7zip-bin/win/x64/7za.exe x -y "-x!darwin"   "$CACHE/<hash>.7z" "-o$CACHE/winCodeSign-2.6.0"
+```
+Depois apague os diretórios numéricos órfãos em `$CACHE` e rode o build de novo.
+
+### electron-builder falha com `image must be at least 256x256`
+O `icone_sistema.ico` precisa de uma camada de 256×256. Há um teste que cobre
+isso (`test_icone_tem_camada_de_256px`).
+
+### `npm install` não baixou o binário do Electron
+Versões recentes do npm bloqueiam scripts de instalação. Force o download:
+```bash
+cd node_modules/electron && node install.js
+```
 
 ### Porta 5000 ocupada
 ```bash

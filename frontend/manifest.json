@@ -4,11 +4,14 @@
   "description": "Sistema de gestao de clientes - Adri Poltronas",
   "start_url": "/",
   "display": "browser",
-  "background_color": "#0f172a",
-  "theme_color": "#3b82f6",
+  "background_color": "#F2EEE7",
+  "theme_color": "#F2EEE7",
   "orientation": "any",
   "scope": "/",
-  "categories": ["business", "productivity"],
+  "categories": [
+    "business",
+    "productivity"
+  ],
   "lang": "pt-BR",
   "dir": "ltr",
   "icons": [

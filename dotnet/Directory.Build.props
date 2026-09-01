@@ -1,0 +1,19 @@
+<Project>
+  <!-- Configuracao comum a todos os projetos da solution. Centralizar aqui
+       evita a mesma linha repetida em sete .csproj. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>12.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Warnings viram erro: numa base nova e barato manter limpo, e evita
+         que avisos de nulabilidade se acumulem ate ninguem mais ler. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- Globalizacao ligada. Com o modo invariante, GetCultureInfo("pt-BR")
+         lanca e todo valor em reais sai como "¤1.234,56": moeda, separador
+         decimal e nome de mes sao conteudo visivel de um sistema que atende
+         uma revenda brasileira, nao detalhe de formatacao. Em Linux isso exige
+         o pacote libicu instalado; no Windows o suporte ja vem no sistema. -->
+    <InvariantGlobalization>false</InvariantGlobalization>
+  </PropertyGroup>
+</Project>

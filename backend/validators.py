@@ -1,8 +1,10 @@
 """
-Validações de entrada para os endpoints de cliente.
+Validações de entrada dos endpoints de cliente, pagamento e entrega agendada.
 Centraliza regras para que frontend e backend fiquem em sincronia.
 """
 import re
+import time
+from datetime import datetime
 
 # Limites razoáveis para um cadastro de cliente
 NOME_MIN, NOME_MAX = 2, 120
@@ -16,6 +18,7 @@ OPCOES_ENTREGA = {'Entrega', 'Retirada'}
 _RE_CEP = re.compile(r"^\d{5}-?\d{3}$")
 _RE_SEGURO = re.compile(r"^[\w\sÀ-ÿ'.,\-()/]+$", re.UNICODE)
 _RE_DATA = re.compile(r'^\d{4}-\d{2}-\d{2}$')
+_RE_HORA = re.compile(r'^([01]\d|2[0-3]):[0-5]\d$')
 
 
 def _normalizar_texto(valor, max_len):
@@ -38,6 +41,50 @@ def _campo_valido(valor, max_len, obrigatorio=True, min_len=1):
     if any(ord(c) < 32 and c not in '\t\n\r' for c in valor):
         return False
     return True
+
+
+# Teto do INTEGER do SQLite (8 bytes com sinal).
+MAX_INTEIRO_SQLITE = 2 ** 63 - 1
+
+
+def data_valida(texto) -> bool:
+    """
+    True quando `texto` e uma data real no formato AAAA-MM-DD.
+
+    O regex sozinho aceitava '2026-13-45'. O SQLite nao reclama: `date()`
+    sobre uma data impossivel devolve NULL, e a comparacao some silenciosamente
+    -- uma entrega com data invalida nunca aparecia nos alertas, e uma cobranca
+    nunca era marcada como atrasada.
+    """
+    if not _RE_DATA.match(str(texto or '')):
+        return False
+    try:
+        datetime.strptime(texto, '%Y-%m-%d')
+    except ValueError:
+        return False
+    return True
+
+
+def inteiro_positivo(valor):
+    """
+    Converte `valor` para um int positivo, ou devolve None se nao der.
+
+    Identificadores chegam como texto (query string, corpo JSON) e eram
+    passados direto para int(). Um `?cliente_id=abc` levantava ValueError
+    fora de qualquer try, e o handler generico transformava isso num 500 com
+    id de correlacao -- ruido no log para o que e apenas entrada invalida.
+    """
+    if valor is None:
+        return None
+    texto = str(valor).strip()
+    if not texto.isdigit():
+        return None
+    numero = int(texto)
+    if numero <= 0 or numero > MAX_INTEIRO_SQLITE:
+        # Acima do INTEGER de 64 bits o sqlite3 levanta OverflowError na
+        # propria execucao da query -- de novo um 500 para entrada invalida.
+        return None
+    return numero
 
 
 def normalizar_cep(cep):
@@ -129,8 +176,8 @@ def validar_pagamento(dados):
     if not isinstance(dados, dict):
         return None, ["Payload invalido (esperava JSON)."]
 
-    cliente_id = dados.get('cliente_id')
-    if not cliente_id or not str(cliente_id).isdigit() or int(str(cliente_id)) <= 0:
+    cliente_id = inteiro_positivo(dados.get('cliente_id'))
+    if cliente_id is None:
         erros.append("Cliente invalido.")
 
     cliente_nome = _normalizar_texto(dados.get('cliente_nome', ''), NOME_MAX)
@@ -148,26 +195,103 @@ def validar_pagamento(dados):
     if not data_vencimento:
         erros.append("Data de vencimento obrigatoria.")
     else:
-        if not _RE_DATA.match(data_vencimento):
+        if not data_valida(data_vencimento):
             erros.append("Data de vencimento invalida. Use formato AAAA-MM-DD.")
 
     tipo_pagamento = str(dados.get('tipo_pagamento', 'Pix')).strip()
     if tipo_pagamento not in OPCOES_TIPO_PAGAMENTO:
-        erros.append("Tipo de pagamento invalido. Escolha 'Pix' ou 'Boleto'.")
+        opcoes = ', '.join(sorted(OPCOES_TIPO_PAGAMENTO))
+        erros.append(f"Tipo de pagamento invalido. Opcoes: {opcoes}.")
 
     status = str(dados.get('status', '')).strip()
     if status and status not in OPCOES_STATUS_PAGAMENTO:
-        erros.append(f"Status invalido. Opcoes: {', '.join(OPCOES_STATUS_PAGAMENTO)}.")
+        erros.append(f"Status invalido. Opcoes: {', '.join(sorted(OPCOES_STATUS_PAGAMENTO))}.")
+
+    # Data em que o dinheiro efetivamente entrou. E ela que alimenta o
+    # faturamento por mes no dashboard, entao precisa do mesmo rigor de
+    # formato que a data de vencimento.
+    data_pagamento = str(dados.get('data_pagamento', '')).strip()
+    if data_pagamento and not data_valida(data_pagamento):
+        erros.append("Data de pagamento invalida. Use formato AAAA-MM-DD.")
 
     if erros:
         return None, erros
 
+    status = status or 'Pendente'
+    data_pagamento = _coerir_data_pagamento(status, data_pagamento)
+
     return {
-        'cliente_id': int(str(cliente_id)),
+        'cliente_id': cliente_id,
         'cliente_nome': cliente_nome,
         'valor': round(valor, 2),
         'descricao': descricao,
         'data_vencimento': data_vencimento,
         'tipo_pagamento': tipo_pagamento,
-        'status': status or 'Pendente',
+        'status': status,
+        'data_pagamento': data_pagamento,
+    }, []
+
+
+def _coerir_data_pagamento(status, data_pagamento):
+    """
+    Mantem `data_pagamento` coerente com `status`.
+
+    As metricas financeiras leem a coluna sem cruzar com o status, entao os
+    dois estados incoerentes precisam ser eliminados na entrada: um
+    'Recebido' sem data ficaria fora de qualquer mes da serie de
+    faturamento, e uma data em cobranca nao recebida contaria receita que
+    nao existe.
+    """
+    if status == 'Recebido':
+        return data_pagamento or time.strftime('%Y-%m-%d')
+    return ''
+
+
+# -----------------------------------------------------------------------------
+# Validacoes de Entrega Agendada
+# -----------------------------------------------------------------------------
+OPCOES_STATUS_ENTREGA = ('Pendente', 'Em andamento', 'Concluida', 'Cancelada')
+
+# Status que encerram a entrega: nada mais a avisar sobre ela.
+STATUS_ENTREGA_ENCERRADOS = ('Concluida', 'Cancelada')
+
+
+def validar_entrega(dados):
+    """
+    Recebe um dict (vindo de request.json) e devolve (entrega_normalizada, erros).
+
+    O endpoint so checava `if not cliente_id or not data_entrega`, entao
+    aceitava um cliente_id que nao existe e uma data em texto livre. A entrega
+    era gravada e depois sumia dos alertas, porque `date(data_entrega)` no SQL
+    das notificacoes devolvia NULL sem erro nenhum.
+    """
+    erros = []
+
+    if not isinstance(dados, dict):
+        return None, ["Payload invalido (esperava JSON)."]
+
+    cliente_id = inteiro_positivo(dados.get('cliente_id'))
+    if cliente_id is None:
+        erros.append("Cliente invalido.")
+
+    data_entrega = str(dados.get('data_entrega', '')).strip()
+    if not data_entrega:
+        erros.append("Data de entrega obrigatoria.")
+    elif not data_valida(data_entrega):
+        erros.append("Data de entrega invalida. Use formato AAAA-MM-DD.")
+
+    hora_entrega = str(dados.get('hora_entrega', '')).strip()
+    if hora_entrega and not _RE_HORA.match(hora_entrega):
+        erros.append("Hora de entrega invalida. Use formato HH:MM.")
+
+    descricao = _normalizar_texto(dados.get('descricao', ''), OBSERVACOES_MAX)
+
+    if erros:
+        return None, erros
+
+    return {
+        'cliente_id': cliente_id,
+        'data_entrega': data_entrega,
+        'hora_entrega': hora_entrega,
+        'descricao': descricao,
     }, []

@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <!-- Unica referencia de projeto: Application enxerga o Domain e mais nada.
+         Sem Avalonia e sem Entity Framework. As fronteiras com a UI e com a
+         infraestrutura sao interfaces declaradas em Abstractions/. -->
+    <ProjectReference Include="..\AdriPoltronas.Domain\AdriPoltronas.Domain.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Apenas as abstracoes de DI e de log; nenhuma implementacao concreta. -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.2" />
+  </ItemGroup>
+</Project>
