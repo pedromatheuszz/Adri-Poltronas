@@ -2,8 +2,19 @@
 
 Aplicativo desktop de gestao da Adri Poltronas em evolucao incremental para um ERP modular. A aplicacao principal usa Electron/TypeScript como janela e Flask/Python como API local, com SQLite e migrations Alembic.
 
+## Ambientes
+
+| Branch | O que e |
+|---|---|
+| `main` | O software pronto: concluido, testado e instalavel. Cada tag e uma versao. |
+| `develop` | A copia de desenvolvimento, onde o trabalho em andamento se integra. |
+| `feature/*` | Uma branch por funcionalidade; nasce de `develop` e volta para ela. |
+
+Se esta na `main`, funciona. O fluxo completo esta em [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Documentacao
 
+- [Como trabalhar neste repositorio](CONTRIBUTING.md)
 - [Diagnostico e roadmap ERP](docs/ERP_DIAGNOSTICO_E_ROADMAP.md)
 - [Build e desenvolvimento](BUILD_GUIDE.md)
 - [Padrao da API](API_STANDARD.md)
