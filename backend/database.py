@@ -782,11 +782,12 @@ def obter_metricas_dashboard():
 # -----------------------------------------------------------------------------
 # Entregas Agendadas
 # -----------------------------------------------------------------------------
-def agendar_entrega(cliente_id, cliente_nome, data_entrega, hora_entrega='', descricao=''):
+def agendar_entrega(cliente_id, cliente_nome, data_entrega, hora_entrega='', descricao='',
+                    pedido_id=None):
     with conectar() as conexao:
         conexao.execute(
-            'INSERT INTO entregas_agendadas (cliente_id, cliente_nome, data_entrega, hora_entrega, descricao) VALUES (?, ?, ?, ?, ?)',
-            (cliente_id, cliente_nome, data_entrega, hora_entrega, descricao),
+            'INSERT INTO entregas_agendadas (cliente_id, cliente_nome, data_entrega, hora_entrega, descricao, pedido_id) VALUES (?, ?, ?, ?, ?, ?)',
+            (cliente_id, cliente_nome, data_entrega, hora_entrega, descricao, pedido_id),
         )
         entrega_id = conexao.execute('SELECT last_insert_rowid()').fetchone()[0]
         novo = conexao.execute(

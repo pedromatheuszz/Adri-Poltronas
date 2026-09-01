@@ -289,9 +289,15 @@ def validar_entrega(dados):
     if erros:
         return None, erros
 
+    # Opcional: a entrega pode nascer solta (como sempre nasceu) ou vinculada
+    # ao pedido que a originou. Sem esta linha o campo era descartado em
+    # silencio e o elo pedido-entrega nunca se formava.
+    pedido_id = inteiro_positivo(dados.get('pedido_id')) if dados.get('pedido_id') else None
+
     return {
         'cliente_id': cliente_id,
         'data_entrega': data_entrega,
         'hora_entrega': hora_entrega,
         'descricao': descricao,
+        'pedido_id': pedido_id,
     }, []

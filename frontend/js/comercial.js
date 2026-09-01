@@ -1,0 +1,678 @@
+
+// =============================================================================
+// COMERCIAL: Produtos, Pedidos e Agenda de Entregas
+//
+// O pedido e a espinha do modulo. Antes dele, pagamento e entrega ficavam
+// pendurados direto no cliente, sem saber a que venda pertenciam.
+//
+// Regra que vale para as tres telas: o backend e a autoridade. Os totais, as
+// situacoes validas e o rateio das parcelas vem prontos da API -- o JS soma
+// apenas para o operador ver enquanto digita, e nunca decide valor.
+// =============================================================================
+
+var SITUACAO_PEDIDO = {
+    rascunho:  { rotulo: 'Rascunho',  badge: 'badge-pendente'  },
+    aberto:    { rotulo: 'Aberto',    badge: 'badge-pendente'  },
+    aprovado:  { rotulo: 'Aprovado',  badge: 'badge-entrega'   },
+    faturado:  { rotulo: 'Faturado',  badge: 'badge-recebido'  },
+    cancelado: { rotulo: 'Cancelado', badge: 'badge-cancelado' }
+};
+
+// Rotulo do botao de cada transicao. A LISTA de transicoes possiveis vem do
+// backend (`proximos_passos`); aqui so mora como cada uma se chama na tela.
+var ACAO_PEDIDO = {
+    aberto:    { rotulo: 'Abrir',    rota: 'abertura',  classe: 'btn-primary' },
+    aprovado:  { rotulo: 'Aprovar',  rota: 'aprovacao', classe: 'btn-primary' },
+    faturado:  { rotulo: 'Faturar',  rota: null,        classe: 'btn-primary' },
+    cancelado: { rotulo: 'Cancelar', rota: 'cancelamento', classe: 'btn-perigo' }
+};
+
+var SITUACAO_ENTREGA = {
+    'Pendente':     { badge: 'badge-pendente',  proxima: 'Em andamento', acao: 'Sair para entrega' },
+    'Em andamento': { badge: 'badge-entrega',   proxima: 'Concluida',    acao: 'Concluir' },
+    'Concluida':    { badge: 'badge-recebido',  proxima: null },
+    'Cancelada':    { badge: 'badge-cancelado', proxima: null }
+};
+
+var _pedidoAberto = null;
+var _cacheProdutos = [];
+
+
+function _brl(valor) {
+    // O backend ja manda o formatado; isto cobre o caso de vir so o inteiro.
+    return valor && valor.formatado ? valor.formatado : formatarReal((valor || 0) / 100);
+}
+
+function _dataBR(iso) {
+    if (!iso) return '-';
+    var partes = String(iso).slice(0, 10).split('-');
+    return partes.length === 3 ? partes[2] + '/' + partes[1] + '/' + partes[0] : iso;
+}
+
+function _badgeSituacao(situacao) {
+    var info = SITUACAO_PEDIDO[situacao] || { rotulo: situacao, badge: 'badge-cancelado' };
+    return '<span class="' + info.badge + '">' + escaparHtml(info.rotulo) + '</span>';
+}
+
+/** Erro de dominio chega na chave `erro`, como manda o API_STANDARD. */
+async function _pedirApi(url, opcoes) {
+    var resposta = await fetch(url, opcoes);
+    var dados = null;
+    try { dados = await resposta.json(); } catch (_) {}
+    if (!resposta.ok) {
+        throw new Error((dados && dados.erro) || ('Falha (' + resposta.status + ')'));
+    }
+    return dados;
+}
+
+function _json(corpo) {
+    return { method: 'POST', headers: CABECALHOS_JSON, body: JSON.stringify(corpo || {}) };
+}
+
+
+// =============================================================================
+// Produtos
+// =============================================================================
+async function carregarProdutos() {
+    var busca = (document.getElementById('prodFiltroBusca') || {}).value || '';
+    mostrarEsqueleto('tabelaProdutos', 5, 4);
+    try {
+        _cacheProdutos = await _pedirApi('/api/produtos?busca=' + encodeURIComponent(busca.trim()));
+        renderizarProdutos(_cacheProdutos);
+    } catch (erro) {
+        renderizarProdutos([]);
+        exibirToast('Erro ao carregar produtos: ' + erro.message, 'error');
+    }
+}
+
+function renderizarProdutos(produtos) {
+    var corpo = document.getElementById('tabelaProdutos');
+    if (!corpo) return;
+    if (!produtos.length) {
+        corpo.innerHTML = linhaEstadoVazio(5, 'Nenhum produto no catalogo',
+            'Cadastre os modelos de poltrona para poder lancar itens nos pedidos.');
+        return;
+    }
+    corpo.innerHTML = produtos.map(function (p) {
+        var descricao = escaparHtml(p.descricao);
+        return '<tr>' +
+            '<td><strong>' + escaparHtml(p.codigo) + '</strong></td>' +
+            '<td class="col-nome" title="' + descricao + '">' + descricao + '</td>' +
+            '<td>' + escaparHtml(p.unidade) + '</td>' +
+            '<td class="valor">' + _brl(p.preco_venda) + '</td>' +
+            '<td class="col-acoes"><div class="tabela-acoes">' +
+            '<button type="button" class="btn btn-secundario btn-sm" data-produto="' + p.id + '">Editar</button>' +
+            '<button type="button" class="btn btn-perigo btn-sm" data-inativar="' + p.id + '">Inativar</button>' +
+            '</div></td></tr>';
+    }).join('');
+}
+
+function abrirFormularioProduto(produto) {
+    document.getElementById('formProduto').reset();
+    document.getElementById('prodId').value = produto ? produto.id : '';
+    document.getElementById('modalProdutoTitulo').textContent =
+        produto ? 'Editar Produto' : 'Novo Produto';
+    if (produto) {
+        document.getElementById('prodCodigo').value = produto.codigo;
+        document.getElementById('prodDescricao').value = produto.descricao;
+        document.getElementById('prodUnidade').value = produto.unidade;
+        document.getElementById('prodPreco').value =
+            (produto.preco_venda_centavos / 100).toFixed(2).replace('.', ',');
+        document.getElementById('prodObservacoes').value = produto.observacoes || '';
+    }
+    abrirModal('modalProduto');
+}
+
+async function salvarProduto(evento) {
+    evento.preventDefault();
+    var id = document.getElementById('prodId').value;
+    var corpo = {
+        codigo: document.getElementById('prodCodigo').value,
+        descricao: document.getElementById('prodDescricao').value,
+        unidade: document.getElementById('prodUnidade').value,
+        preco_venda: document.getElementById('prodPreco').value || '0',
+        observacoes: document.getElementById('prodObservacoes').value
+    };
+    try {
+        await _pedirApi(id ? '/api/produtos/' + id : '/api/produtos',
+            id ? { method: 'PUT', headers: CABECALHOS_JSON, body: JSON.stringify(corpo) }
+               : _json(corpo));
+        fecharModal('modalProduto');
+        exibirToast(id ? 'Produto atualizado.' : 'Produto cadastrado.');
+        carregarProdutos();
+    } catch (erro) {
+        exibirToast(erro.message, 'error');
+    }
+}
+
+async function inativarProduto(produtoId) {
+    var produto = _cacheProdutos.find(function (p) { return p.id === produtoId; });
+    var confirmado = await confirmarAcao({
+        titulo: 'Inativar produto',
+        mensagem: 'O produto "' + (produto ? produto.descricao : '') + '" sai do catalogo, mas '
+                + 'continua nos pedidos que ja o usaram. O codigo volta a ficar livre.',
+        textoConfirmar: 'Inativar',
+        icone: 'alerta',
+        variante: 'atencao'
+    });
+    if (!confirmado) return;
+    try {
+        await _pedirApi('/api/produtos/' + produtoId, { method: 'DELETE', headers: CABECALHOS_JSON });
+        exibirToast('Produto inativado.');
+        carregarProdutos();
+    } catch (erro) {
+        exibirToast(erro.message, 'error');
+    }
+}
+
+
+// =============================================================================
+// Pedidos
+// =============================================================================
+async function carregarPedidos() {
+    var busca = (document.getElementById('pedFiltroBusca') || {}).value || '';
+    var situacao = (document.getElementById('pedFiltroSituacao') || {}).value || '';
+    mostrarEsqueleto('tabelaPedidos', 7, 4);
+    try {
+        var params = new URLSearchParams();
+        if (busca.trim()) params.set('busca', busca.trim());
+        if (situacao) params.set('situacao', situacao);
+        renderizarPedidos(await _pedirApi('/api/pedidos?' + params.toString()));
+    } catch (erro) {
+        renderizarPedidos([]);
+        exibirToast('Erro ao carregar pedidos: ' + erro.message, 'error');
+    }
+}
+
+function renderizarPedidos(pedidos) {
+    var corpo = document.getElementById('tabelaPedidos');
+    if (!corpo) return;
+    if (!pedidos.length) {
+        corpo.innerHTML = linhaEstadoVazio(7, 'Nenhum pedido encontrado',
+            'Crie um pedido para registrar o que o cliente encomendou e o prazo combinado.');
+        return;
+    }
+    corpo.innerHTML = pedidos.map(function (p) {
+        var cliente = escaparHtml(p.cliente_nome || '');
+        return '<tr>' +
+            '<td class="col-numero"><strong>' + escaparHtml(p.numero) + '</strong></td>' +
+            '<td class="col-nome" title="' + cliente + '">' + cliente + '</td>' +
+            '<td class="valor">' + _dataBR(p.data_emissao) + '</td>' +
+            '<td class="valor">' + _dataBR(p.data_entrega_prevista) + '</td>' +
+            '<td class="valor">' + _brl(p.total_liquido) + '</td>' +
+            '<td>' + _badgeSituacao(p.situacao) + '</td>' +
+            '<td class="col-acoes"><div class="tabela-acoes">' +
+            '<button type="button" class="btn btn-secundario btn-sm" data-pedido="' + p.id + '">Abrir</button>' +
+            '</div></td></tr>';
+    }).join('');
+}
+
+async function _preencherClientes(seletor, selecionado) {
+    var alvo = document.getElementById(seletor);
+    if (!alvo) return;
+    try {
+        var clientes = await _pedirApi(API_URL + '?busca=');
+        alvo.innerHTML = '<option value="">Selecione um cliente...</option>' +
+            clientes.map(function (c) {
+                return '<option value="' + c.id + '"' +
+                    (String(c.id) === String(selecionado) ? ' selected' : '') + '>' +
+                    escaparHtml(c.nome) + '</option>';
+            }).join('');
+    } catch (_) {
+        exibirToast('Nao foi possivel carregar os clientes.', 'error');
+    }
+}
+
+async function abrirFormularioPedido(pedidoId) {
+    document.getElementById('formPedido').reset();
+    document.getElementById('pedId').value = pedidoId || '';
+    _pedidoAberto = null;
+
+    if (!pedidoId) {
+        document.getElementById('modalPedidoTitulo').textContent = 'Novo Pedido';
+        document.getElementById('pedidoSituacao').innerHTML = '';
+        document.getElementById('pedidoBlocoItens').hidden = true;
+        _renderizarAcoesPedido(null);
+        await _preencherClientes('pedClienteId');
+        abrirModal('modalPedido');
+        return;
+    }
+
+    try {
+        var pedido = await _pedirApi('/api/pedidos/' + pedidoId);
+        _pedidoAberto = pedido;
+        document.getElementById('modalPedidoTitulo').textContent = 'Pedido ' + pedido.numero;
+        document.getElementById('pedidoSituacao').innerHTML = _badgeSituacao(pedido.situacao);
+        document.getElementById('pedEntregaPrevista').value = pedido.data_entrega_prevista || '';
+        document.getElementById('pedDesconto').value =
+            (pedido.desconto_centavos / 100).toFixed(2).replace('.', ',');
+        document.getElementById('pedFrete').value =
+            (pedido.frete_centavos / 100).toFixed(2).replace('.', ',');
+        document.getElementById('pedObservacoes').value = pedido.observacoes || '';
+        await _preencherClientes('pedClienteId', pedido.cliente_id);
+
+        // Campos e formulario de item so ficam ativos enquanto o pedido aceita
+        // alteracao. A regra vem do backend, em `editavel`.
+        _travarFormularioPedido(!pedido.editavel);
+        _renderizarItens(pedido);
+        _renderizarAcoesPedido(pedido);
+        abrirModal('modalPedido');
+    } catch (erro) {
+        exibirToast(erro.message, 'error');
+    }
+}
+
+function _travarFormularioPedido(travado) {
+    ['pedClienteId', 'pedEntregaPrevista', 'pedDesconto', 'pedFrete', 'pedObservacoes']
+        .forEach(function (id) {
+            var campo = document.getElementById(id);
+            if (campo) campo.disabled = travado;
+        });
+    document.getElementById('btnSalvarPedido').hidden = travado;
+    document.getElementById('pedidoFormItem').hidden = travado;
+}
+
+function _renderizarItens(pedido) {
+    document.getElementById('pedidoBlocoItens').hidden = false;
+    var corpo = document.getElementById('tabelaItensPedido');
+    var itens = pedido.itens || [];
+
+    corpo.innerHTML = itens.length ? itens.map(function (i) {
+        var descricao = escaparHtml(i.descricao);
+        var remover = pedido.editavel
+            ? '<button type="button" class="btn btn-perigo btn-sm" data-item="' + i.id + '">Remover</button>'
+            : '';
+        return '<tr>' +
+            '<td class="col-nome" title="' + descricao + '">' + descricao + '</td>' +
+            '<td class="centro">' + i.quantidade + '</td>' +
+            '<td class="direita">' + _brl(i.preco_unitario) + '</td>' +
+            '<td class="direita">' + _brl(i.total) + '</td>' +
+            '<td class="col-acoes">' + remover + '</td></tr>';
+    }).join('') : '<tr><td colspan="5"><div class="empty-state"><p>Nenhum item lancado.</p></div></td></tr>';
+
+    document.getElementById('pedidoTotais').innerHTML =
+        '<div><dt>Itens</dt><dd>' + _brl(pedido.total_bruto) + '</dd></div>' +
+        '<div><dt>Desconto</dt><dd>- ' + _brl(pedido.desconto) + '</dd></div>' +
+        '<div><dt>Frete</dt><dd>' + _brl(pedido.frete) + '</dd></div>' +
+        '<div class="pedido-total-final"><dt>Total</dt><dd>' + _brl(pedido.total_liquido) + '</dd></div>';
+
+    var produtos = _cacheProdutos.length ? _cacheProdutos : [];
+    document.getElementById('itemProdutoId').innerHTML =
+        '<option value="">Selecione...</option>' + produtos.map(function (p) {
+            return '<option value="' + p.id + '">' + escaparHtml(p.codigo + ' - ' + p.descricao) + '</option>';
+        }).join('');
+}
+
+/**
+ * Botoes de transicao montados a partir de `proximos_passos`.
+ *
+ * A lista vem do backend justamente para a tela nao repetir a maquina de
+ * estados: se as duas divergirem, a tela oferece uma acao que a API recusa.
+ */
+function _renderizarAcoesPedido(pedido) {
+    var area = document.getElementById('pedidoAcoes');
+    var fechar = '<button type="button" class="modal-btn modal-btn-cancelar" ' +
+                 'onclick="fecharModal(\'modalPedido\')">Fechar</button>';
+    if (!pedido) { area.innerHTML = fechar; return; }
+
+    var botoes = (pedido.proximos_passos || []).map(function (destino) {
+        var acao = ACAO_PEDIDO[destino];
+        if (!acao) return '';
+        return '<button type="button" class="btn ' + acao.classe + '" data-transicao="' + destino +
+               '">' + acao.rotulo + '</button>';
+    }).join('');
+
+    if (pedido.aceita_entrega) {
+        botoes += '<button type="button" class="btn btn-secundario" data-agendar="' + pedido.id +
+                  '">Agendar entrega</button>';
+    }
+    area.innerHTML = fechar + botoes;
+}
+
+async function salvarPedido(evento) {
+    evento.preventDefault();
+    var id = document.getElementById('pedId').value;
+    var corpo = {
+        cliente_id: parseInt(document.getElementById('pedClienteId').value, 10),
+        data_entrega_prevista: document.getElementById('pedEntregaPrevista').value,
+        desconto: document.getElementById('pedDesconto').value || '0',
+        frete: document.getElementById('pedFrete').value || '0',
+        observacoes: document.getElementById('pedObservacoes').value
+    };
+    if (!corpo.cliente_id) { exibirToast('Selecione um cliente.', 'error'); return; }
+    try {
+        var pedido = await _pedirApi(id ? '/api/pedidos/' + id : '/api/pedidos',
+            id ? { method: 'PUT', headers: CABECALHOS_JSON, body: JSON.stringify(corpo) }
+               : _json(corpo));
+        exibirToast(id ? 'Pedido atualizado.' : 'Pedido ' + pedido.numero + ' criado.');
+        carregarPedidos();
+        await abrirFormularioPedido(pedido.id);
+    } catch (erro) {
+        exibirToast(erro.message, 'error');
+    }
+}
+
+async function adicionarItemAoPedido() {
+    var pedidoId = document.getElementById('pedId').value;
+    if (!pedidoId) { exibirToast('Salve o pedido antes de lancar itens.', 'error'); return; }
+    var produtoId = parseInt(document.getElementById('itemProdutoId').value, 10);
+    if (!produtoId) { exibirToast('Selecione um produto.', 'error'); return; }
+
+    var corpo = {
+        produto_id: produtoId,
+        quantidade: parseInt(document.getElementById('itemQuantidade').value, 10) || 1,
+        descricao: document.getElementById('itemDescricao').value,
+        preco_unitario: document.getElementById('itemPreco').value
+    };
+    try {
+        var pedido = await _pedirApi('/api/pedidos/' + pedidoId + '/itens', _json(corpo));
+        _pedidoAberto = pedido;
+        document.getElementById('itemDescricao').value = '';
+        document.getElementById('itemPreco').value = '';
+        document.getElementById('itemQuantidade').value = '1';
+        _renderizarItens(pedido);
+        carregarPedidos();
+    } catch (erro) {
+        exibirToast(erro.message, 'error');
+    }
+}
+
+async function removerItemDoPedido(itemId) {
+    var pedidoId = document.getElementById('pedId').value;
+    try {
+        var pedido = await _pedirApi('/api/pedidos/' + pedidoId + '/itens/' + itemId,
+            { method: 'DELETE', headers: CABECALHOS_JSON });
+        _pedidoAberto = pedido;
+        _renderizarItens(pedido);
+        carregarPedidos();
+    } catch (erro) {
+        exibirToast(erro.message, 'error');
+    }
+}
+
+async function transicionarPedido(destino) {
+    var pedidoId = document.getElementById('pedId').value;
+    if (destino === 'faturado') { abrirFaturamento(); return; }
+
+    if (destino === 'cancelado') {
+        var confirmado = await confirmarAcao({
+            titulo: 'Cancelar pedido',
+            mensagem: 'O pedido fica registrado como cancelado e nao pode mais ser faturado.',
+            textoConfirmar: 'Cancelar pedido',
+            textoCancelar: 'Voltar',
+            icone: 'alerta',
+            variante: 'atencao'
+        });
+        if (!confirmado) return;
+    }
+
+    var acao = ACAO_PEDIDO[destino];
+    try {
+        await _pedirApi('/api/pedidos/' + pedidoId + '/' + acao.rota, _json({}));
+        exibirToast('Pedido ' + (SITUACAO_PEDIDO[destino] || {}).rotulo.toLowerCase() + '.');
+        carregarPedidos();
+        await abrirFormularioPedido(pedidoId);
+    } catch (erro) {
+        exibirToast(erro.message, 'error');
+    }
+}
+
+function abrirFaturamento() {
+    var pedido = _pedidoAberto;
+    if (!pedido) return;
+    document.getElementById('fatPedidoId').value = pedido.id;
+    document.getElementById('formFaturamento').reset();
+    document.getElementById('fatParcelas').value = 1;
+    document.getElementById('fatPrimeiroVencimento').value = new Date().toISOString().slice(0, 10);
+    document.getElementById('faturamentoResumo').textContent =
+        'Pedido ' + pedido.numero + ' - ' + _brl(pedido.total_liquido);
+    _atualizarAvisoFaturamento();
+    abrirModal('modalFaturamento');
+}
+
+/** Diz o que vai acontecer ANTES de acontecer -- nao ha desfazer pela tela. */
+function _atualizarAvisoFaturamento() {
+    var parcelas = parseInt(document.getElementById('fatParcelas').value, 10) || 1;
+    document.getElementById('faturamentoEfeito').textContent =
+        'Vai gerar ' + parcelas + (parcelas === 1 ? ' parcela' : ' parcelas') +
+        ' a receber na aba Pagamentos. O pedido passa a faturado e nao aceita mais alteracao.';
+}
+
+async function faturar(evento) {
+    evento.preventDefault();
+    var pedidoId = document.getElementById('fatPedidoId').value;
+    var corpo = {
+        parcelas: parseInt(document.getElementById('fatParcelas').value, 10) || 1,
+        primeiro_vencimento: document.getElementById('fatPrimeiroVencimento').value,
+        forma_pagamento: document.getElementById('fatFormaPagamento').value
+    };
+    try {
+        var pedido = await _pedirApi('/api/pedidos/' + pedidoId + '/faturamento', _json(corpo));
+        fecharModal('modalFaturamento');
+        exibirToast((pedido.parcelas || []).length + ' parcela(s) gerada(s) em Pagamentos.');
+        carregarPedidos();
+        await abrirFormularioPedido(pedidoId);
+    } catch (erro) {
+        exibirToast(erro.message, 'error');
+    }
+}
+
+
+// =============================================================================
+// Agenda de entregas
+// =============================================================================
+async function carregarEntregas() {
+    var filtro = (document.getElementById('entFiltroStatus') || {}).value;
+    var area = document.getElementById('agendaEntregas');
+    if (area) area.innerHTML = '<p class="agenda-carregando">Carregando...</p>';
+    try {
+        var url = '/api/entregas';
+        if (filtro && filtro !== 'todas') url += '?status=' + encodeURIComponent(filtro);
+        var entregas = await _pedirApi(url);
+        if (!filtro) {
+            // "Em aberto" e o padrao: o que a equipe olha de manha.
+            entregas = entregas.filter(function (e) {
+                return e.status !== 'Concluida' && e.status !== 'Cancelada';
+            });
+        }
+        renderizarAgenda(entregas);
+    } catch (erro) {
+        if (area) area.innerHTML = '';
+        exibirToast('Erro ao carregar entregas: ' + erro.message, 'error');
+    }
+}
+
+/**
+ * Rotulo do bloco do dia.
+ *
+ * "Hoje", "Amanha" e "Atrasadas" ganham a data por extenso ao lado, porque
+ * sozinhos nao dizem QUAL dia. Nos demais o titulo ja e a data -- repeti-la
+ * na legenda seria redundante.
+ */
+function _rotuloDoDia(iso) {
+    var hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+    var dia = new Date(iso + 'T00:00:00');
+    var diferenca = Math.round((dia - hoje) / 86400000);
+    if (diferenca < 0) return { titulo: 'Atrasada', classe: 'agenda-dia-atrasado', comData: true };
+    if (diferenca === 0) return { titulo: 'Hoje', classe: 'agenda-dia-hoje', comData: true };
+    if (diferenca === 1) return { titulo: 'Amanha', classe: 'agenda-dia-proximo', comData: true };
+    return { titulo: _dataBR(iso), classe: '', comData: false };
+}
+
+function renderizarAgenda(entregas) {
+    var area = document.getElementById('agendaEntregas');
+    if (!area) return;
+    if (!entregas.length) {
+        area.innerHTML = '<div class="empty-state">' +
+            '<div class="empty-state-icon" aria-hidden="true">' + ICONE_VAZIO + '</div>' +
+            '<h3>Nenhuma entrega na agenda</h3>' +
+            '<p>Agende a partir de um pedido aprovado ou pelo botao acima.</p></div>';
+        return;
+    }
+
+    // Agrupa por dia, ordenado: e assim que a equipe consulta de manha.
+    var porDia = {};
+    entregas.slice().sort(function (a, b) {
+        return (a.data_entrega + (a.hora_entrega || '')).localeCompare(
+               b.data_entrega + (b.hora_entrega || ''));
+    }).forEach(function (e) {
+        (porDia[e.data_entrega] = porDia[e.data_entrega] || []).push(e);
+    });
+
+    area.innerHTML = Object.keys(porDia).sort().map(function (dia) {
+        var rotulo = _rotuloDoDia(dia);
+        var linhas = porDia[dia].map(function (e) {
+            var info = SITUACAO_ENTREGA[e.status] || { badge: 'badge-cancelado' };
+            var acoes = '';
+            if (info.proxima) {
+                acoes += '<button type="button" class="btn btn-secundario btn-sm" ' +
+                         'data-entrega="' + e.id + '" data-para="' + info.proxima + '">' +
+                         info.acao + '</button>';
+            }
+            if (e.status !== 'Concluida' && e.status !== 'Cancelada') {
+                acoes += '<button type="button" class="btn btn-perigo btn-sm" ' +
+                         'data-entrega="' + e.id + '" data-para="Cancelada">Cancelar</button>';
+            }
+            var pedido = e.pedido_id
+                ? '<button type="button" class="elo-pedido" data-pedido="' + e.pedido_id +
+                  '">Ver pedido</button>'
+                : '';
+            return '<li class="agenda-item">' +
+                '<span class="agenda-hora">' + escaparHtml(e.hora_entrega || '--:--') + '</span>' +
+                '<div class="agenda-corpo">' +
+                '<strong>' + escaparHtml(e.cliente_nome || '') + '</strong>' +
+                (e.descricao ? '<span class="agenda-descricao">' + escaparHtml(e.descricao) + '</span>' : '') +
+                '</div>' +
+                '<span class="' + info.badge + '">' + escaparHtml(e.status) + '</span>' +
+                '<div class="tabela-acoes">' + pedido + acoes + '</div>' +
+                '</li>';
+        }).join('');
+        return '<section class="card agenda-dia ' + rotulo.classe + '">' +
+            '<h3 class="agenda-dia-titulo">' + rotulo.titulo +
+            (rotulo.comData ? '<small>' + _dataBR(dia) + '</small>' : '') +
+            '<small class="agenda-contagem">' + porDia[dia].length +
+            (porDia[dia].length === 1 ? ' entrega' : ' entregas') + '</small></h3>' +
+            '<ul class="agenda-lista">' + linhas + '</ul></section>';
+    }).join('');
+}
+
+async function abrirFormularioEntrega(pedido) {
+    document.getElementById('formEntrega').reset();
+    await _preencherClientes('entClienteId', pedido && pedido.cliente_id);
+
+    var seletorPedido = document.getElementById('entPedidoId');
+    try {
+        var pedidos = await _pedirApi('/api/pedidos?situacao=aprovado');
+        var faturados = await _pedirApi('/api/pedidos?situacao=faturado');
+        seletorPedido.innerHTML = '<option value="">Sem pedido vinculado</option>' +
+            pedidos.concat(faturados).map(function (p) {
+                return '<option value="' + p.id + '" data-cliente="' + p.cliente_id + '"' +
+                    (pedido && p.id === pedido.id ? ' selected' : '') + '>' +
+                    escaparHtml(p.numero + ' - ' + p.cliente_nome) + '</option>';
+            }).join('');
+    } catch (_) {
+        seletorPedido.innerHTML = '<option value="">Sem pedido vinculado</option>';
+    }
+
+    if (pedido && pedido.data_entrega_prevista) {
+        document.getElementById('entData').value = pedido.data_entrega_prevista;
+    }
+    abrirModal('modalEntrega');
+}
+
+async function salvarEntrega(evento) {
+    evento.preventDefault();
+    var corpo = {
+        cliente_id: parseInt(document.getElementById('entClienteId').value, 10),
+        data_entrega: document.getElementById('entData').value,
+        hora_entrega: document.getElementById('entHora').value,
+        descricao: document.getElementById('entDescricao').value
+    };
+    var pedidoId = document.getElementById('entPedidoId').value;
+    if (pedidoId) corpo.pedido_id = parseInt(pedidoId, 10);
+    if (!corpo.cliente_id || !corpo.data_entrega) {
+        exibirToast('Cliente e data sao obrigatorios.', 'error');
+        return;
+    }
+    try {
+        await _pedirApi('/api/entregas', _json(corpo));
+        fecharModal('modalEntrega');
+        exibirToast('Entrega agendada.');
+        carregarEntregas();
+        carregarNotificacoes();
+    } catch (erro) {
+        exibirToast(erro.message, 'error');
+    }
+}
+
+async function mudarSituacaoEntrega(entregaId, destino) {
+    try {
+        await _pedirApi('/api/entregas/' + entregaId + '/status',
+            { method: 'PUT', headers: CABECALHOS_JSON, body: JSON.stringify({ status: destino }) });
+        exibirToast('Entrega atualizada.');
+        carregarEntregas();
+        carregarNotificacoes();
+    } catch (erro) {
+        exibirToast(erro.message, 'error');
+    }
+}
+
+
+// =============================================================================
+// Ligacao com a interface
+// =============================================================================
+function registrarEventosComerciais() {
+    var liga = function (id, evento, funcao) {
+        var elemento = document.getElementById(id);
+        if (elemento) elemento.addEventListener(evento, funcao);
+    };
+
+    liga('formProduto', 'submit', salvarProduto);
+    liga('formPedido', 'submit', salvarPedido);
+    liga('formFaturamento', 'submit', faturar);
+    liga('formEntrega', 'submit', salvarEntrega);
+    liga('fatParcelas', 'input', _atualizarAvisoFaturamento);
+    liga('pedFiltroSituacao', 'change', carregarPedidos);
+    liga('entFiltroStatus', 'change', carregarEntregas);
+
+    // Busca com o mesmo atraso da tela de Clientes, para o comportamento nao
+    // mudar de aba para aba.
+    var atrasos = {};
+    [['prodFiltroBusca', carregarProdutos], ['pedFiltroBusca', carregarPedidos]]
+        .forEach(function (par) {
+            liga(par[0], 'input', function () {
+                clearTimeout(atrasos[par[0]]);
+                atrasos[par[0]] = setTimeout(par[1], 300);
+            });
+        });
+
+    // Delegacao: as linhas sao recriadas a cada render, entao o listener vive
+    // no documento e nao em cada botao.
+    document.addEventListener('click', function (evento) {
+        var alvo = evento.target.closest('button');
+        if (!alvo) return;
+
+        if (alvo.dataset.produto) {
+            var produto = _cacheProdutos.find(function (p) {
+                return String(p.id) === alvo.dataset.produto;
+            });
+            if (produto) abrirFormularioProduto(produto);
+        } else if (alvo.dataset.inativar) {
+            inativarProduto(parseInt(alvo.dataset.inativar, 10));
+        } else if (alvo.dataset.pedido) {
+            if (!document.getElementById('aba-pedidos').classList.contains('active')) {
+                trocarAba('pedidos');
+            }
+            abrirFormularioPedido(parseInt(alvo.dataset.pedido, 10));
+        } else if (alvo.dataset.item) {
+            removerItemDoPedido(parseInt(alvo.dataset.item, 10));
+        } else if (alvo.dataset.transicao) {
+            transicionarPedido(alvo.dataset.transicao);
+        } else if (alvo.dataset.agendar) {
+            fecharModal('modalPedido');
+            abrirFormularioEntrega(_pedidoAberto);
+        } else if (alvo.dataset.entrega) {
+            mudarSituacaoEntrega(parseInt(alvo.dataset.entrega, 10), alvo.dataset.para);
+        }
+    });
+}

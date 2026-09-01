@@ -243,7 +243,10 @@ function aplicarMascaraCep(e) {
 // cada troca -- e porque assim a lista de modulos existe num lugar unico.
 var PAGINAS = {
     dashboard:  { titulo: 'Dashboard',  descricao: 'Visao geral do cadastro e das financas' },
+    pedidos:    { titulo: 'Pedidos',    descricao: 'O que foi encomendado, por quanto e para quando' },
     clientes:   { titulo: 'Clientes',   descricao: 'Cadastro, edicao e exportacao da base de clientes' },
+    produtos:   { titulo: 'Produtos',   descricao: 'Catalogo de modelos usado nos pedidos' },
+    entregas:   { titulo: 'Entregas',   descricao: 'Agenda de entregas e retiradas' },
     mapa:       { titulo: 'Mapa',       descricao: 'Distribuicao geografica das entregas e retiradas' },
     pagamentos: { titulo: 'Pagamentos', descricao: 'Recebimentos, cobrancas e situacao financeira' },
     relatorios: { titulo: 'Relatorios', descricao: 'Consultas filtradas e exportacao de dados' }
@@ -289,6 +292,9 @@ function trocarAba(aba) {
         tab.removeAttribute('tabindex');
     }
     if (aba === 'dashboard') { carregarDashboardGraficos(); }
+    if (aba === 'pedidos') { carregarPedidos(); carregarProdutos(); }
+    if (aba === 'produtos') { carregarProdutos(); }
+    if (aba === 'entregas') { carregarEntregas(); }
     if (aba === 'mapa') { setTimeout(function() { initMapa(); carregarMapaClientes(); }, 100); }
     if (aba === 'relatorios') { carregarRelatorio(); }
     if (aba === 'pagamentos') { carregarPagamentos(); }
@@ -306,6 +312,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
     initObservacoesCounter();
     carregarDashboardGraficos();
+
+    // O modulo comercial vive em comercial.js; a checagem cobre o caso de o
+    // arquivo nao ter carregado, para o resto da tela seguir funcionando.
+    if (typeof registrarEventosComerciais === 'function') registrarEventosComerciais();
 
     var selectAll = document.getElementById('selectAll');
     if (selectAll) {

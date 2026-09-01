@@ -38,6 +38,14 @@ def _criar_indices(conexao: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS ix_pagamentos_status_vencimento ON pagamentos(status, data_vencimento)",
         "CREATE INDEX IF NOT EXISTS ix_entregas_cliente_id ON entregas_agendadas(cliente_id)",
         "CREATE INDEX IF NOT EXISTS ix_entregas_data_status ON entregas_agendadas(data_entrega, status)",
+        "CREATE INDEX IF NOT EXISTS ix_produtos_descricao ON produtos(descricao)",
+        "CREATE INDEX IF NOT EXISTS ix_pedidos_cliente_id ON pedidos(cliente_id)",
+        "CREATE INDEX IF NOT EXISTS ix_pedidos_situacao_emissao ON pedidos(situacao, data_emissao)",
+        "CREATE INDEX IF NOT EXISTS ix_pedidos_entrega_prevista ON pedidos(data_entrega_prevista)",
+        "CREATE INDEX IF NOT EXISTS ix_pedido_itens_pedido_id ON pedido_itens(pedido_id)",
+        "CREATE INDEX IF NOT EXISTS ix_pedido_itens_produto_id ON pedido_itens(produto_id)",
+        "CREATE INDEX IF NOT EXISTS ix_pagamentos_pedido_id ON pagamentos(pedido_id)",
+        "CREATE INDEX IF NOT EXISTS ix_entregas_pedido_id ON entregas_agendadas(pedido_id)",
         "CREATE INDEX IF NOT EXISTS ix_auditoria_entidade_registro ON auditoria_eventos(entidade, entidade_id, id)",
         "CREATE INDEX IF NOT EXISTS ix_auditoria_criado_em ON auditoria_eventos(criado_em)",
         "CREATE INDEX IF NOT EXISTS ix_auditoria_usuario_criado_em ON auditoria_eventos(usuario_id, criado_em)",
@@ -46,6 +54,9 @@ def _criar_indices(conexao: sqlite3.Connection) -> None:
         conexao.execute(comando)
 
     indices_unicos = [
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_produtos_codigo "
+        "ON produtos(codigo) WHERE ativo = 1",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_pedidos_numero ON pedidos(numero)",
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_pagamentos_asaas_payment_id "
         "ON pagamentos(asaas_payment_id) WHERE asaas_payment_id IS NOT NULL AND asaas_payment_id != ''",
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_pagamentos_asaas_external_reference "
@@ -148,6 +159,58 @@ def garantir_schema_fallback(conexao: sqlite3.Connection) -> None:
                 FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE RESTRICT
         );
 
+        CREATE TABLE IF NOT EXISTS produtos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            codigo TEXT NOT NULL,
+            descricao TEXT NOT NULL,
+            unidade TEXT NOT NULL DEFAULT 'un',
+            preco_venda_centavos INTEGER NOT NULL DEFAULT 0,
+            observacoes TEXT NOT NULL DEFAULT '',
+            ativo INTEGER NOT NULL DEFAULT 1,
+            criado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+            atualizado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+        );
+
+        CREATE TABLE IF NOT EXISTS pedidos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            numero TEXT NOT NULL,
+            cliente_id INTEGER NOT NULL,
+            cliente_nome TEXT NOT NULL DEFAULT '',
+            situacao TEXT NOT NULL DEFAULT 'rascunho',
+            data_emissao TEXT NOT NULL DEFAULT (date('now', 'localtime')),
+            data_entrega_prevista TEXT NOT NULL DEFAULT '',
+            total_bruto_centavos INTEGER NOT NULL DEFAULT 0,
+            desconto_centavos INTEGER NOT NULL DEFAULT 0,
+            frete_centavos INTEGER NOT NULL DEFAULT 0,
+            total_liquido_centavos INTEGER NOT NULL DEFAULT 0,
+            observacoes TEXT NOT NULL DEFAULT '',
+            criado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+            atualizado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+            faturado_em TEXT NOT NULL DEFAULT '',
+            cancelado_em TEXT NOT NULL DEFAULT '',
+            motivo_cancelamento TEXT NOT NULL DEFAULT '',
+            CONSTRAINT fk_pedidos_cliente_id_clientes
+                FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE RESTRICT,
+            CHECK (situacao IN ('rascunho', 'aberto', 'aprovado', 'faturado', 'cancelado'))
+        );
+
+        CREATE TABLE IF NOT EXISTS pedido_itens (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pedido_id INTEGER NOT NULL,
+            produto_id INTEGER NOT NULL,
+            descricao TEXT NOT NULL,
+            quantidade INTEGER NOT NULL DEFAULT 1,
+            preco_unitario_centavos INTEGER NOT NULL,
+            desconto_centavos INTEGER NOT NULL DEFAULT 0,
+            total_centavos INTEGER NOT NULL,
+            sequencia INTEGER NOT NULL DEFAULT 1,
+            CONSTRAINT fk_pedido_itens_pedido_id_pedidos
+                FOREIGN KEY (pedido_id) REFERENCES pedidos(id) ON DELETE CASCADE,
+            CONSTRAINT fk_pedido_itens_produto_id_produtos
+                FOREIGN KEY (produto_id) REFERENCES produtos(id) ON DELETE RESTRICT,
+            CHECK (quantidade > 0)
+        );
+
         CREATE TABLE IF NOT EXISTS auditoria_eventos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             usuario_id TEXT,
@@ -194,6 +257,19 @@ def garantir_schema_fallback(conexao: sqlite3.Connection) -> None:
     # A sessao Microsoft ganhou refresh_token e validade do access_token.
     # Anulaveis: a linha gravada por uma versao anterior segue valida ate o
     # proximo login, que ja preenche as duas.
+    # Vinculo do pagamento com o pedido que o originou. Anulaveis: os
+    # lancamentos avulsos que ja existem nasceram sem pedido.
+    colunas_pagamentos_pedido = {
+        "pedido_id": "INTEGER",
+        "parcela": "INTEGER NOT NULL DEFAULT 1",
+        "total_parcelas": "INTEGER NOT NULL DEFAULT 1",
+    }
+    for coluna, declaracao in colunas_pagamentos_pedido.items():
+        _garantir_coluna(conexao, "pagamentos", coluna, declaracao)
+
+    # De qual pedido esta entrega e. Anulavel pelo mesmo motivo.
+    _garantir_coluna(conexao, "entregas_agendadas", "pedido_id", "INTEGER")
+
     colunas_sessao = {
         "refresh_token": "TEXT",
         "expira_em": "INTEGER",
