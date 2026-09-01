@@ -871,16 +871,34 @@ tbody tr:hover td { background: var(--cor-hover); }
 /* Nome do cliente: o dado que identifica a linha. */
 tbody td strong { font-weight: var(--peso-semi); }
 
-/* Valores em dinheiro e contagens alinham a direita e nao dançam. */
+/* Valores em dinheiro, datas e contagens alinham a direita e nao dançam.
+   `nowrap` porque "R$ 3.850,00" quebrado em duas linhas deixa de ser um
+   numero legivel -- a coluna cede largura, o valor nao. */
 td.valor, th.valor, .col-valor {
     text-align: right;
     font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+/* Identificador de documento: nunca quebra. "PED-2026-000001" partido em tres
+   linhas era o que a tabela de pedidos fazia por falta desta regra. */
+.col-numero, td.col-numero {
+    width: 1%;
+    white-space: nowrap;
 }
 
 /* Texto longo trunca com reticencia em vez de estourar a coluna; o conteudo
-   completo continua no `title` que o JS ja escreve. */
+   completo continua no `title` que o JS ja escreve.
+
+   `max-width: 0` e o truque que faz o text-overflow valer numa celula de
+   largura percentual. O `min-width` e o contrapeso: numa tabela onde as
+   outras colunas nao quebram (numero de documento, valor, data), a coluna
+   flexivel era espremida ate sobrar "D.." do nome do cliente. Quando o minimo
+   e maior que o maximo, o minimo vence -- e a reticencia continua valendo
+   dentro dele. */
 .col-nome, .col-cidade, .col-bairro {
-    max-width: 0; /* deixa o text-overflow valer dentro da largura percentual */
+    max-width: 0;
+    min-width: 160px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1861,6 +1879,161 @@ td .empty-state { padding: var(--esp-10) var(--esp-4); }
     margin-top: var(--esp-4);
     font-size: var(--texto-md);
     color: var(--cor-texto-2);
+}
+
+
+/* =============================================================================
+   13-B. COMERCIAL: pedido e agenda de entregas
+
+   Quase tudo destas telas ja e coberto pelos componentes das secoes acima
+   (.card, .btn-*, .badge-*, .tabela-rolagem, .modal-box). O que sobra aqui e
+   o especifico: a linha de lancamento de item, o quadro de totais e a agenda
+   agrupada por dia.
+   ========================================================================== */
+
+/* Modal que carrega formulario e tabela precisa de mais largura e do texto
+   alinhado a esquerda -- rotulo de campo centralizado nao se le. */
+.modal-formulario { text-align: left; }
+.modal-formulario .modal-title,
+.modal-formulario .modal-msg { text-align: center; }
+.modal-box-larga { max-width: 860px; }
+
+.pedido-cabecalho {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--esp-3);
+    margin-bottom: var(--esp-2);
+}
+.pedido-cabecalho .modal-title { margin-bottom: 0; }
+
+.pedido-itens {
+    margin-top: var(--esp-6);
+    padding-top: var(--esp-5);
+    border-top: 1px solid var(--cor-borda);
+}
+
+/* Linha de lancamento: produto e descricao ocupam a sobra, quantidade e
+   preco ficam estreitos, e o botao alinha pela base dos campos. */
+.item-formulario {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: var(--esp-3);
+    margin-bottom: var(--esp-4);
+    padding: var(--esp-4);
+    border: 1px solid var(--cor-borda);
+    border-radius: var(--raio-md);
+    background: var(--cor-superficie-2);
+}
+.item-formulario .input-group { flex: 1 1 180px; min-width: 0; }
+.item-formulario .input-group-estreito { flex: 0 0 96px; }
+
+/* Totais como lista de definicao: rotulo e valor alinham entre si, e o total
+   final se destaca sem precisar de cor. */
+.pedido-totais {
+    display: flex;
+    flex-direction: column;
+    gap: var(--esp-1);
+    margin: var(--esp-4) 0 0;
+    padding-top: var(--esp-3);
+    border-top: 1px solid var(--cor-borda);
+}
+.pedido-totais > div {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--esp-4);
+}
+.pedido-totais dt { color: var(--cor-texto-2); font-size: var(--texto-md); }
+.pedido-totais dd {
+    margin: 0;
+    font-variant-numeric: tabular-nums;
+    color: var(--cor-texto);
+}
+.pedido-total-final {
+    margin-top: var(--esp-2);
+    padding-top: var(--esp-2);
+    border-top: 1px solid var(--cor-borda);
+}
+.pedido-total-final dt,
+.pedido-total-final dd {
+    font-size: var(--texto-lg);
+    font-weight: var(--peso-semi);
+    color: var(--cor-texto);
+}
+
+/* --- Agenda de entregas ---------------------------------------------------
+   Agrupada por dia: e assim que a equipe consulta de manha. "Hoje" e
+   "Atrasadas" ganham uma faixa de acento a esquerda -- o segundo sinal,
+   alem do titulo, de que aquele bloco pede atencao. */
+.agenda { display: flex; flex-direction: column; gap: var(--esp-4); }
+.agenda-carregando { color: var(--cor-texto-2); font-size: var(--texto-md); }
+
+.agenda-dia { padding: var(--esp-4) var(--esp-5); margin-bottom: 0; }
+.agenda-dia-titulo {
+    display: flex;
+    align-items: baseline;
+    gap: var(--esp-3);
+    margin: 0 0 var(--esp-3);
+    font-size: var(--texto-base);
+    font-weight: var(--peso-semi);
+}
+.agenda-dia-titulo small {
+    font-size: var(--texto-md);
+    font-weight: var(--peso-normal);
+    color: var(--cor-texto-2);
+}
+/* A contagem fica encostada na direita, separada da data. */
+.agenda-dia-titulo .agenda-contagem { margin-left: auto; }
+.agenda-dia-hoje { border-left: 3px solid var(--cor-primaria); }
+.agenda-dia-atrasado { border-left: 3px solid var(--cor-perigo); }
+.agenda-dia-atrasado .agenda-dia-titulo { color: var(--cor-perigo-texto); }
+.agenda-dia-proximo { border-left: 3px solid var(--cor-borda-forte); }
+
+.agenda-lista { margin: 0; padding: 0; list-style: none; }
+.agenda-item {
+    display: flex;
+    align-items: center;
+    gap: var(--esp-4);
+    padding: var(--esp-3) 0;
+    border-bottom: 1px solid var(--cor-borda-sutil);
+}
+.agenda-item:last-child { border-bottom: none; }
+
+.agenda-hora {
+    flex: 0 0 52px;
+    font-variant-numeric: tabular-nums;
+    font-weight: var(--peso-semi);
+    color: var(--cor-texto-2);
+}
+.agenda-corpo { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.agenda-descricao {
+    font-size: var(--texto-md);
+    color: var(--cor-texto-2);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Volta para o pedido que originou a entrega. E um link, nao um botao de
+   acao: nao muda estado nenhum. */
+.elo-pedido {
+    padding: 0 var(--esp-2);
+    border: none;
+    background: none;
+    color: var(--cor-primaria);
+    font: inherit;
+    font-size: var(--texto-md);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    cursor: pointer;
+}
+.elo-pedido:hover { color: var(--cor-primaria-forte); }
+
+@media (max-width: 900px) {
+    .item-formulario .input-group,
+    .item-formulario .input-group-estreito { flex: 1 1 100%; }
+    .agenda-item { flex-wrap: wrap; }
 }
 
 

@@ -363,7 +363,11 @@ def test_template_principal_usa_estrutura_html5_semantica():
     for tag in ('header', 'nav', 'main', 'section', 'article', 'search', 'dialog', 'footer'):
         assert f'<{tag}' in html, f'Elemento HTML5 ausente: <{tag}>'
 
-    assert html.count('<dialog class="modal-overlay"') == 5
+    # A garantia e que TODO modal seja <dialog>, e nao uma contagem fixa: o
+    # numero cresce a cada tela nova, e travar nele so gera falso alarme. O
+    # que importa e que ninguem volte a usar <div> -- foi de la que vinham o
+    # foco passeando por tras do modal e o Esc que nao fechava.
+    assert html.count('<dialog class="modal-overlay"') >= 5
     assert '<div class="modal-overlay"' not in html
 
 

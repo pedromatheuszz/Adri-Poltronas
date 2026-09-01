@@ -19,8 +19,8 @@
           href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 
     <!-- Ordem obrigatoria: tokens.css declara as variaveis que style.css usa. -->
-    <link rel="stylesheet" href="/css/tokens.css?v=v75">
-    <link rel="stylesheet" href="/css/style.css?v=v75">
+    <link rel="stylesheet" href="/css/tokens.css?v=v76">
+    <link rel="stylesheet" href="/css/style.css?v=v76">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
           integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H"
           crossorigin="anonymous" referrerpolicy="no-referrer" />
@@ -69,11 +69,30 @@
                 <span class="nav-tab-rotulo">Dashboard</span>
             </button>
             <p class="nav-grupo" role="presentation">Comercial</p>
+            <button type="button" class="nav-tab" role="tab" id="tab-pedidos" tabindex="-1"
+                    aria-selected="false" aria-controls="aba-pedidos" title="Pedidos"
+                    onclick="trocarAba('pedidos')">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M9 13h6"/><path d="M9 17h4"/></svg>
+                <span class="nav-tab-rotulo">Pedidos</span>
+            </button>
             <button type="button" class="nav-tab" role="tab" id="tab-clientes" tabindex="-1"
                     aria-selected="false" aria-controls="aba-clientes" title="Clientes"
                     onclick="trocarAba('clientes')">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
                 <span class="nav-tab-rotulo">Clientes</span>
+            </button>
+            <button type="button" class="nav-tab" role="tab" id="tab-produtos" tabindex="-1"
+                    aria-selected="false" aria-controls="aba-produtos" title="Produtos"
+                    onclick="trocarAba('produtos')">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 18v-6a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v6"/><path d="M4 15h16"/><path d="M6 18v2"/><path d="M18 18v2"/><path d="M7 9V7a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v2"/></svg>
+                <span class="nav-tab-rotulo">Produtos</span>
+            </button>
+            <p class="nav-grupo" role="presentation">Operacional</p>
+            <button type="button" class="nav-tab" role="tab" id="tab-entregas" tabindex="-1"
+                    aria-selected="false" aria-controls="aba-entregas" title="Entregas"
+                    onclick="trocarAba('entregas')">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="1" y="6" width="13" height="11" rx="1"/><path d="M14 10h4l3 3v4h-7z"/><circle cx="5.5" cy="18.5" r="1.8"/><circle cx="17.5" cy="18.5" r="1.8"/></svg>
+                <span class="nav-tab-rotulo">Entregas</span>
             </button>
             <button type="button" class="nav-tab" role="tab" id="tab-mapa" tabindex="-1"
                     aria-selected="false" aria-controls="aba-mapa" title="Mapa"
@@ -248,6 +267,145 @@
             </section>
 
             <!-- ============================================================
+                 PEDIDOS
+                 O centro do dia a dia numa fabrica sob encomenda: e do pedido
+                 que nascem a entrega agendada e as parcelas a receber.
+                 ============================================================ -->
+            <section id="aba-pedidos" class="tab-content" hidden
+                     role="tabpanel" aria-labelledby="tab-pedidos" tabindex="0">
+                <section class="card">
+                    <div class="secao-topo">
+                        <h2 class="card-title card-title-icone">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/></svg>
+                            Pedidos
+                        </h2>
+                        <button type="button" class="btn btn-primary" onclick="abrirFormularioPedido()">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                            Novo Pedido
+                        </button>
+                    </div>
+
+                    <div class="lista-toolbar">
+                        <search class="input-group search-bar">
+                            <label class="visually-hidden" for="pedFiltroBusca">Pesquisar pedidos</label>
+                            <input type="search" id="pedFiltroBusca" autocomplete="off"
+                                   placeholder="Pesquisar por cliente ou numero...">
+                        </search>
+                        <div class="input-group">
+                            <label class="visually-hidden" for="pedFiltroSituacao">Filtrar por situacao</label>
+                            <select id="pedFiltroSituacao">
+                                <option value="">Todas as situacoes</option>
+                                <option value="rascunho">Rascunho</option>
+                                <option value="aberto">Aberto</option>
+                                <option value="aprovado">Aprovado</option>
+                                <option value="faturado">Faturado</option>
+                                <option value="cancelado">Cancelado</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="tabela-rolagem">
+                        <table>
+                            <caption class="visually-hidden">Pedidos de venda</caption>
+                            <thead>
+                                <tr>
+                                    <th scope="col" class="col-numero">Numero</th>
+                                    <th scope="col" class="col-nome">Cliente</th>
+                                    <th scope="col">Emissao</th>
+                                    <th scope="col">Entrega prevista</th>
+                                    <th scope="col" class="valor">Total</th>
+                                    <th scope="col">Situacao</th>
+                                    <th scope="col" class="col-acoes">Acoes</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tabelaPedidos"></tbody>
+                        </table>
+                    </div>
+                </section>
+            </section>
+
+            <!-- ============================================================
+                 PRODUTOS
+                 Catalogo enxuto: e meio para o pedido, nao um fim.
+                 ============================================================ -->
+            <section id="aba-produtos" class="tab-content" hidden
+                     role="tabpanel" aria-labelledby="tab-produtos" tabindex="0">
+                <section class="card">
+                    <div class="secao-topo">
+                        <h2 class="card-title card-title-icone">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 18v-6a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v6"/><path d="M4 15h16"/></svg>
+                            Produtos
+                        </h2>
+                        <button type="button" class="btn btn-primary" onclick="abrirFormularioProduto()">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                            Novo Produto
+                        </button>
+                    </div>
+
+                    <div class="lista-toolbar">
+                        <search class="input-group search-bar">
+                            <label class="visually-hidden" for="prodFiltroBusca">Pesquisar produtos</label>
+                            <input type="search" id="prodFiltroBusca" autocomplete="off"
+                                   placeholder="Pesquisar por codigo ou descricao...">
+                        </search>
+                    </div>
+
+                    <div class="tabela-rolagem">
+                        <table>
+                            <caption class="visually-hidden">Catalogo de produtos</caption>
+                            <thead>
+                                <tr>
+                                    <th scope="col">Codigo</th>
+                                    <th scope="col" class="col-nome">Descricao</th>
+                                    <th scope="col">Unidade</th>
+                                    <th scope="col" class="valor">Preco de venda</th>
+                                    <th scope="col" class="col-acoes">Acoes</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tabelaProdutos"></tbody>
+                        </table>
+                    </div>
+                </section>
+            </section>
+
+            <!-- ============================================================
+                 ENTREGAS
+                 A agenda que o backend ja servia e que nunca teve tela: as
+                 notificacoes avisavam sobre entregas impossiveis de cadastrar.
+                 ============================================================ -->
+            <section id="aba-entregas" class="tab-content" hidden
+                     role="tabpanel" aria-labelledby="tab-entregas" tabindex="0">
+                <section class="card">
+                    <div class="secao-topo">
+                        <h2 class="card-title card-title-icone">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="1" y="6" width="13" height="11" rx="1"/><path d="M14 10h4l3 3v4h-7z"/></svg>
+                            Agenda de Entregas
+                        </h2>
+                        <button type="button" class="btn btn-primary" onclick="abrirFormularioEntrega()">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                            Agendar Entrega
+                        </button>
+                    </div>
+
+                    <div class="lista-toolbar">
+                        <div class="input-group">
+                            <label class="visually-hidden" for="entFiltroStatus">Filtrar por situacao</label>
+                            <select id="entFiltroStatus">
+                                <option value="">Em aberto</option>
+                                <option value="Pendente">Pendente</option>
+                                <option value="Em andamento">Em andamento</option>
+                                <option value="Concluida">Concluida</option>
+                                <option value="Cancelada">Cancelada</option>
+                                <option value="todas">Todas</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div id="agendaEntregas" class="agenda"></div>
+                </section>
+            </section>
+
+            <!-- ============================================================
                  CLIENTES
                  ============================================================ -->
             <section id="aba-clientes" class="tab-content" hidden
@@ -416,6 +574,13 @@
                         <button type="button" class="btn btn-excel" id="btnEnviarExcel" onclick="enviarParaExcel()" disabled>
                             <img src="/img/excel.png" alt="" width="18" height="18">
                             Enviar para Excel
+                        </button>
+                        <!-- Backup do banco: a funcao existia desde sempre, mas
+                             nao havia botao nem atalho que a alcancasse. -->
+                        <button type="button" class="btn btn-secundario" id="btnBackupBanco"
+                                onclick="fazerBackupSQLite()" title="Baixa o banco de dados completo">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            Backup do banco
                         </button>
                     </footer>
                 </section>
@@ -699,6 +864,11 @@
             <div id="importarResultado" class="importar-resultado" role="status" aria-live="polite"></div>
             <div class="modal-actions">
                 <button type="button" class="modal-btn modal-btn-cancelar" id="modalImportarCancelar">Fechar</button>
+                <!-- Sem este botao a importacao nao tinha como ser executada:
+                     `executarImportacao()` existia completa no app.js e nunca
+                     era chamada, entao Ctrl+I abria um modal sem saida. -->
+                <button type="button" class="modal-btn modal-btn-confirmar"
+                        id="modalImportarConfirmar" onclick="executarImportacao()">Importar</button>
             </div>
         </div>
     </dialog>
@@ -773,13 +943,270 @@
         </div>
     </dialog>
 
+    <!-- ================================================================
+         PRODUTO
+         ================================================================ -->
+    <dialog class="modal-overlay" id="modalProduto" aria-labelledby="modalProdutoTitulo">
+        <div class="modal-box modal-box-media modal-formulario">
+            <h2 class="modal-title" id="modalProdutoTitulo">Novo Produto</h2>
+            <p class="modal-msg">Modelos do catalogo. Cada pedido lanca itens a partir daqui.</p>
+
+            <form id="formProduto">
+                <input type="hidden" id="prodId">
+                <div class="form-grid-modal">
+                    <div class="input-group">
+                        <label for="prodCodigo">Codigo *</label>
+                        <input type="text" id="prodCodigo" required maxlength="40"
+                               placeholder="Ex: POLT-001">
+                    </div>
+                    <div class="input-group">
+                        <label for="prodUnidade">Unidade</label>
+                        <select id="prodUnidade">
+                            <option value="un">Unidade</option>
+                            <option value="pc">Peca</option>
+                            <option value="cj">Conjunto</option>
+                            <option value="m">Metro</option>
+                            <option value="m2">Metro quadrado</option>
+                            <option value="h">Hora</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <label for="prodDescricao">Descricao *</label>
+                    <input type="text" id="prodDescricao" required maxlength="200"
+                           placeholder="Ex: Poltrona Costela">
+                </div>
+
+                <div class="input-group">
+                    <label for="prodPreco">Preco de venda (R$)</label>
+                    <input type="text" id="prodPreco" inputmode="decimal" placeholder="0,00">
+                </div>
+
+                <div class="input-group">
+                    <label for="prodObservacoes">Observacoes</label>
+                    <textarea id="prodObservacoes" rows="2" maxlength="1000"
+                              placeholder="Medidas padrao, tecidos disponiveis..."></textarea>
+                </div>
+
+                <div class="modal-actions">
+                    <button type="button" class="modal-btn modal-btn-cancelar"
+                            onclick="fecharModal('modalProduto')">Cancelar</button>
+                    <button type="submit" class="modal-btn modal-btn-confirmar modal-btn-sucesso">Salvar</button>
+                </div>
+            </form>
+        </div>
+    </dialog>
+
+    <!-- ================================================================
+         PEDIDO
+         Cabecalho, itens e as acoes da maquina de estados. Os botoes de
+         transicao sao montados pelo JS a partir de `proximos_passos`, que
+         o backend calcula -- a tela nao repete a regra.
+         ================================================================ -->
+    <dialog class="modal-overlay" id="modalPedido" aria-labelledby="modalPedidoTitulo">
+        <div class="modal-box modal-box-larga modal-formulario">
+            <div class="pedido-cabecalho">
+                <h2 class="modal-title" id="modalPedidoTitulo">Novo Pedido</h2>
+                <span id="pedidoSituacao"></span>
+            </div>
+
+            <form id="formPedido">
+                <input type="hidden" id="pedId">
+                <div class="form-grid-modal">
+                    <div class="input-group">
+                        <label for="pedClienteId">Cliente *</label>
+                        <select id="pedClienteId" required>
+                            <option value="">Selecione um cliente...</option>
+                        </select>
+                    </div>
+                    <div class="input-group">
+                        <label for="pedEntregaPrevista">Entrega prevista</label>
+                        <input type="date" id="pedEntregaPrevista">
+                    </div>
+                </div>
+
+                <div class="form-grid-modal">
+                    <div class="input-group">
+                        <label for="pedDesconto">Desconto (R$)</label>
+                        <input type="text" id="pedDesconto" inputmode="decimal" placeholder="0,00">
+                    </div>
+                    <div class="input-group">
+                        <label for="pedFrete">Frete (R$)</label>
+                        <input type="text" id="pedFrete" inputmode="decimal" placeholder="0,00">
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <label for="pedObservacoes">Observacoes</label>
+                    <textarea id="pedObservacoes" rows="2" maxlength="1000"
+                              placeholder="Combinados com o cliente, condicoes especiais..."></textarea>
+                </div>
+
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary" id="btnSalvarPedido">Salvar pedido</button>
+                </div>
+            </form>
+
+            <!-- Itens: so aparecem depois que o pedido existe, porque cada item
+                 precisa de um pedido a que pertencer. -->
+            <section id="pedidoBlocoItens" class="pedido-itens" hidden>
+                <h3 class="secao-titulo">Itens do pedido</h3>
+
+                <div id="pedidoFormItem" class="item-formulario">
+                    <div class="input-group">
+                        <label for="itemProdutoId">Produto</label>
+                        <select id="itemProdutoId"><option value="">Selecione...</option></select>
+                    </div>
+                    <div class="input-group">
+                        <label for="itemDescricao">Descricao (tecido, acabamento, medida)</label>
+                        <input type="text" id="itemDescricao" maxlength="300"
+                               placeholder="Deixe vazio para usar a do catalogo">
+                    </div>
+                    <div class="input-group input-group-estreito">
+                        <label for="itemQuantidade">Qtd.</label>
+                        <input type="number" id="itemQuantidade" min="1" step="1" value="1">
+                    </div>
+                    <div class="input-group input-group-estreito">
+                        <label for="itemPreco">Preco un. (R$)</label>
+                        <input type="text" id="itemPreco" inputmode="decimal" placeholder="catalogo">
+                    </div>
+                    <button type="button" class="btn btn-secundario" onclick="adicionarItemAoPedido()">Adicionar</button>
+                </div>
+
+                <div class="tabela-rolagem">
+                    <table class="tabela-simples">
+                        <caption class="visually-hidden">Itens do pedido</caption>
+                        <thead>
+                            <tr>
+                                <th scope="col" class="col-nome">Descricao</th>
+                                <th scope="col" class="centro">Qtd.</th>
+                                <th scope="col" class="direita">Preco un.</th>
+                                <th scope="col" class="direita">Total</th>
+                                <th scope="col" class="col-acoes"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="tabelaItensPedido"></tbody>
+                    </table>
+                </div>
+
+                <dl class="pedido-totais" id="pedidoTotais"></dl>
+            </section>
+
+            <div class="modal-actions" id="pedidoAcoes">
+                <button type="button" class="modal-btn modal-btn-cancelar"
+                        onclick="fecharModal('modalPedido')">Fechar</button>
+            </div>
+        </div>
+    </dialog>
+
+    <!-- ================================================================
+         FATURAMENTO
+         O momento em que o pedido vira dinheiro a receber. O texto diz o
+         que vai acontecer ANTES de acontecer -- nao ha desfazer pela tela.
+         ================================================================ -->
+    <dialog class="modal-overlay" id="modalFaturamento" aria-labelledby="modalFaturamentoTitulo">
+        <div class="modal-box modal-formulario">
+            <h2 class="modal-title" id="modalFaturamentoTitulo">Faturar pedido</h2>
+            <p class="modal-msg" id="faturamentoResumo"></p>
+
+            <form id="formFaturamento">
+                <input type="hidden" id="fatPedidoId">
+                <div class="form-grid-modal">
+                    <div class="input-group">
+                        <label for="fatParcelas">Parcelas</label>
+                        <input type="number" id="fatParcelas" min="1" max="36" step="1" value="1">
+                    </div>
+                    <div class="input-group">
+                        <label for="fatPrimeiroVencimento">1o vencimento *</label>
+                        <input type="date" id="fatPrimeiroVencimento" required>
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <label for="fatFormaPagamento">Forma de pagamento</label>
+                    <select id="fatFormaPagamento">
+                        <option value="Pix">Pix</option>
+                        <option value="Boleto">Boleto</option>
+                        <option value="Dinheiro">Dinheiro</option>
+                        <option value="Cartao">Cartao</option>
+                        <option value="Outro">Outro</option>
+                    </select>
+                </div>
+
+                <p class="aviso-dados-externos" id="faturamentoAviso">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                    <span id="faturamentoEfeito"></span>
+                </p>
+
+                <div class="modal-actions">
+                    <button type="button" class="modal-btn modal-btn-cancelar"
+                            onclick="fecharModal('modalFaturamento')">Cancelar</button>
+                    <button type="submit" class="modal-btn modal-btn-confirmar modal-btn-sucesso">Faturar</button>
+                </div>
+            </form>
+        </div>
+    </dialog>
+
+    <!-- ================================================================
+         AGENDAR ENTREGA
+         ================================================================ -->
+    <dialog class="modal-overlay" id="modalEntrega" aria-labelledby="modalEntregaTitulo">
+        <div class="modal-box modal-box-media modal-formulario">
+            <h2 class="modal-title" id="modalEntregaTitulo">Agendar Entrega</h2>
+            <p class="modal-msg">A entrega aparece na agenda e nas notificacoes.</p>
+
+            <form id="formEntrega">
+                <div class="input-group">
+                    <label for="entClienteId">Cliente *</label>
+                    <select id="entClienteId" required>
+                        <option value="">Selecione um cliente...</option>
+                    </select>
+                </div>
+
+                <div class="input-group">
+                    <label for="entPedidoId">Pedido</label>
+                    <select id="entPedidoId">
+                        <option value="">Sem pedido vinculado</option>
+                    </select>
+                </div>
+
+                <div class="form-grid-modal">
+                    <div class="input-group">
+                        <label for="entData">Data *</label>
+                        <input type="date" id="entData" required>
+                    </div>
+                    <div class="input-group">
+                        <label for="entHora">Hora</label>
+                        <input type="time" id="entHora">
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <label for="entDescricao">Descricao</label>
+                    <input type="text" id="entDescricao" maxlength="300"
+                           placeholder="Ex: 2 poltronas, subir ate o 3o andar">
+                </div>
+
+                <div class="modal-actions">
+                    <button type="button" class="modal-btn modal-btn-cancelar"
+                            onclick="fecharModal('modalEntrega')">Cancelar</button>
+                    <button type="submit" class="modal-btn modal-btn-confirmar modal-btn-sucesso">Agendar</button>
+                </div>
+            </form>
+        </div>
+    </dialog>
+
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
             integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH"
             crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"
             integrity="sha384-e6nUZLBkQ86NJ6TVVKAeSaK8jWa3NhkYWZFomE39AvDbQWeie9PlQqM3pmYW5d1g"
             crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-    <script src="/js/offline.js?v=v75"></script>
-    <script src="/js/app.js?v=v75"></script>
+    <script src="/js/offline.js?v=v76"></script>
+    <script src="/js/app.js?v=v76"></script>
+    <!-- Modulo comercial: Produtos, Pedidos e Agenda de Entregas.
+         Arquivo separado porque app.js ja passa de 2.000 linhas. -->
+    <script src="/js/comercial.js?v=v76"></script>
 </body>
 </html>

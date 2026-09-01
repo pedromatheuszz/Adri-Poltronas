@@ -1,10 +1,12 @@
 """Gerenciador de migrações do banco de dados."""
 import logging
 import os
+import sqlite3
 import sys
 
 from alembic.config import Config
 from alembic import command
+from alembic.script import ScriptDirectory
 
 import database
 
@@ -37,6 +39,53 @@ def _config() -> Config:
     caminho_bd = database.obter_caminho_banco_absoluto().replace('\\', '/')
     cfg.set_main_option('sqlalchemy.url', f'sqlite:///{caminho_bd}')
     return cfg
+
+
+def revisao_do_banco() -> str | None:
+    """
+    Revisão gravada em `alembic_version`, lida direto do arquivo.
+
+    `None` significa banco novo (a tabela ainda não existe) — e banco novo não
+    tem nada a perder, então não justifica backup.
+    """
+    caminho = database.obter_caminho_banco_absoluto()
+    if not os.path.exists(caminho):
+        return None
+    try:
+        conexao = sqlite3.connect(f"file:{caminho}?mode=ro", uri=True, timeout=5)
+    except sqlite3.Error:
+        return None
+    try:
+        linha = conexao.execute("SELECT version_num FROM alembic_version").fetchone()
+        return linha[0] if linha else None
+    except sqlite3.Error:
+        return None
+    finally:
+        conexao.close()
+
+
+def revisao_alvo() -> str | None:
+    """Cabeça da cadeia de migrations no código."""
+    try:
+        return ScriptDirectory.from_config(_config()).get_current_head()
+    except Exception:
+        log.warning("Não foi possível determinar a cabeça das migrations.")
+        return None
+
+
+def ha_migracoes_pendentes() -> bool:
+    """
+    Verdadeiro só quando o banco existente está atrás do código.
+
+    É o gatilho do backup de pré-migração: sem esta checagem, toda abertura do
+    app geraria uma cópia, e a rotação descartaria justamente as que
+    antecedem uma mudança de schema.
+    """
+    atual = revisao_do_banco()
+    if atual is None:
+        return False
+    alvo = revisao_alvo()
+    return alvo is not None and atual != alvo
 
 
 def aplicar_migrações():

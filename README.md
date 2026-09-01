@@ -5,7 +5,6 @@ Aplicativo desktop de gestao da Adri Poltronas em evolucao incremental para um E
 ## Documentacao
 
 - [Diagnostico e roadmap ERP](docs/ERP_DIAGNOSTICO_E_ROADMAP.md)
-- [Backend ERP v2 e comparacao com o v1](backend_v2/README.md)
 - [Build e desenvolvimento](BUILD_GUIDE.md)
 - [Padrao da API](API_STANDARD.md)
 - [Aplicativo .NET/Avalonia](dotnet/README.md)
@@ -23,10 +22,16 @@ npm start
 
 O Electron inicia o Flask em `http://127.0.0.1:5000`. O banco fica em `%APPDATA%\AdriPoltronas\adri_poltronas.db`; para testes isolados, defina `ADRI_DB_PATH`.
 
-O backend ERP v2 é independente e pode rodar ao mesmo tempo em
-`http://127.0.0.1:5001`. Use `npm.cmd run start:v2` para abrir o Electron com o
-v2 na porta 5000; `npm start` continua selecionando o v1 por padrão. Veja
-[backend_v2/README.md](backend_v2/README.md).
+O banco tem backup automático: uma cópia antes de cada migration e uma por
+dia, em `%APPDATA%\AdriPoltronas\backups\`. As cópias são rotacionadas (10 de
+pré-migração, 7 diárias) e usam a API online do SQLite, então são íntegras
+mesmo com o aplicativo aberto.
+
+> Existiu um segundo backend (`backend_v2/`), construído em paralelo para
+> comparação. O núcleo ERP dele — dinheiro em centavos e a máquina de estados
+> do pedido — foi trazido para `backend/erp/`, e o backend foi removido. O
+> código segue recuperável no histórico:
+> `git show 613ca78:backend_v2/banco/esquema.sql`.
 
 ## Qualidade
 

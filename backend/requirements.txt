@@ -8,7 +8,9 @@ flask-limiter==3.5.0
 python-dotenv==1.2.2
 openpyxl==3.1.5
 alembic==1.12.0
-cryptography==42.0.8
+# Piso de seguranca: 42.0.8 acumulava 7 vulnerabilidades conhecidas, e e
+# esta biblioteca que cifra o token da Microsoft em security.py.
+cryptography==50.0.1
 
 # --- Windows (DPAPI para os segredos locais) ---
 pywin32==306; sys_platform == "win32"
@@ -17,6 +19,8 @@ pywin32==306; sys_platform == "win32"
 pyinstaller==6.21.0
 
 # --- Desenvolvimento / CI ---
-pytest==8.3.4
-pytest-cov==5.0.0
+# pytest 8.3.4 tinha PYSEC-2026-1845. O 9.x e major: veio junto o
+# pytest-cov 7, porque o 5 nao suporta a serie nova.
+pytest==9.1.1
+pytest-cov==7.1.0
 ruff==0.4.0

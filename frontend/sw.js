@@ -5,7 +5,7 @@
 // IMPORTANTE: incremente CACHE_NAME sempre que o HTML, o CSS ou o JS mudarem.
 // O handler de `activate` apaga todo cache cujo nome nao esteja nesta lista, e
 // e isso que expurga a versao anterior da maquina do usuario.
-const CACHE_NAME = 'adri-poltronas-v7';
+const CACHE_NAME = 'adri-poltronas-v9';
 
 // Assets proprios: precache obrigatorio. Sao servidos pelo backend local,
 // entao addAll() so falha aqui se algo estiver de fato errado no bundle.
@@ -14,6 +14,7 @@ const PRECACHE_ASSETS = [
   '/css/tokens.css',
   '/css/style.css',
   '/js/app.js',
+  '/js/comercial.js',
   '/js/offline.js',
   '/manifest.json'
 ];
@@ -192,6 +193,16 @@ async function apenasRede(request) {
   try {
     return await fetch(request);
   } catch (error) {
+    // Status 503 e o header, e nao 200.
+    //
+    // Com 200 o `fetch` do app RESOLVIA com sucesso, entao `tentarBackend`
+    // nunca marcava `semBackend` e o caminho de cache offline jamais rodava:
+    // `carregarClientes` seguia adiante, tentava filtrar um objeto como se
+    // fosse lista e estourava. Resultado visivel: tabela vazia com "Erro ao
+    // carregar clientes" -- enquanto os dados estavam intactos no IndexedDB.
+    //
+    // O header e o sinal explicito: distingue "a rede caiu aqui no worker"
+    // de um 503 legitimo vindo do backend.
     return new Response(
       JSON.stringify({
         offline: true,
@@ -199,8 +210,11 @@ async function apenasRede(request) {
         dados: []
       }),
       {
-        headers: { 'Content-Type': 'application/json' },
-        status: 200
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Adri-Offline': '1'
+        },
+        status: 503
       }
     );
   }

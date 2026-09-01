@@ -34,7 +34,7 @@ def criar_entrega():
     # avisaria a pessoa errada.
     entrega_id = database.agendar_entrega(
         entrega['cliente_id'], cliente['nome'], entrega['data_entrega'],
-        entrega['hora_entrega'], entrega['descricao'],
+        entrega['hora_entrega'], entrega['descricao'], entrega.get('pedido_id'),
     )
     return jsonify({"mensagem": "Entrega agendada!", "id": entrega_id}), 201
 
