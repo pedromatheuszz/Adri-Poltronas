@@ -124,6 +124,11 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        # Historico completo: a varredura de segredos precisa olhar TODOS os
+        # commits, nao so o ultimo. Com o clone raso padrao (depth 1) o
+        # gitleaks nao consegue resolver o intervalo e o passo reprovava.
+        fetch-depth: 0
 
     - name: Set up Python
       uses: actions/setup-python@v5
@@ -139,7 +144,25 @@ jobs:
       # Sem `|| true`: uma dependencia vulneravel precisa reprovar o pipeline.
       run: pip-audit --requirement backend/requirements.txt --strict
 
+    # gitleaks pelo binario, e nao pela action oficial.
+    #
+    # A `gitleaks/gitleaks-action@v2` reprovava com "Unexpected exit code [1]"
+    # sem apontar nenhum vazamento -- e o proprio gitleaks, rodado sobre este
+    # repositorio, responde "no leaks found". O que falhava era a camada da
+    # action (validacao de licenca e telemetria), nao a varredura.
+    #
+    # Chamar o binario direto tira essa camada do caminho: a versao fica
+    # fixada, o resultado e reproduzivel localmente com o mesmo comando, e o
+    # passo faz exatamente o que o nome dele diz.
     - name: Scan for committed secrets
-      uses: gitleaks/gitleaks-action@v2
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        VERSAO_GITLEAKS: 8.30.1
+      run: |
+        curl -sSfL -o gitleaks.tar.gz \
+          "https://github.com/gitleaks/gitleaks/releases/download/v${VERSAO_GITLEAKS}/gitleaks_${VERSAO_GITLEAKS}_linux_x64.tar.gz"
+        tar -xzf gitleaks.tar.gz gitleaks
+        chmod +x gitleaks
+        # `--redact` para o log do CI nunca imprimir o segredo encontrado --
+        # o log e publico neste repositorio.
+        ./gitleaks detect --source . --no-banner --redact --verbose
+        rm -f gitleaks gitleaks.tar.gz
