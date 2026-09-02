@@ -5,6 +5,32 @@ Versionamento [semântico](https://semver.org/lang/pt-BR/).
 
 ---
 
+## [1.2.1] — 2026-09-02
+
+Correção do job de instalador introduzido na 1.2.0, que reprovou na primeira
+execução real.
+
+### Corrigido
+
+- **O CI construía o instalador e reprovava ao tentar publicá-lo.** O
+  electron-builder detecta que está num CI e liga publicação implícita: o
+  `.exe` ficava pronto e o passo falhava logo depois, sem token do GitHub.
+  `--publish never` entrou no script `dist` do `package.json` — assim vale
+  igual no CI e na máquina de quem empacota, e ninguém publica release por
+  acidente.
+
+### Alterado
+
+- O job do instalador roda também na `develop`. A ideia original de poupar
+  minutos rodando só na promoção invertia a ordem: quem descobria a quebra era
+  a `main`, cuja regra é "se está aqui, funciona".
+- Falha do empacotamento agora aparece na anotação do job, com as últimas
+  linhas do log, e o log completo sobe como artefato. O log do passo só é
+  acessível com direitos de admin no repositório — a informação existia e não
+  alcançava quem precisava dela.
+
+---
+
 ## [1.2.0] — 2026-09-01
 
 Correção dos pontos levantados no diagnóstico técnico do commit `c50c2ec`. As
@@ -146,5 +172,6 @@ Primeira versão em produção: cadastro de clientes, pagamentos com Asaas,
 dashboard, mapa, relatórios, notificações, exportação para o OneDrive e
 interface renovada em Electron.
 
+[1.2.1]: https://github.com/pedromatheuszz/Adri-Poltronas/releases/tag/v1.2.1
 [1.2.0]: https://github.com/pedromatheuszz/Adri-Poltronas/releases/tag/v1.2.0
 [1.1.0]: https://github.com/pedromatheuszz/Adri-Poltronas/releases/tag/v1.1.0
