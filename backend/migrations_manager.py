@@ -41,12 +41,78 @@ def _config() -> Config:
     return cfg
 
 
+# Estados possiveis do arquivo de banco. Existem porque a pergunta "ha
+# migracao pendente?" nao tem resposta util sem antes saber COM O QUE se esta
+# lidando -- e a versao anterior deste modulo tratava tres situacoes muito
+# diferentes como a mesma coisa (`None`):
+#
+#   arquivo inexistente | banco legado sem alembic_version | banco ilegivel
+#
+# Consequencia pratica do empate: um banco legado, cheio de clientes reais,
+# respondia "nao ha migracao pendente" e seguia direto para o upgrade SEM
+# BACKUP. Era exatamente o caso em que a copia mais importava.
+ESTADO_AUSENTE = "ausente"        # o arquivo nao existe: instalacao nova
+ESTADO_VAZIO = "vazio"            # existe, mas sem nenhuma tabela de dados
+ESTADO_LEGADO = "legado"          # tem dados e nao tem alembic_version
+ESTADO_VERSIONADO = "versionado"  # tem alembic_version legivel
+ESTADO_ILEGIVEL = "ilegivel"      # existe e nao abre, ou nao responde consulta
+
+# Estados em que nao ha nada a perder. Tudo que estiver FORA deste conjunto
+# exige backup antes de migrar e proibe o fallback de schema.
+ESTADOS_SEM_DADOS = frozenset({ESTADO_AUSENTE, ESTADO_VAZIO})
+
+
+def estado_do_banco() -> str:
+    """
+    Classifica o arquivo de banco antes de qualquer decisao sobre migracao.
+
+    Nao levanta: um erro aqui vira `ESTADO_ILEGIVEL`, que e o estado mais
+    conservador -- quem consome trata ilegivel como "tem dados", forcando
+    backup e proibindo o fallback.
+    """
+    caminho = database.obter_caminho_banco_absoluto()
+    if not os.path.exists(caminho) or os.path.getsize(caminho) == 0:
+        return ESTADO_AUSENTE
+
+    try:
+        conexao = sqlite3.connect(f"file:{caminho}?mode=ro", uri=True, timeout=5)
+    except sqlite3.Error:
+        return ESTADO_ILEGIVEL
+
+    try:
+        tabelas = {
+            linha[0]
+            for linha in conexao.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+    except sqlite3.Error:
+        return ESTADO_ILEGIVEL
+    finally:
+        conexao.close()
+
+    # sqlite_sequence e criada sozinha por qualquer AUTOINCREMENT e nao conta
+    # como dado do usuario.
+    tabelas_de_dados = {t for t in tabelas if not t.startswith("sqlite_")}
+    if not tabelas_de_dados:
+        return ESTADO_VAZIO
+    if "alembic_version" not in tabelas_de_dados:
+        return ESTADO_LEGADO
+    return ESTADO_VERSIONADO
+
+
+def banco_tem_dados() -> bool:
+    """Verdadeiro sempre que perder o arquivo custaria alguma coisa."""
+    return estado_do_banco() not in ESTADOS_SEM_DADOS
+
+
 def revisao_do_banco() -> str | None:
     """
     Revisão gravada em `alembic_version`, lida direto do arquivo.
 
-    `None` significa banco novo (a tabela ainda não existe) — e banco novo não
-    tem nada a perder, então não justifica backup.
+    `None` cobre tres casos que o chamador NAO deve confundir entre si —
+    arquivo ausente, banco legado e banco ilegivel. Quem precisa distinguir
+    chama `estado_do_banco()`.
     """
     caminho = database.obter_caminho_banco_absoluto()
     if not os.path.exists(caminho):
@@ -75,17 +141,41 @@ def revisao_alvo() -> str | None:
 
 def ha_migracoes_pendentes() -> bool:
     """
-    Verdadeiro só quando o banco existente está atrás do código.
+    Verdadeiro quando o Alembic vai mexer num banco que tem o que perder.
 
-    É o gatilho do backup de pré-migração: sem esta checagem, toda abertura do
-    app geraria uma cópia, e a rotação descartaria justamente as que
-    antecedem uma mudança de schema.
+    É o gatilho do backup de pré-migração. Sem a checagem, toda abertura do
+    app geraria uma cópia e a rotação descartaria justamente as que antecedem
+    uma mudança de schema — por isso um banco já na cabeça responde `False`.
+
+    Banco legado (sem `alembic_version`) e banco ilegível respondem `True`:
+    são os dois casos em que o upgrade mais pode doer e em que a versão
+    anterior desta função respondia, erradamente, `False`.
     """
-    atual = revisao_do_banco()
-    if atual is None:
+    estado = estado_do_banco()
+    if estado in ESTADOS_SEM_DADOS:
         return False
+    if estado in (ESTADO_LEGADO, ESTADO_ILEGIVEL):
+        return True
     alvo = revisao_alvo()
-    return alvo is not None and atual != alvo
+    return alvo is not None and revisao_do_banco() != alvo
+
+
+def carimbar(revisao: str = "head") -> None:
+    """
+    Grava `alembic_version` sem executar nenhuma migration.
+
+    Existe para um banco construído pelo caminho de emergência
+    (`garantir_schema_fallback`), que sai com o schema pronto e SEM
+    `alembic_version`. Para o Alembic esse banco é "legado": ele tentaria
+    aplicar a migration inicial sobre tabelas que já existem, falharia, e --
+    desde que a inicialização passou a falhar de forma segura -- o aplicativo
+    se recusaria a abrir a partir da segunda execução.
+
+    Carimbar declara o que é verdade: o schema já está na altura desta
+    revisão. É o que torna o banco migrável dali em diante.
+    """
+    command.stamp(_config(), revisao)
+    log.info("Banco carimbado na revisão %s.", revisao)
 
 
 def aplicar_migrações():

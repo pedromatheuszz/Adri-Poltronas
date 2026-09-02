@@ -48,6 +48,8 @@ def _criar_indices(conexao: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS ix_entregas_pedido_id ON entregas_agendadas(pedido_id)",
         "CREATE INDEX IF NOT EXISTS ix_auditoria_entidade_registro ON auditoria_eventos(entidade, entidade_id, id)",
         "CREATE INDEX IF NOT EXISTS ix_auditoria_criado_em ON auditoria_eventos(criado_em)",
+        "CREATE INDEX IF NOT EXISTS ix_operacoes_idempotentes_criado_em "
+        "ON operacoes_idempotentes(criado_em)",
         "CREATE INDEX IF NOT EXISTS ix_auditoria_usuario_criado_em ON auditoria_eventos(usuario_id, criado_em)",
     ]
     for comando in comandos:
@@ -113,6 +115,7 @@ def garantir_schema_fallback(conexao: sqlite3.Connection) -> None:
             cliente_id INTEGER NOT NULL,
             cliente_nome TEXT DEFAULT '',
             valor REAL NOT NULL DEFAULT 0,
+            valor_centavos INTEGER,
             descricao TEXT DEFAULT '',
             status TEXT NOT NULL DEFAULT 'Pendente',
             data_pagamento TEXT DEFAULT '',
@@ -127,8 +130,21 @@ def garantir_schema_fallback(conexao: sqlite3.Connection) -> None:
             asaas_external_reference TEXT DEFAULT '',
             asaas_emissao_estado TEXT DEFAULT '',
             asaas_emissao_inicio TEXT DEFAULT '',
+            pedido_id INTEGER,
+            parcela INTEGER NOT NULL DEFAULT 1,
+            total_parcelas INTEGER NOT NULL DEFAULT 1,
             CONSTRAINT fk_pagamentos_cliente_id_clientes
-                FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE RESTRICT
+                FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE RESTRICT,
+            -- RESTRICT, e nao CASCADE: apagar um pedido nao pode levar junto as
+            -- parcelas dele. O dominio resolve isso por cancelamento, que
+            -- preserva o registro.
+            --
+            -- Declarada aqui, no CREATE, porque SQLite nao aceita acrescentar
+            -- constraint por ALTER TABLE -- e era exatamente por isso que a
+            -- coluna vivia sem FK. Num banco que ja existe, quem cria a
+            -- constraint e a migration a3b6f019c72d, recriando a tabela.
+            CONSTRAINT fk_pagamentos_pedido_id_pedidos
+                FOREIGN KEY (pedido_id) REFERENCES pedidos(id) ON DELETE RESTRICT
         );
 
         CREATE TABLE IF NOT EXISTS clientes_asaas (
@@ -155,8 +171,11 @@ def garantir_schema_fallback(conexao: sqlite3.Connection) -> None:
             descricao TEXT DEFAULT '',
             status TEXT NOT NULL DEFAULT 'Pendente',
             criado_em TEXT DEFAULT (datetime('now', 'localtime')),
+            pedido_id INTEGER,
             CONSTRAINT fk_entregas_agendadas_cliente_id_clientes
-                FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE RESTRICT
+                FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE RESTRICT,
+            CONSTRAINT fk_entregas_agendadas_pedido_id_pedidos
+                FOREIGN KEY (pedido_id) REFERENCES pedidos(id) ON DELETE RESTRICT
         );
 
         CREATE TABLE IF NOT EXISTS produtos (
@@ -211,6 +230,15 @@ def garantir_schema_fallback(conexao: sqlite3.Connection) -> None:
             CHECK (quantidade > 0)
         );
 
+        CREATE TABLE IF NOT EXISTS operacoes_idempotentes (
+            chave TEXT PRIMARY KEY,
+            rota TEXT NOT NULL,
+            metodo TEXT NOT NULL,
+            status INTEGER NOT NULL,
+            corpo TEXT NOT NULL,
+            criado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+        );
+
         CREATE TABLE IF NOT EXISTS auditoria_eventos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             usuario_id TEXT,
@@ -250,9 +278,21 @@ def garantir_schema_fallback(conexao: sqlite3.Connection) -> None:
         "asaas_external_reference": "TEXT DEFAULT ''",
         "asaas_emissao_estado": "TEXT DEFAULT ''",
         "asaas_emissao_inicio": "TEXT DEFAULT ''",
+        # Dinheiro em centavos inteiros. `valor` (REAL) continua sendo gravado
+        # durante a transicao; ver a migration a3b6f019c72d para o porque.
+        "valor_centavos": "INTEGER",
     }
     for coluna, declaracao in colunas_pagamentos.items():
         _garantir_coluna(conexao, "pagamentos", coluna, declaracao)
+
+    # Backfill: um banco que veio pelo caminho de emergencia tem `valor` e nao
+    # tem `valor_centavos`. ROUND antes de CAST -- CAST sozinho trunca, e um
+    # centavo por linha nao e arredondamento, e erro.
+    conexao.execute(
+        "UPDATE pagamentos SET valor_centavos = "
+        "CAST(ROUND(COALESCE(valor, 0) * 100) AS INTEGER) "
+        "WHERE valor_centavos IS NULL"
+    )
 
     # A sessao Microsoft ganhou refresh_token e validade do access_token.
     # Anulaveis: a linha gravada por uma versao anterior segue valida ate o

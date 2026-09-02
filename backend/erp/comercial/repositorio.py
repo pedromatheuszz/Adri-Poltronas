@@ -289,18 +289,29 @@ def inserir_parcela(conexao, dados: dict) -> int:
 
     Reusar a tabela existente, em vez de criar `titulos`, mantem em pe toda a
     maquina de cobranca que ja funciona: Pix, boleto, webhook do Asaas e a
-    tela de Pagamentos. `valor` continua REAL nesta tabela -- a conversao a
-    partir de centavos acontece aqui, na fronteira.
+    tela de Pagamentos.
+
+    O valor chega em CENTAVOS e e gravado em centavos. Ate a versao 1.1 ele
+    passava por `round(centavos / 100, 2)` aqui, e o rateio exato feito pelo
+    `dinheiro.ratear` se perdia na conversao: tres parcelas de um pedido de
+    R$ 100,00 viravam 33.33 / 33.33 / 33.34 em ponto flutuante binario, cuja
+    soma nao e 100,00.
+
+    `valor` (REAL) continua sendo gravado a partir dos centavos, para que
+    consultas e relatorios que dependem dele sigam funcionando enquanto as
+    duas colunas convivem.
     """
+    centavos = int(dados["valor_centavos"])
     conexao.execute(
-        """INSERT INTO pagamentos (cliente_id, cliente_nome, valor, descricao, status,
-                                   data_vencimento, tipo_pagamento, pedido_id,
-                                   parcela, total_parcelas)
-           VALUES (?, ?, ?, ?, 'Pendente', ?, ?, ?, ?, ?)""",
+        """INSERT INTO pagamentos (cliente_id, cliente_nome, valor, valor_centavos,
+                                   descricao, status, data_vencimento,
+                                   tipo_pagamento, pedido_id, parcela, total_parcelas)
+           VALUES (?, ?, ?, ?, ?, 'Pendente', ?, ?, ?, ?, ?)""",
         (
             dados["cliente_id"],
             dados["cliente_nome"],
-            dados["valor"],
+            round(centavos / 100, 2),
+            centavos,
             dados["descricao"],
             dados["data_vencimento"],
             dados.get("tipo_pagamento", "Pix"),

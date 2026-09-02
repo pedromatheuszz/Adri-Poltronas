@@ -37,8 +37,21 @@ def iniciar_contexto(contexto: ContextoOperacao):
 
 
 def encerrar_contexto(token) -> None:
-    """Restaura o contexto anterior, inclusive em requisicoes concorrentes."""
-    _CONTEXTO_ATUAL.reset(token)
+    """
+    Restaura o contexto anterior, inclusive em requisicoes concorrentes.
+
+    Idempotente de proposito. `ContextVar.reset()` levanta RuntimeError quando
+    recebe um token ja consumido, e o unico chamador e um `teardown_request`
+    do Flask -- que pode rodar duas vezes sobre a mesma requisicao (o
+    `test_client` usado como gerenciador de contexto faz exatamente isso).
+    Uma excecao levantada no teardown substitui a resposta que ja estava
+    pronta por um 500, ou seja: a limpeza derrubaria o que ela deveria estar
+    apenas encerrando.
+    """
+    try:
+        _CONTEXTO_ATUAL.reset(token)
+    except (RuntimeError, ValueError):
+        pass
 
 
 def obter_contexto() -> ContextoOperacao:

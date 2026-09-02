@@ -444,7 +444,12 @@ def validar_sql_safe(consulta: str, params: tuple = ()) -> bool:
 # Seguranca de Upload de Arquivos
 # ---------------------------------------------------------------------------
 
-_EXTENSOES_PERMITIDAS = {'.csv', '.json', '.xlsx', '.xls'}
+# `.xls` FICOU DE FORA de proposito. O leitor usado na importacao e o
+# openpyxl, que so abre o formato OOXML (.xlsx) -- entregar um .xls a ele
+# levanta excecao. Aceitar a extensao aqui fazia a interface prometer um
+# suporte que nao existe: o usuario escolhia o arquivo, aguardava, e recebia
+# "nao foi possivel ler o arquivo enviado" sem saber por que.
+_EXTENSOES_PERMITIDAS = {'.csv', '.json', '.xlsx'}
 _TAMANHO_MAXIMO_UPLOAD = 10 * 1024 * 1024  # 10 MB
 _MIME_TYPES_PERMITIDOS = {
     'text/csv',
@@ -476,6 +481,13 @@ def validar_upload(arquivo, max_size: int = _TAMANHO_MAXIMO_UPLOAD) -> tuple:
         return False, "Nome de arquivo invalido."
 
     ext = os.path.splitext(filename)[1].lower()
+    if ext == '.xls':
+        # O erro mais provavel de todos, e o unico que merece instrucao
+        # propria: quem tem uma planilha antiga nao sabe que ela e de outro
+        # formato, so que "o Excel abre". Mandar converter e mais util do que
+        # informar que a extensao nao e permitida.
+        return False, ("Arquivos .xls (Excel antigo) nao sao suportados. Abra a "
+                       "planilha no Excel e salve como .xlsx, ou exporte para CSV.")
     if ext not in _EXTENSOES_PERMITIDAS:
         return False, f"Extensao nao permitida: {ext}. Use CSV, JSON ou XLSX."
 

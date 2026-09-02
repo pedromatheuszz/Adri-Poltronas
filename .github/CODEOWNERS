@@ -1,0 +1,20 @@
+# Quem responde por cada parte do repositorio.
+#
+# O GitHub usa este arquivo para pedir revisao automaticamente. Com um
+# mantenedor so, o efeito pratico e outro: junto com a protecao da branch
+# `main`, ele impede que um merge aconteca sem passar por quem responde pelo
+# codigo -- inclusive um merge feito no automatico.
+#
+# Ao entrar uma segunda pessoa no projeto, este arquivo e o lugar de dividir
+# responsabilidade por area, e nao um combinado verbal.
+
+* @pedromatheuszz
+
+# Areas em que um erro custa mais caro do que em qualquer outra: dinheiro,
+# schema do banco e a cadeia que produz o instalador. Ficam listadas
+# explicitamente para que a intencao continue legivel quando houver mais gente.
+/backend/erp/financeiro/      @pedromatheuszz
+/backend/migrations/          @pedromatheuszz
+/backend/capacidade.py        @pedromatheuszz
+/.github/workflows/           @pedromatheuszz
+/AdriPoltronasBackend.spec    @pedromatheuszz

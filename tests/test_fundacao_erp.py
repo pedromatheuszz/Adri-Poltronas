@@ -160,7 +160,7 @@ def test_migrations_reconstroem_schema_integral_em_banco_novo(tmp_path, monkeypa
     # Cabeca da cadeia de migrations. Atualizar junto ao acrescentar uma
     # revisao nova -- e o que garante que ela entrou na cadeia, e nao ficou
     # pendurada fora dela.
-    assert revisao == "d1e7b3f5620a"
+    assert revisao == "a3b6f019c72d"
     # O modulo comercial: sem estas tres, pagamento e entrega continuam
     # pendurados no cliente, sem saber a que venda pertencem.
     assert {"produtos", "pedidos", "pedido_itens"} <= tabelas
@@ -169,6 +169,9 @@ def test_migrations_reconstroem_schema_integral_em_banco_novo(tmp_path, monkeypa
     # volta a refazer o login a cada hora para exportar uma planilha.
     assert {"refresh_token", "expira_em"} <= colunas_sessao
     assert "auditoria_eventos" in tabelas
+    # Sem ela a fila offline nao consegue reenviar com seguranca: um POST
+    # cuja resposta se perdeu vira um segundo cliente identico no banco.
+    assert "operacoes_idempotentes" in tabelas
     assert any(fk[2] == "clientes" and fk[6] == "RESTRICT" for fk in fks_pagamentos)
     assert {
         "trg_auditoria_eventos_immutable_update",

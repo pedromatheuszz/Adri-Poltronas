@@ -184,22 +184,45 @@ def test_put_em_pagamento_inexistente_retorna_404(client):
 # -----------------------------------------------------------------------------
 # Regressoes introduzidas na camada de seguranca adicionada durante a auditoria
 # -----------------------------------------------------------------------------
-def test_csp_permite_os_handlers_inline_que_o_template_usa(client):
+def test_markup_nao_tem_handler_inline(client):
     """
-    O index.html tem 22 handlers `onclick=` inline. Uma CSP com nonce gerado
-    por resposta e nunca repassado ao template bloquearia todos eles -- a
-    interface inteira pararia de responder.
+    Os 36 `onclick=` do template viraram comandos declarativos (`data-comando`).
+
+    O teste guarda a condicao que permite a CSP recusar script inline: basta um
+    `onclick=` voltar ao markup para a interface quebrar em silencio -- o
+    navegador bloqueia o handler sem aviso visivel na tela.
     """
-    import re as _re
     template = os.path.join(os.path.dirname(__file__), '..', 'backend', 'templates', 'index.html')
     with open(template, encoding='utf-8') as f:
         markup = f.read()
-    assert 'onclick=' in markup, "o template deixou de usar handlers inline"
 
+    assert 'onclick=' not in markup, (
+        "handler inline de volta no template: ou ele vira data-acao, ou a CSP "
+        "precisa liberar 'unsafe-inline' de novo -- e a liberacao vale para "
+        "todo script inline da pagina, nao so para este"
+    )
+    assert 'data-comando=' in markup, "os comandos declarativos sumiram do template"
+
+
+def test_csp_recusa_script_inline(client):
+    """
+    Enquanto havia `onclick=` no markup, `script-src` precisava de
+    'unsafe-inline'. Essa liberacao nao e seletiva: vale para TODO script
+    inline da pagina, inclusive um que venha a ser injetado por um campo de
+    cadastro mal escapado.
+    """
+    import re as _re
     csp = client.get('/').headers['Content-Security-Policy']
     script_src = _re.search(r'script-src([^;]*)', csp).group(1)
-    assert "'unsafe-inline'" in script_src
-    assert 'nonce-' not in script_src
+
+    assert "'unsafe-inline'" not in script_src
+    assert "'self'" in script_src
+
+    # `style-src` mantem a liberacao de proposito: Leaflet e Chart.js
+    # posicionam elementos escrevendo no atributo `style` em tempo de execucao.
+    # Estilo injetado permite defacement, nao execucao de codigo.
+    style_src = _re.search(r'style-src([^;]*)', csp).group(1)
+    assert "'unsafe-inline'" in style_src
 
 
 def test_limpar_csrf_cache_preserva_tokens_vivos():
@@ -283,7 +306,13 @@ def test_cancelamento_de_pendente_com_sucesso(client, asaas_espiao):
 
     assert resposta.status_code == 200
     assert chamadas == ['pay_789']
-    assert database.obter_pagamento_por_id(pagamento_id) is None
+    # A linha continua no banco, agora como 'Cancelado'. Apagar registro
+    # financeiro o faz sumir do extrato, da conferencia com o Asaas (que segue
+    # conhecendo a cobranca pelo asaas_payment_id) e da propria auditoria, que
+    # ficaria com um evento de cancelamento apontando para um id sem destino.
+    cancelado = database.obter_pagamento_por_id(pagamento_id)
+    assert cancelado is not None
+    assert cancelado['status'] == 'Cancelado'
 
 
 # -----------------------------------------------------------------------------
@@ -483,7 +512,10 @@ def test_nome_de_arquivo_do_onedrive_e_saneado(bruto, esperado):
 
 @pytest.mark.parametrize("bruto", [
     "../../../Documentos/relatorio",
-    "..\..\Windows\system32\payload",
+    # Raw string: sem o prefixo, `\W` e `\s` sao sequencias de escape
+    # invalidas -- o Python ainda as aceita, com SyntaxWarning, mas a partir
+    # da 3.12 o aviso e ruido a cada execucao da suite.
+    r"..\..\Windows\system32\payload",
     "pasta/subpasta/arquivo",
     "a:/b",
 ])
