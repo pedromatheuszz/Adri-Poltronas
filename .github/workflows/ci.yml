@@ -362,6 +362,11 @@ jobs:
         # fazer. Ele constroi para verificar que o empacotamento funciona; a
         # assinatura de release e outro processo, com outra chave.
         CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        # E o CI tambem NAO publica. O `--publish never` esta no script `dist`
+        # do package.json, entao vale igual aqui e na maquina de quem
+        # empacota. Ver o commit que o acrescentou: o electron-builder detecta
+        # CI e liga publicacao implicita, e foi assim que este job reprovou com
+        # o instalador ja construido.
       run: |
         # `set +e` e obrigatorio aqui. O GitHub roda `shell: bash` como
         # `bash --noprofile --norc -eo pipefail`, e com `-e` o script aborta na
