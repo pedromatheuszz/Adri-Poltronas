@@ -12,5 +12,12 @@
     <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="8.0.0" />
     <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.1" />
     <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="8.0.0" />
+    <!-- Elevacao de dependencia TRANSITIVA, e nao um pacote que o codigo use.
+         `Microsoft.EntityFrameworkCore.Sqlite` traz SQLitePCLRaw 2.1.6, com
+         GHSA-2m69-gcr7-jv3q (severidade alta). Declarar a versao corrigida
+         aqui faz o NuGet resolver a mais alta e alcanca tambem os projetos de
+         teste, que herdam por referencia de projeto.
+         Removivel quando o EF Core passar a trazer uma versao corrigida. -->
+    <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="3.53.3" />
   </ItemGroup>
 </Project>

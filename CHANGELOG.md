@@ -106,6 +106,11 @@ mudanças de segurança e de integridade financeira são o centro desta versão.
 - Rotação dos arquivos de log — antes um único `app.log` crescia sem limite.
 - Dependências Node atualizadas: 14 vulnerabilidades (13 altas, 1 crítica) na
   cadeia do `electron-builder` e no próprio Electron, agora em zero.
+- Duas vulnerabilidades altas em pacotes NuGet transitivos, que ninguém via
+  porque o CI nunca auditou o lado .NET: `SQLitePCLRaw.lib.e_sqlite3`
+  (GHSA-2m69-gcr7-jv3q, via EF Core) e `Tmds.DBus.Protocol`
+  (GHSA-xrw6-gwf8-vvr9, via Avalonia). As versões corrigidas passaram a ser
+  declaradas explicitamente.
 
 ---
 

@@ -202,11 +202,17 @@ jobs:
       run: pip-audit --requirement backend/requirements.txt --strict
 
     - name: Check for vulnerable dependencies (versoes travadas)
+      # Duas particularidades, e as duas custaram um job vermelho:
+      #
       # A copia para `.txt` nao e capricho: o pip-audit recusa o arquivo pela
       # extensao ("invalid requirements input") antes mesmo de tentar le-lo.
+      #
+      # `--no-deps` porque o lock JA e o fecho transitivo -- resolver de novo
+      # nao acrescenta nada e, pior, falha neste runner Linux ao tentar
+      # resolver `pywin32`, que so existe para Windows.
       run: |
         cp backend/requirements.lock requirements-lock.txt
-        pip-audit --requirement requirements-lock.txt --strict
+        pip-audit --requirement requirements-lock.txt --no-deps --strict
         rm -f requirements-lock.txt
 
     # gitleaks pelo binario, e nao pela action oficial.

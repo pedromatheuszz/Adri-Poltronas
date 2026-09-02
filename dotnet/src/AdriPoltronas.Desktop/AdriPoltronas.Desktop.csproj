@@ -28,6 +28,12 @@
     <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="8.0.0" />
     <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.1" />
     <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="8.0.1" />
+    <!-- Mesmo caso: o Avalonia traz Tmds.DBus.Protocol 0.20.0, com
+         GHSA-xrw6-gwf8-vvr9 (severidade alta). E a camada de IPC do Linux,
+         entao nao afeta o Windows; mas a solution compila para os tres
+         sistemas, e o audit do CI reprova por severidade, nao por
+         plataforma. -->
+    <PackageReference Include="Tmds.DBus.Protocol" Version="0.95.0" />
     <PackageReference Include="WebView.Avalonia" Version="11.0.0.1" />
     <PackageReference Include="WebView.Avalonia.Desktop" Version="11.0.0.1" />
   </ItemGroup>
