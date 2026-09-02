@@ -143,12 +143,17 @@ do banco real antes de promover para a `main`.
   Microsoft ativa: as alterações vão para a fila de erros com 401. Resolver
   exige autenticação local própria, independente de integração.
 - **Não há usuários nem permissões.** Quem abre o aplicativo pode tudo.
+- **Releases são publicadas por tag.** `git push origin vX.Y.Z` dispara o
+  workflow `release.yml`, que constrói o instalador, gera o checksum e publica.
+  A tag precisa casar com a `version` do `package.json` — o workflow reprova se
+  divergirem.
 - **`main` não está protegida pelo GitHub.** A tabela acima diz que ninguém
   grava direto nela — hoje isso é combinado, não regra: um `git push origin
   main` acidental passa. Ver "Proteger a `main`" abaixo.
-- **`pagamentos.valor` ainda é `REAL`.** As tabelas do módulo comercial usam
-  centavos inteiros; a de pagamentos não. Converter exige leitura dupla
-  durante a transição e é projeto próprio.
+- **`pagamentos.valor` ainda é `REAL`, ao lado de `valor_centavos`.** As
+  escritas e todas as leituras financeiras já usam a coluna inteira; `valor`
+  segue sendo gravado para não quebrar consumidor externo. Removê-la é o
+  passo final da transição.
 - **Listagens não têm paginação.** A tela de clientes baixa e renderiza todos.
   Adequado para os milhares de registros de hoje; não para dezenas de milhares.
 - **Um computador por empresa.** SQLite em pasta de rede corrompe. Compartilhar
@@ -156,16 +161,72 @@ do banco real antes de promover para a `main`.
 
 ## Proteger a `main`
 
-Enquanto isso não estiver feito, a regra "ninguém grava direto na `main`" é
-apenas um acordo. Em
-[Settings → Branches](https://github.com/pedromatheuszz/Adri-Poltronas/settings/branches),
-crie um ruleset para `main` com:
+Enquanto isto não estiver feito, a regra "ninguém grava direto na `main`" é um
+acordo, e não uma regra: um `git push origin main` acidental passa.
 
-- **Require a pull request before merging**
-- **Require status checks to pass** — marque todos: `test (3.10)`,
-  `test (3.11)`, `test (3.12)`, `electron`, `qt`, `dotnet`, `security` e
-  `instalador`
-- **Block force pushes**
+São três minutos, e só o dono do repositório consegue fazer.
+
+```bash
+start https://github.com/pedromatheuszz/Adri-Poltronas/settings/rules/new
+```
+
+Em **New branch ruleset**:
+
+| Campo | Valor |
+|---|---|
+| Ruleset Name | `Protege a main` |
+| Enforcement status | **Active** |
+| Target branches | Add target → Include by pattern → `main` |
+
+E marque:
+
+- ☑ **Require a pull request before merging** — *Required approvals: 0*. Com um
+  mantenedor só, o valor está em forçar o PR, não em ter revisor: é o PR que
+  faz os checks rodarem antes do merge.
+- ☑ **Require status checks to pass** — adicione os **9**: `test (3.10)`,
+  `test (3.11)`, `test (3.12)`, `electron`, `qt`, `dotnet`, `security`, `e2e` e
+  `instalador`.
+- ☑ **Block force pushes**
+- ☑ **Restrict deletions**
+
+Repita para `develop`, se quiser — ali dá para dispensar o `instalador`, que é
+o job mais demorado.
+
+> **O detalhe que morde:** um check só aparece na busca depois de ter rodado ao
+> menos uma vez com aquele nome exato. Todos os 9 já rodaram, então aparecem.
+> Se você renomear um job, o ruleset continua exigindo o nome antigo — que
+> nunca mais vai chegar — e todo PR trava esperando um check que não existe.
+
+### Por que isso importa aqui
+
+O `CODEOWNERS` já existe, mas ele sozinho **não bloqueia nada**: sem ruleset,
+ele apenas sugere revisor. E o job `instalador` só protege de verdade se for
+obrigatório — foi ele que pegou, na primeira execução real, o fato de o
+aplicativo instalado nunca ter aplicado uma migration sequer.
+
+## Publicar uma release
+
+Empurrar a tag dispara `release.yml`, que constrói o instalador, gera o
+**SHA-256** e publica tudo em Releases, usando o trecho correspondente do
+`CHANGELOG.md` como nota.
+
+```bash
+git switch main && git pull
+git tag -a v1.3.0 -m "v1.3.0 - resumo do que entrou"
+git push origin v1.3.0
+```
+
+A tag precisa casar com a `version` do `package.json` — o workflow reprova se
+divergirem, porque isso significa que alguém marcou a versão sem subir o
+número, e o instalador sairia com o nome de outra versão.
+
+**O instalador não é assinado.** O Windows SmartScreen vai alertar quem baixar.
+O corpo da release diz isso e mostra o comando para conferir o checksum. Para
+resolver de vez é preciso um certificado de code signing — os tipos, os custos
+e as CAs estão em [docs/code-signing.md](docs/code-signing.md). Com o
+certificado em mãos, são dois secrets (`CSC_LINK` com o `.pfx` em base64 e
+`CSC_KEY_PASSWORD`) e remover o `CSC_IDENTITY_AUTO_DISCOVERY: false` do
+workflow.
 
 ## Autoria dos commits
 

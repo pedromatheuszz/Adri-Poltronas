@@ -149,8 +149,12 @@ def decifrar(valor: str):
         wc = _importar_win32crypt()
         if wc is None:
             return None
-        bruto = base64.b64decode(valor[len(PREFIXO_DPAPI):])
+        # O b64decode fica DENTRO do try: um valor truncado ou editado a mao
+        # levanta binascii.Error, e essa excecao escapava daqui. Quem chama
+        # espera `None` para "nao consegui decifrar" -- um arquivo corrompido
+        # derrubava a leitura inteira em vez de degradar.
         try:
+            bruto = base64.b64decode(valor[len(PREFIXO_DPAPI):])
             resultado = wc.CryptUnprotectData(bruto, None, None, None, 0)
             return resultado[1].decode("utf-8")
         except Exception:

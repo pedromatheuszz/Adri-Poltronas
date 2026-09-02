@@ -38,8 +38,13 @@ def idempotente(rota):
     situacoes sao o mesmo fetch que rejeita, e reenviar um POST de criacao
     produzia dois clientes identicos.
 
-    Sem cabecalho `Idempotency-Key` a rota se comporta como antes: o
-    mecanismo e para quem envia da fila, nao para a tela.
+    A chave e RESERVADA antes de a rota executar, e concluida depois. Ver
+    `erp/core/idempotencia.py` para o porque dos tres passos -- em resumo,
+    registrar a resposta so no fim deixava uma janela em que a escrita
+    acontecia e a lembranca nao.
+
+    Sem cabecalho `Idempotency-Key` a rota se comporta como antes: o mecanismo
+    e para quem envia da fila, nao para a tela.
     """
     @wraps(rota)
     def envelope(*args, **kwargs):
@@ -47,23 +52,57 @@ def idempotente(rota):
         if not idempotencia.chave_valida(chave):
             return rota(*args, **kwargs)
 
-        lembrada = idempotencia.resposta_registrada(database.conectar, chave)
-        if lembrada is not None:
-            status, corpo = lembrada
+        impressao = idempotencia.impressao_da_requisicao(
+            request.method, request.path, request.get_data(cache=True)
+        )
+        situacao, guardada = idempotencia.reservar(
+            database.conectar, chave, request.path, request.method, impressao
+        )
+
+        if situacao == idempotencia.REPETIDA:
+            status, corpo = guardada
             resposta = jsonify(corpo)
             resposta.status_code = status
             # Deixa explicito, para quem depurar, que este 201 nao criou nada.
             resposta.headers['X-Idempotencia'] = 'repetida'
             return resposta
 
-        resultado = rota(*args, **kwargs)
+        if situacao == idempotencia.EM_ANDAMENTO:
+            # 503, e nao 409: a fila offline trata 4xx como erro definitivo e
+            # move a operacao para a fila de erros. Aqui a resposta certa e
+            # "volte depois" -- a requisicao original pode ainda estar em voo,
+            # ou ter morrido e deixado a reserva para a poda recolher.
+            log.warning("[IDEMPOTENCIA] Chave %s ainda em andamento.", chave)
+            return jsonify({
+                "erro": "Esta operacao ja esta sendo processada. Tente novamente "
+                        "em instantes.",
+            }), 503
+
+        if situacao == idempotencia.CONFLITO:
+            # Erro de quem envia: a mesma chave voltou com outro corpo.
+            # Devolver a resposta da primeira operacao seria pior -- o cliente
+            # acharia que a segunda foi aplicada.
+            log.warning("[IDEMPOTENCIA] Chave %s reutilizada com corpo diferente.", chave)
+            return jsonify({
+                "erro": "Esta chave de operacao ja foi usada com outros dados.",
+            }), 422
+
+        try:
+            resultado = rota(*args, **kwargs)
+        except Exception:
+            # A reserva nao pode sobreviver a uma rota que explodiu, ou o
+            # reenvio encontraria "em andamento" ate a poda passar.
+            idempotencia.liberar(database.conectar, chave)
+            raise
+
         corpo, status = _corpo_e_status(resultado)
-        # So sucesso e lembrado: reenviar um 400 de validacao produz o mesmo
-        # 400, sem efeito colateral, e guardar erro so faria a tabela crescer.
         if corpo is not None and 200 <= status < 300:
-            idempotencia.registrar(
-                database.conectar, chave, request.path, request.method, status, corpo
-            )
+            idempotencia.concluir(database.conectar, chave, status, corpo)
+        else:
+            # So sucesso vira lembranca: reenviar um 400 de validacao produz o
+            # mesmo 400, sem efeito colateral, e guardar erro impediria a fila
+            # de tentar de novo depois que a causa fosse corrigida.
+            idempotencia.liberar(database.conectar, chave)
         return resultado
 
     return envelope
@@ -76,7 +115,6 @@ def _corpo_e_status(resultado):
         return resposta.get_json(), int(status)
     except (AttributeError, TypeError, ValueError):
         return None, int(status) if isinstance(status, int) else 200
-
 
 
 # Teto por pagina. Existe para uma requisicao nao poder pedir a base inteira

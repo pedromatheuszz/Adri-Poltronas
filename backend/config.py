@@ -5,6 +5,8 @@ import os
 import logging
 from dotenv import load_dotenv
 
+import segredos
+
 log = logging.getLogger("adri.config")
 
 # Modelo gravado em %APPDATA% na primeira execucao, para que o app instalado
@@ -79,11 +81,19 @@ def carregar_configuracao() -> None:
     A ordem define a precedencia: `load_dotenv` nao sobrescreve variaveis ja
     definidas, entao o .env do repositorio (desenvolvimento) vence, e o de
     %APPDATA% cobre o app instalado.
+
+    Ao final, anota QUAIS nomes vieram de arquivo. E o que permite ao cofre
+    saber se uma credencial em `os.environ` foi lida do `.env` -- e portanto
+    perde para a versao cifrada -- ou injetada de fora, caso em que vence.
     """
+    antes = set(os.environ)
+
     load_dotenv()
     caminho_usuario = caminho_env_do_usuario()
     if caminho_usuario and os.path.exists(caminho_usuario):
         load_dotenv(caminho_usuario)
+
+    segredos.registrar_origem_env(set(os.environ) - antes)
 
 
 carregar_configuracao()
@@ -103,12 +113,15 @@ ESCOPOS_MICROSOFT = "User.Read Files.ReadWrite offline_access"
 
 URL_TOKEN_MICROSOFT = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
 URL_AUTORIZACAO_MICROSOFT = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
-GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
-ASAAS_API_KEY = os.environ.get('ASAAS_API_KEY', '')
+# Credenciais de integracao. Vem do cofre cifrado quando ele as tem; do
+# ambiente ou do .env quando nao. Ver `segredos.py` para a precedencia e para
+# o limite honesto do que o DPAPI protege.
+GEMINI_API_KEY = segredos.obter('GEMINI_API_KEY')
+ASAAS_API_KEY = segredos.obter('ASAAS_API_KEY')
 ASAAS_SANDBOX = os.environ.get('ASAAS_SANDBOX', 'true').strip().lower() == 'true'
 # Token que o Asaas envia no header `asaas-access-token` dos webhooks.
 # Deve ser diferente da ASAAS_API_KEY (recomendacao explicita do Asaas).
-ASAAS_WEBHOOK_TOKEN = os.environ.get('ASAAS_WEBHOOK_TOKEN', '')
+ASAAS_WEBHOOK_TOKEN = segredos.obter('ASAAS_WEBHOOK_TOKEN')
 
 # Versao do aplicativo. Lida do package.json para nao existirem duas verdades:
 # o instalador, o titulo da janela e a sonda de identidade precisam concordar,

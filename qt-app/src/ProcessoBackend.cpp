@@ -1,10 +1,20 @@
 #include "ProcessoBackend.h"
 
+#include "Capacidade.h"
+
 #include <QCoreApplication>
 #include <QDeadlineTimer>
 #include <QDir>
 #include <QFileInfo>
+#include <QEventLoop>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
+#include <QScopedPointer>
 #include <QTcpSocket>
+#include <QTimer>
 #include <QThread>
 
 namespace adri {
@@ -50,14 +60,69 @@ bool ProcessoBackend::servidorNoAr(int timeoutMs) {
     return sonda.waitForConnected(timeoutMs);
 }
 
+ProcessoBackend::EstadoDaPorta ProcessoBackend::sondarPorta(const QByteArray &capacidade,
+                                                            int timeoutMs) {
+    if (!servidorNoAr(timeoutMs)) return EstadoDaPorta::Livre;
+
+    // `/api/health` e a unica rota que responde sem capacidade -- de
+    // proposito: e ela que permite descobrir SE a capacidade em maos serve.
+    QNetworkAccessManager rede;
+    QNetworkRequest pedido(urlDoApp().resolved(QUrl(QStringLiteral("/api/health"))));
+    if (!capacidade.isEmpty()) pedido.setRawHeader(kHeaderDaCapacidade, capacidade);
+
+    QScopedPointer<QNetworkReply> resposta(rede.get(pedido));
+    QEventLoop laco;
+    QTimer relogio;
+    relogio.setSingleShot(true);
+    QObject::connect(resposta.data(), &QNetworkReply::finished, &laco, &QEventLoop::quit);
+    QObject::connect(&relogio, &QTimer::timeout, &laco, &QEventLoop::quit);
+    relogio.start(timeoutMs);
+    laco.exec();
+
+    if (!resposta->isFinished() || resposta->error() != QNetworkReply::NoError)
+        return EstadoDaPorta::Estranho;
+
+    const QJsonObject corpo = QJsonDocument::fromJson(resposta->readAll()).object();
+    if (corpo.value(QLatin1String("servico")).toString() != QLatin1String("adri-poltronas"))
+        return EstadoDaPorta::Estranho;
+
+    const bool exige = corpo.value(QLatin1String("capacidade_exigida")).toBool();
+    const bool aceita = corpo.value(QLatin1String("capacidade_aceita")).toBool();
+    if (exige && !aceita) return EstadoDaPorta::RecusouCapacidade;
+    return EstadoDaPorta::Nosso;
+}
+
 bool ProcessoBackend::iniciar(const QString &raizProjeto, bool empacotado, QString *erro) {
+    const QByteArray capacidade = tokenDeCapacidade().toUtf8();
+
     // Uma instancia anterior (ou a janela do Electron) pode ja estar servindo.
-    // Reaproveitar evita o segundo processo morrer com a porta ocupada.
-    if (servidorNoAr()) {
+    // Reaproveitar evita o segundo processo morrer com a porta ocupada -- mas
+    // so quando o que esta la e mesmo o nosso backend, e aceita a nossa
+    // credencial. Antes bastava a porta estar ocupada, e a janela adotava
+    // qualquer servidor.
+    switch (sondarPorta(capacidade)) {
+    case EstadoDaPorta::Nosso:
         emit saidaDoBackend(QStringLiteral("[backend] reaproveitando servidor em %1")
                                 .arg(urlDoApp().toString()));
         processoProprio_ = false;
         return true;
+    case EstadoDaPorta::Estranho:
+        if (erro)
+            *erro = QStringLiteral(
+                        "A porta %1 ja esta em uso por outro programa.\n\n"
+                        "O Adri Poltronas precisa dela para funcionar. Feche o outro "
+                        "programa e abra o aplicativo de novo.")
+                        .arg(kPorta);
+        return false;
+    case EstadoDaPorta::RecusouCapacidade:
+        if (erro)
+            *erro = QStringLiteral(
+                "Ha uma execucao anterior do Adri Poltronas ainda ativa em segundo "
+                "plano, com outra credencial.\n\nEncerre o processo "
+                "\"AdriPoltronasBackend\" pelo Gerenciador de Tarefas e tente de novo.");
+        return false;
+    case EstadoDaPorta::Livre:
+        break;  // segue e sobe o proprio
     }
 
     const Comando comando = comandoPara(raizProjeto, empacotado);
@@ -74,6 +139,12 @@ bool ProcessoBackend::iniciar(const QString &raizProjeto, bool empacotado, QStri
     // log do backend so aparece quando o processo morre.
     QProcessEnvironment ambiente = QProcessEnvironment::systemEnvironment();
     ambiente.insert(QStringLiteral("PYTHONUNBUFFERED"), QStringLiteral("1"));
+    // Sem isto, o backend que a janela Qt sobe nao exige capacidade de
+    // ninguem -- e a protecao que o Electron ganhou na 1.2 seria desfeita
+    // por quem abrisse a outra interface.
+    if (!capacidade.isEmpty())
+        ambiente.insert(QString::fromLatin1(kVariavelDaCapacidade),
+                        QString::fromUtf8(capacidade));
     processo_->setProcessEnvironment(ambiente);
 
     connect(processo_, &QProcess::readyReadStandardOutput, this, [this] {
@@ -101,7 +172,8 @@ bool ProcessoBackend::iniciar(const QString &raizProjeto, bool empacotado, QStri
             }
             return false;
         }
-        if (servidorNoAr(kIntervaloSondaMs)) return true;
+        if (sondarPorta(capacidade, kIntervaloSondaMs) == EstadoDaPorta::Nosso)
+            return true;
         QThread::msleep(kIntervaloSondaMs);
         QCoreApplication::processEvents();
     }

@@ -162,17 +162,42 @@ def test_put_sem_status_nao_apaga_a_receita(client):
     assert metricas['total_pendente'] == 0
 
 
-def test_put_com_status_explicito_e_respeitado(client):
+def test_put_com_status_explicito_e_recusado(client):
+    """
+    O PUT deixou de ser porta dos fundos da maquina de estados.
+
+    Este teste afirmava o contrario ate a versao 1.2.1 -- que mandar `status`
+    no corpo era respeitado. Isso permitia marcar 'Recebido' sem passar pela
+    conferencia com o gateway, ou reabrir uma cobranca cancelada, sem registro
+    do porque. A regra que impedia o estrago vivia no comportamento da tela,
+    que por acaso nao enviava o campo; e regra que depende de o cliente se
+    comportar nao e regra.
+
+    Transicao de estado tem porta propria, e cada uma carrega a checagem
+    correspondente.
+    """
     cliente_id, pagamento_id = _pagamento_recebido(client)
 
     resposta = _put_pagamento(client, pagamento_id, cliente_id, status="Cancelado")
-    assert resposta.status_code == 200
 
+    assert resposta.status_code == 409
+    assert database.obter_pagamento_por_id(pagamento_id)['status'] == 'Recebido'
+
+
+def test_put_repetindo_o_status_atual_passa(client):
+    """Um formulario que reenvia o registro inteiro nao esta tentando mudar
+    estado nenhum -- recusar isso quebraria a edicao de descricao."""
+    cliente_id, pagamento_id = _pagamento_recebido(client)
+
+    resposta = _put_pagamento(client, pagamento_id, cliente_id,
+                              status="Recebido", descricao="Poltrona azul")
+
+    assert resposta.status_code == 200
     pagamento = database.obter_pagamento_por_id(pagamento_id)
-    assert pagamento['status'] == 'Cancelado'
-    # Cancelado nao e recebimento: a data de pagamento precisa sair junto,
-    # senao as metricas contariam dinheiro que nao entrou.
-    assert pagamento['data_pagamento'] == ''
+    assert pagamento['descricao'] == 'Poltrona azul'
+    assert pagamento['status'] == 'Recebido'
+    # E a data de recebimento continua intacta: o PUT nao a reescreve.
+    assert pagamento['data_pagamento'] == '2020-01-10'
 
 
 def test_put_em_pagamento_inexistente_retorna_404(client):

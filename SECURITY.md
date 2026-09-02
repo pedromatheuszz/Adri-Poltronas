@@ -59,7 +59,10 @@ computador, e isso define o que é defensável:
 - **Janela isolada**: `contextIsolation`, sandbox, sem integração com Node,
   navegação externa bloqueada.
 - **Webhook do Asaas fail closed**: sem token configurado, ele recusa tudo.
-- **Segredos fora do repositório**: vivem em `%APPDATA%\AdriPoltronas\.env`.
+- **Segredos fora do repositório e cifrados em repouso**: as chaves do Asaas
+  e do Gemini vivem em `%APPDATA%\AdriPoltronas\.segredos`, protegidas por
+  DPAPI. Uma chave em texto no `.env` é migrada automaticamente na próxima
+  abertura.
 
 ### O que **não** é tratado — e por quê
 
@@ -67,6 +70,10 @@ computador, e isso define o que é defensável:
   SQLite diretamente, ler o `.env` e o arquivo de capacidade. Nenhum controle
   dentro do aplicativo muda isso; quem defende essa fronteira é o sistema
   operacional.
+- **As chaves cifradas não resistem a código rodando como você.** O DPAPI
+  protege contra outra conta do Windows e contra o arquivo sair da máquina;
+  um processo executando com a sua identidade pode simplesmente pedir que ele
+  decifre. É a mesma fronteira do arquivo de capacidade.
 - **Banco e backups não são cifrados em repouso.** O arquivo contém nome,
   endereço e CEP de clientes reais. Um disco sem BitLocker, roubado, entrega
   tudo. Cifrar exigiria SQLCipher e uma chave que o usuário teria de digitar a
