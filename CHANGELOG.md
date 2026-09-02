@@ -83,6 +83,17 @@ foco são os três bloqueios que impediam operação financeira real.
 
 ### Adicionado
 
+- **Releases automáticas.** Empurrar uma tag `v*` constrói o instalador, gera
+  o **SHA-256** e publica um GitHub Release com o arquivo e o trecho
+  correspondente do CHANGELOG. Existiam tags e a página de Releases estava
+  vazia — quem quisesse o instalador precisava construí-lo. O checksum não
+  substitui assinatura digital, mas é o mínimo verificável enquanto não há
+  certificado.
+- **Chaves de integração cifradas em repouso.** `ASAAS_API_KEY`,
+  `GEMINI_API_KEY` e `ASAAS_WEBHOOK_TOKEN` saem do `.env` em texto puro e
+  passam a viver cifradas com DPAPI, reusando a mesma infraestrutura que já
+  protegia os tokens da Microsoft. A migração acontece na abertura do
+  aplicativo, preservando o `.env` original como `.env.bak`.
 - **O CI instala o instalador e o exercita**, em vez de apenas construí-lo. Ele
   verifica que o app instalado abre, exige a capacidade, recusa quem não a
   apresenta — e que o banco criado por ele chega à cabeça da cadeia de
