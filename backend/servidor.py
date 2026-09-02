@@ -116,6 +116,33 @@ def preparar_banco() -> None:
     tem_dados = estado not in migrations_manager.ESTADOS_SEM_DADOS
     log.info("Estado do banco antes de migrar: %s", estado)
 
+    if estado == migrations_manager.ESTADO_LEGADO:
+        # Banco com schema e sem `alembic_version`. Na pratica, um banco que
+        # veio do caminho de emergencia: `garantir_schema_fallback` monta o
+        # schema completo e nao registra revisao nenhuma.
+        #
+        # Tentar `upgrade` daqui e o caminho errado -- a migration inicial faz
+        # CREATE TABLE sobre tabelas que ja existem e falha. O certo e nivelar
+        # (o fallback e idempotente: IF NOT EXISTS e ALTER condicional) e
+        # declarar a revisao que o schema de fato tem.
+        log.warning("Banco sem alembic_version. Nivelando pelo schema base e carimbando.")
+        if backup.criar_backup(caminho, backup.MOTIVO_PRE_MIGRACAO):
+            log.info("Backup antes de carimbar o banco legado.")
+        elif tem_dados:
+            raise ErroDePreparacaoDoBanco(
+                "Nao foi possivel gravar o backup obrigatorio antes de "
+                "regularizar o banco. Verifique espaco em disco e permissao "
+                "de escrita na pasta de dados.", caminho,
+            )
+        try:
+            database.criar_tabela()
+            migrations_manager.carimbar("head")
+        except Exception as erro:
+            raise ErroDePreparacaoDoBanco(
+                "Nao foi possivel regularizar o banco existente.", caminho,
+            ) from erro
+        estado = migrations_manager.estado_do_banco()
+
     if estado == migrations_manager.ESTADO_ILEGIVEL:
         raise ErroDePreparacaoDoBanco(
             "O arquivo do banco existe mas nao pode ser lido. Ele pode estar "
@@ -153,6 +180,12 @@ def preparar_banco() -> None:
         # Banco novo: o schema basico e melhor do que nao abrir.
         log.exception("Falha ao migrar banco novo; usando criar_tabela()")
         database.criar_tabela()
+        # E carimbar, senao a proxima abertura encontra um banco "legado" e
+        # cai no caminho de regularizacao a cada boot.
+        try:
+            migrations_manager.carimbar("head")
+        except Exception:
+            log.warning("Schema base criado, mas nao foi possivel carimbar a revisao.")
 
     # Lembrancas de operacoes offline ja processadas expiram: a fila nao
     # guarda operacao por semanas, e sem a poda a tabela so cresce.

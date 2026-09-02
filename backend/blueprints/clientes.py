@@ -79,10 +79,47 @@ def _corpo_e_status(resultado):
 
 
 
+# Teto por pagina. Existe para uma requisicao nao poder pedir a base inteira
+# so passando `limite=999999` -- o que anularia a propria paginacao.
+LIMITE_MAXIMO_POR_PAGINA = 500
+
+
 @clientes_bp.route('', methods=['GET'])
 def listar_clientes():
+    """
+    Lista clientes ativos.
+
+    Sem `limite`, devolve tudo -- e o comportamento que a sincronizacao do
+    cache offline depende, porque ela trata a lista como autoritativa e poda o
+    que nao esta nela.
+
+    Com `limite`, devolve uma pagina e informa o total no cabecalho
+    `X-Total-Registros`. O corpo continua sendo um array simples: trocar por
+    um envelope quebraria todo consumidor existente por um dado que cabe num
+    cabecalho.
+    """
     busca = request.args.get('busca', '')
-    return jsonify(database.listar_clientes(busca))
+
+    limite_bruto = (request.args.get('limite') or '').strip()
+    if not limite_bruto:
+        return jsonify(database.listar_clientes(busca))
+
+    limite = validators.inteiro_positivo(limite_bruto)
+    if limite is None:
+        return jsonify({"erro": "limite deve ser um numero positivo."}), 400
+    limite = min(limite, LIMITE_MAXIMO_POR_PAGINA)
+
+    # Zero e um deslocamento legitimo (primeira pagina), e
+    # `inteiro_positivo` o recusaria -- por isso a checagem e feita a mao.
+    deslocamento_bruto = (request.args.get('deslocamento') or '0').strip()
+    if not deslocamento_bruto.isdigit():
+        return jsonify({"erro": "deslocamento deve ser um numero inteiro nao negativo."}), 400
+    deslocamento = int(deslocamento_bruto)
+
+    pagina = database.listar_clientes(busca, limite=limite, deslocamento=deslocamento)
+    resposta = jsonify(pagina)
+    resposta.headers['X-Total-Registros'] = str(database.contar_clientes(busca))
+    return resposta
 
 
 @clientes_bp.route('', methods=['POST'])

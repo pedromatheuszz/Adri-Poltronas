@@ -453,6 +453,9 @@ document.addEventListener('DOMContentLoaded', function() {
     var btnConciliar = document.getElementById('btnConciliarAsaas');
     if (btnConciliar) btnConciliar.addEventListener('click', function(){ conciliarPagamentos(false); });
 
+    var btnMais = document.getElementById('btnCarregarMaisClientes');
+    if (btnMais) btnMais.addEventListener('click', carregarMaisClientes);
+
     var btnRestaurar = document.getElementById('btnRestaurarBanco');
     if (btnRestaurar) btnRestaurar.addEventListener('click', abrirModalRestaurar);
 
@@ -1064,27 +1067,66 @@ function fecharNotificacoes() {
     if (botao) botao.setAttribute('aria-expanded', 'false');
 }
 
+// Paginacao da lista de clientes.
+//
+// Ate a versao 1.1 a tela pedia TODOS os clientes e desenhava todos de uma vez.
+// Com alguns milhares de registros isso e uma pausa visivel a cada troca de
+// aba; com dezenas de milhares, a aba trava -- montar dezenas de milhares de
+// <tr> por concatenacao de string nao tem como sair barato.
+//
+// 200 por pagina cobre com folga a operacao de um dia e mantem o primeiro
+// desenho instantaneo. O resto vem por demanda.
+var TAMANHO_DA_PAGINA = 200;
+var _clientesCarregados = [];
+var _totalDeClientes = 0;
+var _buscaDaPagina = '';
+
 async function carregarClientes() {
     var busca = (document.getElementById('inputPesquisa') || {}).value || '';
-    busca = busca.trim();
+    _buscaDaPagina = busca.trim();
+    _clientesCarregados = [];
+    _totalDeClientes = 0;
     // Esqueleto antes da chamada: a lista mantem a altura e o operador ve que
     // algo esta em andamento, em vez de encarar a tabela vazia da consulta
     // anterior ate a resposta chegar.
     mostrarEsqueleto('tabelaClientes', 6, 5);
-    var r = await tentarBackend(API_URL+'?busca='+encodeURIComponent(busca));
+    return _carregarPaginaDeClientes(true);
+}
+
+async function carregarMaisClientes() {
+    return _carregarPaginaDeClientes(false);
+}
+
+async function _carregarPaginaDeClientes(primeira) {
+    var url = API_URL + '?busca=' + encodeURIComponent(_buscaDaPagina) +
+              '&limite=' + TAMANHO_DA_PAGINA +
+              '&deslocamento=' + _clientesCarregados.length;
+    var r = await tentarBackend(url);
     if (r.semBackend) { carregarClientesOffline(true); return; }
     try {
         if (!r.resposta.ok) throw new Error('Falha');
-        var clientes = await r.resposta.json();
-        // Cache para uso offline. `sincronizarCache` (e nao `cacheClientes`)
-        // porque esta lista e a autoritativa: o que nao esta nela precisa
-        // sair do cache, senao ficam residuos de registros ja excluidos e de
-        // ids temporarios negativos criados offline.
-        if (typeof OfflineManager !== 'undefined' && Array.isArray(clientes)) {
-            OfflineManager.sincronizarCache(clientes);
+        var pagina = await r.resposta.json();
+        if (!Array.isArray(pagina)) pagina = [];
+
+        var total = parseInt(r.resposta.headers.get('X-Total-Registros') || '', 10);
+        _totalDeClientes = isNaN(total) ? (_clientesCarregados.length + pagina.length) : total;
+        _clientesCarregados = _clientesCarregados.concat(pagina);
+
+        // Cache para uso offline. `sincronizarCache` poda o que nao esta na
+        // lista -- correto quando ela e a base inteira, destrutivo quando e
+        // uma pagina: a segunda pagina seria lida como "excluida no servidor".
+        // Por isso a poda so acontece quando tudo coube numa pagina so.
+        if (typeof OfflineManager !== 'undefined') {
+            if (_clientesCarregados.length >= _totalDeClientes) {
+                OfflineManager.sincronizarCache(_clientesCarregados);
+            } else {
+                OfflineManager.cacheClientes(pagina);
+            }
         }
-        clientes = clientes.filter(clientePassaFiltro);
+
+        var clientes = _clientesCarregados.filter(clientePassaFiltro);
         renderizarTabela(clientes);
+        _atualizarRodapeDaLista(clientes.length);
     } catch (error) {
         console.error('Erro ao carregar do servidor:', error);
         renderizarTabela([]);
@@ -1348,6 +1390,32 @@ function mostrarEsqueleto(idTabela, colunas, linhas) {
     var html = '';
     for (var i = 0; i < (linhas || 5); i++) html += '<tr class="skeleton-row">' + celulas + '</tr>';
     tbody.innerHTML = html;
+}
+
+function _atualizarRodapeDaLista(visiveis) {
+    var rodape = document.getElementById('rodapeClientes');
+    var contagem = document.getElementById('contagemClientes');
+    var botao = document.getElementById('btnCarregarMaisClientes');
+    if (!rodape || !contagem || !botao) return;
+
+    var faltam = _totalDeClientes - _clientesCarregados.length;
+    if (faltam <= 0 && _totalDeClientes <= TAMANHO_DA_PAGINA) {
+        // Cabe tudo numa pagina: o rodape so ocuparia espaco.
+        rodape.hidden = true;
+        return;
+    }
+
+    rodape.hidden = false;
+    // Saber que existem 1.240 registros e ver 200 e diferente de achar que ha
+    // 200. A contagem fica visivel enquanto houver mais de uma pagina.
+    contagem.textContent = 'Mostrando ' + visiveis + ' de ' + _totalDeClientes +
+                           (visiveis !== _clientesCarregados.length
+                              ? ' (filtro aplicado sobre ' + _clientesCarregados.length + ' carregados)'
+                              : '');
+    botao.hidden = faltam <= 0;
+    botao.textContent = faltam > 0
+        ? 'Carregar mais ' + Math.min(faltam, TAMANHO_DA_PAGINA)
+        : 'Carregar mais';
 }
 
 function renderizarTabela(clientes) {

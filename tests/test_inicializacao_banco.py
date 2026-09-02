@@ -229,3 +229,68 @@ def test_main_sai_com_codigo_dois_e_marca_a_falha_de_banco(monkeypatch, capsys):
     saida = capsys.readouterr().err
     assert servidor.MARCADOR_FALHA_BANCO in saida
     assert "Disco cheio." in saida
+
+
+# =============================================================================
+# Banco vindo do caminho de emergencia
+#
+# `garantir_schema_fallback` monta o schema completo e nao grava revisao
+# nenhuma. Para o Alembic, o resultado e um banco "legado" -- e tentar migrar
+# dali faz a migration inicial rodar CREATE TABLE sobre tabelas que ja
+# existem. Sem regularizacao, a inicializacao passaria a recusar o banco a
+# partir da SEGUNDA execucao: o app abriria uma vez e nunca mais.
+# =============================================================================
+def test_banco_do_fallback_e_regularizado_no_boot(monkeypatch, tmp_path):
+    caminho = tmp_path / "emergencia.db"
+    _apontar_para(monkeypatch, caminho)
+    monkeypatch.setattr(database, "DB_PATH", str(caminho))
+
+    database.criar_tabela()
+    with database.conectar() as conexao:
+        conexao.execute(
+            "INSERT INTO clientes (nome, cep, rua, bairro, cidade, entrega_retirada) "
+            "VALUES ('Do fallback', '11000-000', 'Rua', 'Centro', 'Santos', 'Entrega')"
+        )
+    assert migrations_manager.estado_do_banco() == migrations_manager.ESTADO_LEGADO
+
+    servidor.preparar_banco()
+
+    assert migrations_manager.estado_do_banco() == migrations_manager.ESTADO_VERSIONADO
+    assert migrations_manager.revisao_do_banco() == migrations_manager.revisao_alvo()
+    assert migrations_manager.ha_migracoes_pendentes() is False
+
+    with database.conectar() as conexao:
+        assert conexao.execute("SELECT COUNT(*) FROM clientes").fetchone()[0] == 1
+
+
+def test_regularizar_banco_legado_faz_backup_antes(monkeypatch, tmp_path):
+    """Carimbar tambem mexe no banco. Se der errado, o operador precisa de
+    para onde voltar."""
+    caminho = tmp_path / "emergencia.db"
+    _apontar_para(monkeypatch, caminho)
+    monkeypatch.setattr(database, "DB_PATH", str(caminho))
+    database.criar_tabela()
+    with database.conectar() as conexao:
+        conexao.execute(
+            "INSERT INTO clientes (nome, cep, rua, bairro, cidade, entrega_retirada) "
+            "VALUES ('Antes de carimbar', '11000-000', 'Rua', 'Centro', 'Santos', 'Entrega')"
+        )
+
+    servidor.preparar_banco()
+
+    copias = backup.listar_copias(str(caminho))
+    assert any(c["motivo"] == backup.MOTIVO_PRE_MIGRACAO for c in copias),         "nao guardou copia antes de regularizar o banco"
+
+
+def test_segundo_boot_do_banco_regularizado_e_silencioso(monkeypatch, tmp_path):
+    caminho = tmp_path / "emergencia.db"
+    _apontar_para(monkeypatch, caminho)
+    monkeypatch.setattr(database, "DB_PATH", str(caminho))
+    database.criar_tabela()
+
+    servidor.preparar_banco()
+    revisao = migrations_manager.revisao_do_banco()
+    servidor.preparar_banco()
+
+    # Nada mudou: o banco ja estava na cabeca e nao ha o que regularizar.
+    assert migrations_manager.revisao_do_banco() == revisao

@@ -131,20 +131,44 @@ def salvar_cliente(nome, cep, rua, bairro, cidade, entrega_retirada, observacoes
         return cliente_id
 
 
-def listar_clientes(busca=''):
+def _filtro_de_busca(busca: str):
+    """Devolve (fragmento_sql, parametros) para o termo de busca."""
     termo = (busca or '').strip()
+    if not termo:
+        return '', []
+    like = f'%{termo}%'
+    return ' AND (nome LIKE ? OR cidade LIKE ? OR bairro LIKE ?)', [like, like, like]
+
+
+def contar_clientes(busca='') -> int:
+    """Quantos clientes ativos atendem a busca. Base da paginacao."""
+    filtro, parametros = _filtro_de_busca(busca)
     with conectar() as conexao:
-        if termo:
-            like = f'%{termo}%'
-            linhas = conexao.execute(
-                'SELECT * FROM clientes WHERE ativo=1 AND '
-                '(nome LIKE ? OR cidade LIKE ? OR bairro LIKE ?) ORDER BY id DESC',
-                (like, like, like),
-            ).fetchall()
-        else:
-            linhas = conexao.execute(
-                'SELECT * FROM clientes WHERE ativo=1 ORDER BY id DESC'
-            ).fetchall()
+        return conexao.execute(
+            f'SELECT COUNT(*) FROM clientes WHERE ativo=1{filtro}', parametros
+        ).fetchone()[0]
+
+
+def listar_clientes(busca='', limite=None, deslocamento=0):
+    """
+    Clientes ativos, do mais recente para o mais antigo.
+
+    `limite` e opcional, e a ausencia dele devolve TUDO -- de proposito. A
+    sincronizacao do cache offline usa a lista como autoritativa: o que nao
+    esta nela e podado. Se a paginacao virasse o padrao, a segunda pagina
+    inteira seria tratada como "excluida no servidor" e sumiria do cache.
+
+    Quem pagina (a tela de clientes) passa `limite` explicitamente e sabe que
+    a resposta e parcial.
+    """
+    filtro, parametros = _filtro_de_busca(busca)
+    sql = f'SELECT * FROM clientes WHERE ativo=1{filtro} ORDER BY id DESC'
+    if limite is not None:
+        sql += ' LIMIT ? OFFSET ?'
+        parametros = parametros + [int(limite), int(deslocamento or 0)]
+
+    with conectar() as conexao:
+        linhas = conexao.execute(sql, parametros).fetchall()
     resultado = []
     for linha in linhas:
         try:

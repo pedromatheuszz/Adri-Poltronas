@@ -1361,6 +1361,20 @@ body.modo-selecao-ativo tbody tr:hover td { background: var(--cor-selecao); }
 .pendencia-erro-quando { font-size: var(--texto-sm); color: var(--cor-texto-3); }
 .pendencia-erro-acoes { display: flex; gap: var(--esp-2); margin-top: var(--esp-3); }
 
+/* Rodape da lista paginada. A contagem fica sempre visivel enquanto ha mais
+   de uma pagina -- saber que existem 1.240 registros e ver 200 e diferente de
+   achar que ha 200. */
+.lista-rodape {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--esp-4);
+    padding-top: var(--esp-4);
+    margin-top: var(--esp-2);
+    border-top: 1px solid var(--cor-borda-sutil);
+}
+.lista-contagem { font-size: var(--texto-md); color: var(--cor-texto-2); }
+
 /* Modal que carrega formulario: o texto volta a alinhar a esquerda, porque
    rotulo de campo centralizado nao se le. */
 .payment-modal { max-width: 520px; text-align: left; }

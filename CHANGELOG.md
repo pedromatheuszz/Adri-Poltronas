@@ -76,7 +76,11 @@ mudanças de segurança e de integridade financeira são o centro desta versão.
 - **Cópia de backup para um segundo destino** (`ADRI_BACKUP_EXTRA`).
 - **Fila de erros visível** para alterações offline recusadas, com reenvio e
   descarte.
-- `SECURITY.md`, `PRIVACIDADE.md`, `LICENSE`, `CODEOWNERS` e este arquivo.
+- **Paginação na lista de clientes** (200 por página, com contagem do total).
+  A tela baixava e desenhava todos os registros de uma vez.
+- `SECURITY.md`, `PRIVACIDADE.md`, `LICENSE`, `CODEOWNERS`, este arquivo e o
+  primeiro ADR (`docs/adr/`), registrando por que o .NET deixou de escrever
+  no banco de produção.
 - CI: `npm audit`, auditoria de pacotes NuGet, cobertura mínima de 80%,
   auditoria do `requirements.lock`, checksum do binário do gitleaks, actions
   fixadas por SHA e **construção do instalador**, que nunca era exercitada.

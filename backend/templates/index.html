@@ -19,8 +19,8 @@
           href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 
     <!-- Ordem obrigatoria: tokens.css declara as variaveis que style.css usa. -->
-    <link rel="stylesheet" href="/css/tokens.css?v=v81">
-    <link rel="stylesheet" href="/css/style.css?v=v81">
+    <link rel="stylesheet" href="/css/tokens.css?v=v82">
+    <link rel="stylesheet" href="/css/style.css?v=v82">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
           integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H"
           crossorigin="anonymous" referrerpolicy="no-referrer" />
@@ -578,6 +578,17 @@
                             </thead>
                             <tbody id="tabelaClientes"></tbody>
                         </table>
+                    </div>
+
+                    <!-- Ate a versao 1.1 a tela baixava e desenhava TODOS os
+                         clientes de uma vez. Com alguns milhares de registros
+                         isso e uma pausa visivel; com dezenas de milhares, a
+                         aba trava. Agora ela carrega por pagina. -->
+                    <div class="lista-rodape" id="rodapeClientes" hidden>
+                        <span class="lista-contagem" id="contagemClientes" aria-live="polite"></span>
+                        <button type="button" class="btn btn-secundario btn-sm" id="btnCarregarMaisClientes">
+                            Carregar mais
+                        </button>
                     </div>
 
                     <footer class="actions-excel">
@@ -1273,10 +1284,10 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"
             integrity="sha384-e6nUZLBkQ86NJ6TVVKAeSaK8jWa3NhkYWZFomE39AvDbQWeie9PlQqM3pmYW5d1g"
             crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-    <script src="/js/offline.js?v=v81"></script>
-    <script src="/js/app.js?v=v81"></script>
+    <script src="/js/offline.js?v=v82"></script>
+    <script src="/js/app.js?v=v82"></script>
     <!-- Modulo comercial: Produtos, Pedidos e Agenda de Entregas.
          Arquivo separado porque app.js ja passa de 2.000 linhas. -->
-    <script src="/js/comercial.js?v=v81"></script>
+    <script src="/js/comercial.js?v=v82"></script>
 </body>
 </html>

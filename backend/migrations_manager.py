@@ -160,6 +160,24 @@ def ha_migracoes_pendentes() -> bool:
     return alvo is not None and revisao_do_banco() != alvo
 
 
+def carimbar(revisao: str = "head") -> None:
+    """
+    Grava `alembic_version` sem executar nenhuma migration.
+
+    Existe para um banco construído pelo caminho de emergência
+    (`garantir_schema_fallback`), que sai com o schema pronto e SEM
+    `alembic_version`. Para o Alembic esse banco é "legado": ele tentaria
+    aplicar a migration inicial sobre tabelas que já existem, falharia, e --
+    desde que a inicialização passou a falhar de forma segura -- o aplicativo
+    se recusaria a abrir a partir da segunda execução.
+
+    Carimbar declara o que é verdade: o schema já está na altura desta
+    revisão. É o que torna o banco migrável dali em diante.
+    """
+    command.stamp(_config(), revisao)
+    log.info("Banco carimbado na revisão %s.", revisao)
+
+
 def aplicar_migrações():
     """Aplica todas as migrações pendentes."""
     try:

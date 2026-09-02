@@ -380,6 +380,7 @@ O caminho pretendido está em
 - [Padrão da API](API_STANDARD.md) — contrato das rotas
 - [Build e desenvolvimento](BUILD_GUIDE.md) — empacotamento e instalador
 - [Diagnóstico e roadmap ERP](docs/ERP_DIAGNOSTICO_E_ROADMAP.md) — estado e evolução
+- [Decisões de arquitetura](docs/adr/) — o que foi decidido, e o que foi descartado junto
 - [Code signing](docs/code-signing.md) — assinatura do executável
 - [Aplicativo .NET/Avalonia](dotnet/README.md) — exploração arquitetural, banco próprio, não distribuída
 - [Licença](LICENSE) — software proprietário; o código é público para consulta
