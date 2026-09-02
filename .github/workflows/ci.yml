@@ -363,20 +363,33 @@ jobs:
         # assinatura de release e outro processo, com outra chave.
         CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       run: |
-        set -o pipefail
-        npm run dist 2>&1 | tee electron-builder.log && exit 0
+        # `set +e` e obrigatorio aqui. O GitHub roda `shell: bash` como
+        # `bash --noprofile --norc -eo pipefail`, e com `-e` o script aborta na
+        # primeira falha -- ou seja, no proprio `npm run dist`, antes de
+        # chegar a linha que publica o erro. Foi o que aconteceu na primeira
+        # tentativa: a anotacao continuou dizendo apenas "exit code 1".
+        set +e
+        npm run dist 2>&1 | tee electron-builder.log
+        CODIGO=${PIPESTATUS[0]}
+        set -e
 
-        # Chegou aqui: falhou. O log completo vai como artefato, mas baixar
-        # artefato exige autenticacao -- e quem esta olhando o resultado do CI
-        # muitas vezes so ve a anotacao. Entao as ultimas linhas vao para a
-        # anotacao tambem, que aparece na propria pagina do job.
+        if [ "$CODIGO" -eq 0 ]; then
+          exit 0
+        fi
+
+        # O log completo vai como artefato, mas baixar artefato exige
+        # autenticacao -- e quem olha um CI vermelho muitas vezes so alcanca a
+        # anotacao. Entao as ultimas linhas vao para la tambem.
         echo "::group::Saida completa do electron-builder"
         cat electron-builder.log
         echo "::endgroup::"
-        {
-          echo "::error title=electron-builder falhou::"
-          tail -n 30 electron-builder.log | tr '\n' '%0A'
-        } || true
+
+        # `%` antes de `%0A`, senao o proprio escape e reinterpretado; `\r`
+        # vira espaco porque a saida vem de um runner Windows.
+        MENSAGEM=$(tail -n 25 electron-builder.log \
+          | sed 's/%/%25/g; s/\r/ /g' \
+          | awk '{ printf "%s%%0A", $0 }')
+        echo "::error title=electron-builder falhou (codigo $CODIGO)::$MENSAGEM"
         exit 1
 
     - name: Publicar log do empacotamento
