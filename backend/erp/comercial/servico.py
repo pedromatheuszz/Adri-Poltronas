@@ -434,8 +434,9 @@ def faturar_pedido(pedido_id: int, dados: dict) -> dict:
             repositorio.inserir_parcela(conexao, {
                 "cliente_id": pedido["cliente_id"],
                 "cliente_nome": pedido["cliente_nome"],
-                # Fronteira entre os dois mundos: `pagamentos.valor` e REAL.
-                "valor": round(centavos / 100, 2),
+                # Centavos exatos, do rateio ate a linha gravada. A conversao
+                # para float que existia aqui desfazia o trabalho do `ratear`.
+                "valor_centavos": centavos,
                 "descricao": f"Pedido {pedido['numero']} - parcela {indice}/{parcelas}",
                 "data_vencimento": vencimento,
                 "tipo_pagamento": forma,

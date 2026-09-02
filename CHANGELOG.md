@@ -54,6 +54,15 @@ mudanças de segurança e de integridade financeira são o centro desta versão.
 - Confirmação manual de pagamento agora confere com o Asaas antes de marcar
   como recebido. Forçar exige motivo, e o motivo vai para a auditoria.
 - Cancelar cobrança marca `Cancelado` em vez de apagar a linha.
+- **Dinheiro em centavos inteiros** (`pagamentos.valor_centavos`). O rateio de
+  parcelas já era exato, mas o faturamento entregava o resultado a
+  `pagamentos` passando por `round(centavos / 100, 2)` — e três parcelas de um
+  pedido de R$ 100,00 deixavam de somar R$ 100,00 em ponto flutuante binário.
+  `valor` continua sendo gravado durante a transição.
+- **Chaves estrangeiras reais** em `pagamentos.pedido_id` e
+  `entregas_agendadas.pedido_id`. Elas foram acrescentadas por `ALTER TABLE`, e
+  SQLite não aceita adicionar constraint por ALTER: nada impedia uma parcela
+  apontando para um pedido inexistente.
 - Exportações CSV e XLSX neutralizam texto que o Excel interpretaria como
   fórmula.
 - `.xls` deixou de ser aceito na importação com uma mensagem que explica o que

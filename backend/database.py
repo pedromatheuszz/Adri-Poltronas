@@ -5,6 +5,7 @@ import logging
 import security
 import asaas
 import notificacoes_db
+from erp.core import dinheiro
 from erp.core.auditoria import registrar_evento
 from erp.core.schema_fallback import garantir_schema_fallback
 from erp.financeiro.servico_pagamentos import aplicar_evento_asaas
@@ -405,19 +406,28 @@ def listar_pagamentos(cliente_id=None, status=None):
 
 
 def salvar_pagamento(cliente_id, cliente_nome, valor, descricao, data_vencimento,
-                     tipo_pagamento='Pix', status='Pendente', data_pagamento=''):
+                     tipo_pagamento='Pix', status='Pendente', data_pagamento='',
+                     valor_centavos=None):
     """
     Cria um novo pagamento e retorna o ID.
 
     `status`/`data_pagamento` sao parametros porque a tela de recebimento
     registra dinheiro que JA entrou. Fixar 'Pendente' aqui fazia esse
     lancamento nascer vencido e ser contado como atrasado no mesmo instante.
+
+    `valor_centavos` e a fonte de verdade quando informado -- e o caso do
+    faturamento de pedido, que ja tem o valor rateado em centavos exatos e nao
+    deve passa-lo por float. Quando so `valor` chega (tela de recebimento
+    avulso), os centavos sao derivados dele.
     """
+    centavos = dinheiro.para_centavos(valor) if valor_centavos is None else int(valor_centavos)
+    valor = round(centavos / 100, 2)
+
     with conectar() as conexao:
         conexao.execute(
-            'INSERT INTO pagamentos (cliente_id, cliente_nome, valor, descricao, status, data_vencimento, tipo_pagamento, data_pagamento) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-            (cliente_id, cliente_nome, valor, descricao, status, data_vencimento, tipo_pagamento, data_pagamento),
+            'INSERT INTO pagamentos (cliente_id, cliente_nome, valor, valor_centavos, descricao, status, data_vencimento, tipo_pagamento, data_pagamento) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            (cliente_id, cliente_nome, valor, centavos, descricao, status, data_vencimento, tipo_pagamento, data_pagamento),
         )
         pagamento_id = conexao.execute('SELECT last_insert_rowid()').fetchone()[0]
         acao = 'Recebimento registrado' if status == 'Recebido' else 'Cobranca criada'
@@ -441,11 +451,20 @@ def atualizar_pagamento(pagamento_id, **kwargs):
     campos_permitidos = {
         'status', 'data_pagamento', 'asaas_payment_id', 'pix_payload',
         'pix_qr_code', 'boleto_url', 'nosso_numero', 'descricao',
-        'valor', 'data_vencimento', 'tipo_pagamento', 'cliente_nome',
+        'valor', 'valor_centavos', 'data_vencimento', 'tipo_pagamento',
+        'cliente_nome', 'asaas_external_reference', 'asaas_emissao_estado',
     }
     campos = {k: v for k, v in kwargs.items() if k in campos_permitidos and v is not None}
     if not campos:
         return 0
+
+    # As duas colunas de dinheiro andam juntas. Deixar `valor` mudar sozinho
+    # faria `valor_centavos` guardar o numero antigo -- e a divergencia seria
+    # silenciosa ate alguem comparar os dois em um relatorio.
+    if 'valor' in campos and 'valor_centavos' not in campos:
+        campos['valor_centavos'] = dinheiro.para_centavos(campos['valor'])
+    elif 'valor_centavos' in campos and 'valor' not in campos:
+        campos['valor'] = round(int(campos['valor_centavos']) / 100, 2)
     sets = ', '.join(f'{k}=?' for k in campos)
     vals = list(campos.values()) + [pagamento_id]
     with conectar() as conexao:
