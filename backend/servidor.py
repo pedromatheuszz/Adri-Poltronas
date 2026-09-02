@@ -20,6 +20,7 @@ if DIRETORIO_BACKEND not in sys.path:
 
 import database  # noqa: E402
 from erp.core import backup  # noqa: E402
+from erp.core import idempotencia  # noqa: E402
 from app import app  # noqa: E402
 
 log = logging.getLogger("adri.servidor")
@@ -152,6 +153,12 @@ def preparar_banco() -> None:
         # Banco novo: o schema basico e melhor do que nao abrir.
         log.exception("Falha ao migrar banco novo; usando criar_tabela()")
         database.criar_tabela()
+
+    # Lembrancas de operacoes offline ja processadas expiram: a fila nao
+    # guarda operacao por semanas, e sem a poda a tabela so cresce.
+    descartadas = idempotencia.limpar_antigas(database.conectar)
+    if descartadas:
+        log.info("Chaves de idempotencia expiradas removidas: %s", descartadas)
 
     # Copia do dia, depois do schema estar no lugar. Silenciosa quando a de
     # hoje ja existe, entao reabrir o app varias vezes nao acumula arquivos.

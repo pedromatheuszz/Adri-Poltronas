@@ -332,6 +332,7 @@ function trocarAba(aba) {
     if (aba === 'entregas') { carregarEntregas(); }
     if (aba === 'mapa') { setTimeout(function() { initMapa(); carregarMapaClientes(); }, 100); }
     if (aba === 'relatorios') { carregarRelatorio(); }
+    if (aba === 'clientes') { atualizarAvisoDePendenciasComErro(); }
     if (aba === 'pagamentos') {
         carregarPagamentos();
         // Conciliacao silenciosa ao abrir a aba: e o momento em que o
@@ -451,6 +452,24 @@ document.addEventListener('DOMContentLoaded', function() {
 
     var btnConciliar = document.getElementById('btnConciliarAsaas');
     if (btnConciliar) btnConciliar.addEventListener('click', function(){ conciliarPagamentos(false); });
+
+    var btnVerPendencias = document.getElementById('btnVerPendenciasComErro');
+    if (btnVerPendencias) btnVerPendencias.addEventListener('click', abrirPendenciasComErro);
+
+    var fecharPendencias = document.getElementById('modalPendenciasFechar');
+    if (fecharPendencias) fecharPendencias.addEventListener('click', function(){ fecharModal('modalPendenciasComErro'); });
+
+    var listaPendencias = document.getElementById('listaPendenciasComErro');
+    if (listaPendencias) {
+        // Delegacao: os botoes nascem a cada abertura do modal, e prende-los
+        // um a um vazaria listener a cada renderizacao.
+        listaPendencias.addEventListener('click', function(e) {
+            var botao = e.target.closest('button[data-reenviar], button[data-descartar]');
+            if (botao) _acaoNaPendenciaComErro(botao);
+        });
+    }
+
+    atualizarAvisoDePendenciasComErro();
 
     var modalNomeCancelar = document.getElementById('modalNomeCancelar');
     var modalNomeConfirmar = document.getElementById('modalNomeConfirmar');
@@ -1091,15 +1110,22 @@ async function registrarNovoCliente(dados) {
     var r = await tentarBackend(API_URL, { method: 'POST', headers: CABECALHOS_JSON, body: JSON.stringify(dados) });
     if (r.semBackend) {
         try {
-            await OfflineManager.savePendingAction('create', dados);
-            exibirToast('Salvo offline! Sera sincronizado quando voltar online.', 'success');
-            cancelarEdicao();
-            // Adicionar ao cache local com ID temporario negativo
-            var cached = await OfflineManager.getCachedClientes();
-            var novoId = -Date.now(); // ID temporario negativo para evitar conflito
+            // O id temporario nasce ANTES de enfileirar, e vai junto na
+            // pendencia. Era o elo que faltava: sem ele nada ligava a criacao
+            // na fila ao registro que o operador ve na tela, e por isso uma
+            // edicao feita em seguida ia contra o id negativo (404, descartada
+            // em silencio) e uma exclusao deixava a criacao viva na fila (o
+            // cliente reaparecia ao sincronizar).
+            var novoId = -Date.now();
             dados.id = novoId;
             dados.criado_em = new Date().toISOString();
-            dados._offline = true; // Flag para identificar offline
+            dados._offline = true;
+
+            await OfflineManager.savePendingAction('create', dados, novoId);
+            exibirToast('Salvo offline! Sera sincronizado quando voltar online.', 'success');
+            cancelarEdicao();
+
+            var cached = await OfflineManager.getCachedClientes();
             cached.push(dados);
             await OfflineManager.cacheClientes(cached);
             carregarClientesOffline(false);
@@ -1119,7 +1145,14 @@ async function atualizarClienteServidor(id, dados) {
     if (r.semBackend) {
         try {
             dados.id = id;
-            await OfflineManager.savePendingAction('update', dados);
+            if (id < 0) {
+                // Cliente que so existe aqui: o servidor nem conhece o
+                // registro, entao nao ha PUT a enviar. A edicao e absorvida
+                // pela criacao que ainda esta na fila.
+                await OfflineManager.mesclarNaCriacaoPendente(id, dados);
+            } else {
+                await OfflineManager.savePendingAction('update', dados);
+            }
             exibirToast('Atualizacao salva offline! Sera sincronizado quando voltar online.', 'success');
             cancelarEdicao();
             // Atualizar cache local
@@ -1155,7 +1188,11 @@ async function excluirClienteServidor(id) {
     if (r.semBackend) {
         try {
             if (id < 0) {
-                exibirToast('Cliente removido do cache offline.', 'success');
+                // Cancela a criacao que ainda esta na fila. Limpar so o cache,
+                // como antes, deixava o POST pendente intacto -- e o cliente
+                // excluido reaparecia assim que a conexao voltasse.
+                await OfflineManager.cancelarCriacaoPendente(id);
+                exibirToast('Cliente removido antes de ser enviado.', 'success');
             } else {
                 await OfflineManager.savePendingAction('delete', { id: id });
                 exibirToast('Exclusao salva offline! Sera sincronizado quando voltar online.', 'success');
@@ -1176,6 +1213,100 @@ async function excluirClienteServidor(id) {
         cancelarEdicao(); carregarClientes(); carregarDashboardGraficos();
     } catch (erro) { exibirToast('Erro: ' + erro.message, 'error'); }
 }
+
+
+// -----------------------------------------------------------------------------
+// Alteracoes offline que o servidor recusou
+//
+// A fila de sincronizacao apagava, sem aviso, tudo que o servidor recusasse de
+// forma definitiva (4xx) ou que esgotasse as tentativas. Na pratica: o
+// operador cadastrava um cliente sem conexao, o servidor recusava o CEP, e o
+// cadastro simplesmente desaparecia. Ninguem ficava sabendo.
+//
+// Agora essas operacoes vao para uma fila de erros. Estas funcoes sao a parte
+// visivel dela: um aviso na aba de clientes e um modal para reenviar ou
+// descartar cada uma com conhecimento de causa.
+// -----------------------------------------------------------------------------
+var ACAO_LEGIVEL = { create: 'Cadastro', update: 'Edicao', delete: 'Exclusao' };
+
+async function atualizarAvisoDePendenciasComErro() {
+    var aviso = document.getElementById('avisoPendenciasComErro');
+    if (!aviso || typeof OfflineManager === 'undefined') return;
+    try {
+        var falhas = await OfflineManager.getDeadLetters();
+        if (!falhas.length) { aviso.hidden = true; return; }
+        aviso.hidden = false;
+        var detalhe = document.getElementById('avisoPendenciasDetalhe');
+        if (detalhe) {
+            detalhe.textContent = falhas.length === 1
+                ? '1 alteracao feita offline foi recusada pelo servidor.'
+                : falhas.length + ' alteracoes feitas offline foram recusadas pelo servidor.';
+        }
+    } catch (erro) {
+        console.error('Nao foi possivel ler a fila de erros:', erro);
+    }
+}
+
+async function abrirPendenciasComErro() {
+    var lista = document.getElementById('listaPendenciasComErro');
+    if (!lista) return;
+    var falhas = await OfflineManager.getDeadLetters();
+
+    if (!falhas.length) {
+        lista.innerHTML = '<div class="empty-state"><p>Nenhuma alteracao pendente de correcao.</p></div>';
+    } else {
+        lista.innerHTML = falhas.map(function(f) {
+            var nome = (f.dados && f.dados.nome) ? f.dados.nome : ('registro #' + (f.dados && f.dados.id));
+            return '<div class="pendencia-erro">' +
+                '<div class="pendencia-erro-cabecalho">' +
+                    '<span class="pendencia-erro-nome">' +
+                        escaparHtml(ACAO_LEGIVEL[f.action] || f.action) + ': ' + escaparHtml(String(nome)) +
+                    '</span>' +
+                    '<span class="pendencia-erro-quando">' + escaparHtml(formatarQuando(f.timestamp)) + '</span>' +
+                '</div>' +
+                '<div class="pendencia-erro-motivo">' + escaparHtml(f.motivo || 'Motivo nao registrado') + '</div>' +
+                '<div class="pendencia-erro-acoes">' +
+                    '<button type="button" class="btn btn-primary btn-sm" data-reenviar="' + f.id + '">Tentar de novo</button>' +
+                    '<button type="button" class="btn btn-perigo btn-sm" data-descartar="' + f.id + '">Descartar</button>' +
+                '</div>' +
+            '</div>';
+        }).join('');
+    }
+    abrirModal('modalPendenciasComErro');
+}
+
+function formatarQuando(iso) {
+    if (!iso) return '';
+    var data = new Date(iso);
+    return isNaN(data.getTime()) ? '' : data.toLocaleString('pt-BR');
+}
+
+async function _acaoNaPendenciaComErro(elemento) {
+    var idReenviar = elemento.getAttribute('data-reenviar');
+    var idDescartar = elemento.getAttribute('data-descartar');
+
+    if (idReenviar) {
+        await OfflineManager.reenviarDeadLetter(Number(idReenviar));
+        exibirToast('Reenviando...');
+    } else if (idDescartar) {
+        var confirmado = await confirmarAcao({
+            titulo: 'Descartar alteracao',
+            mensagem: 'Esta alteracao sera perdida definitivamente. Deseja continuar?',
+            textoConfirmar: 'Descartar',
+            icone: 'excluir',
+            variante: 'perigo'
+        });
+        if (!confirmado) return;
+        await OfflineManager.descartarDeadLetter(Number(idDescartar));
+    } else {
+        return;
+    }
+
+    await abrirPendenciasComErro();
+    await atualizarAvisoDePendenciasComErro();
+    carregarClientes();
+}
+
 
 // -----------------------------------------------------------------------------
 // Estados de tabela

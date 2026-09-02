@@ -19,8 +19,8 @@
           href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 
     <!-- Ordem obrigatoria: tokens.css declara as variaveis que style.css usa. -->
-    <link rel="stylesheet" href="/css/tokens.css?v=v77">
-    <link rel="stylesheet" href="/css/style.css?v=v77">
+    <link rel="stylesheet" href="/css/tokens.css?v=v78">
+    <link rel="stylesheet" href="/css/style.css?v=v78">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
           integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H"
           crossorigin="anonymous" referrerpolicy="no-referrer" />
@@ -410,6 +410,20 @@
                  ============================================================ -->
             <section id="aba-clientes" class="tab-content" hidden
                      role="tabpanel" aria-labelledby="tab-clientes" tabindex="0">
+
+                <!-- Alteracoes feitas offline que o servidor recusou. Antes
+                     elas eram apagadas em silencio: o trabalho do operador
+                     sumia sem aviso e sem forma de recuperar. O aviso so
+                     aparece quando ha algo nele. -->
+                <div id="avisoPendenciasComErro" class="aviso-erro-sync" role="alert" hidden>
+                    <div class="aviso-erro-sync-texto">
+                        <strong id="avisoPendenciasTitulo">Alteracoes nao enviadas</strong>
+                        <span id="avisoPendenciasDetalhe"></span>
+                    </div>
+                    <button type="button" class="btn btn-secundario btn-sm" id="btnVerPendenciasComErro">
+                        Ver alteracoes
+                    </button>
+                </div>
 
                 <section class="card">
                     <h2 id="formTitle" class="card-title card-title-icone">
@@ -858,6 +872,21 @@
         </div>
     </dialog>
 
+    <dialog class="modal-overlay" id="modalPendenciasComErro" aria-labelledby="modalPendenciasTitulo">
+        <div class="modal-box modal-box-media">
+            <h2 class="modal-title" id="modalPendenciasTitulo">Alteracoes nao enviadas</h2>
+            <p class="modal-msg">
+                Estas alteracoes foram feitas sem conexao e o servidor as recusou.
+                Reenvie depois de corrigir o que motivou a recusa, ou descarte se
+                nao forem mais necessarias.
+            </p>
+            <div id="listaPendenciasComErro" class="lista-pendencias"></div>
+            <div class="modal-actions">
+                <button type="button" class="modal-btn modal-btn-cancelar" id="modalPendenciasFechar">Fechar</button>
+            </div>
+        </div>
+    </dialog>
+
     <dialog class="modal-overlay" id="modalNomeArquivo" aria-labelledby="modalNomeTitulo">
         <div class="modal-box modal-box-estreita">
             <h2 class="modal-title" id="modalNomeTitulo">Nome do Arquivo</h2>
@@ -1219,10 +1248,10 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"
             integrity="sha384-e6nUZLBkQ86NJ6TVVKAeSaK8jWa3NhkYWZFomE39AvDbQWeie9PlQqM3pmYW5d1g"
             crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-    <script src="/js/offline.js?v=v77"></script>
-    <script src="/js/app.js?v=v77"></script>
+    <script src="/js/offline.js?v=v78"></script>
+    <script src="/js/app.js?v=v78"></script>
     <!-- Modulo comercial: Produtos, Pedidos e Agenda de Entregas.
          Arquivo separado porque app.js ja passa de 2.000 linhas. -->
-    <script src="/js/comercial.js?v=v77"></script>
+    <script src="/js/comercial.js?v=v78"></script>
 </body>
 </html>

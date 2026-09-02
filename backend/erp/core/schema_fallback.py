@@ -48,6 +48,8 @@ def _criar_indices(conexao: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS ix_entregas_pedido_id ON entregas_agendadas(pedido_id)",
         "CREATE INDEX IF NOT EXISTS ix_auditoria_entidade_registro ON auditoria_eventos(entidade, entidade_id, id)",
         "CREATE INDEX IF NOT EXISTS ix_auditoria_criado_em ON auditoria_eventos(criado_em)",
+        "CREATE INDEX IF NOT EXISTS ix_operacoes_idempotentes_criado_em "
+        "ON operacoes_idempotentes(criado_em)",
         "CREATE INDEX IF NOT EXISTS ix_auditoria_usuario_criado_em ON auditoria_eventos(usuario_id, criado_em)",
     ]
     for comando in comandos:
@@ -209,6 +211,15 @@ def garantir_schema_fallback(conexao: sqlite3.Connection) -> None:
             CONSTRAINT fk_pedido_itens_produto_id_produtos
                 FOREIGN KEY (produto_id) REFERENCES produtos(id) ON DELETE RESTRICT,
             CHECK (quantidade > 0)
+        );
+
+        CREATE TABLE IF NOT EXISTS operacoes_idempotentes (
+            chave TEXT PRIMARY KEY,
+            rota TEXT NOT NULL,
+            metodo TEXT NOT NULL,
+            status INTEGER NOT NULL,
+            corpo TEXT NOT NULL,
+            criado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
         );
 
         CREATE TABLE IF NOT EXISTS auditoria_eventos (

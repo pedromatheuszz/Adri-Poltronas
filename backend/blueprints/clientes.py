@@ -6,12 +6,15 @@ import csv
 import json
 import os
 import logging
+from functools import wraps
+
 import openpyxl
 from flask import Blueprint, request, jsonify, send_file
 
 import database
 import security
 import validators
+from erp.core import idempotencia
 
 log = logging.getLogger("adri.clientes")
 
@@ -25,6 +28,58 @@ MAX_LINHAS_IMPORTACAO = 5000
 clientes_bp = Blueprint('clientes', __name__, url_prefix='/api/clientes')
 
 
+def idempotente(rota):
+    """
+    Faz a rota lembrar do que ja processou, por chave de operacao.
+
+    Existe por causa da fila offline. Ela reenvia sempre que a tentativa
+    anterior nao confirmou -- e "nao confirmou" e ambiguo: pode ser que o
+    servidor nunca tenha recebido, ou que tenha recebido, gravado, e a
+    resposta ter se perdido no caminho de volta. Do lado do navegador as duas
+    situacoes sao o mesmo fetch que rejeita, e reenviar um POST de criacao
+    produzia dois clientes identicos.
+
+    Sem cabecalho `Idempotency-Key` a rota se comporta como antes: o
+    mecanismo e para quem envia da fila, nao para a tela.
+    """
+    @wraps(rota)
+    def envelope(*args, **kwargs):
+        chave = (request.headers.get(idempotencia.NOME_DO_HEADER) or '').strip()
+        if not idempotencia.chave_valida(chave):
+            return rota(*args, **kwargs)
+
+        lembrada = idempotencia.resposta_registrada(database.conectar, chave)
+        if lembrada is not None:
+            status, corpo = lembrada
+            resposta = jsonify(corpo)
+            resposta.status_code = status
+            # Deixa explicito, para quem depurar, que este 201 nao criou nada.
+            resposta.headers['X-Idempotencia'] = 'repetida'
+            return resposta
+
+        resultado = rota(*args, **kwargs)
+        corpo, status = _corpo_e_status(resultado)
+        # So sucesso e lembrado: reenviar um 400 de validacao produz o mesmo
+        # 400, sem efeito colateral, e guardar erro so faria a tabela crescer.
+        if corpo is not None and 200 <= status < 300:
+            idempotencia.registrar(
+                database.conectar, chave, request.path, request.method, status, corpo
+            )
+        return resultado
+
+    return envelope
+
+
+def _corpo_e_status(resultado):
+    """Extrai (dict, status) do que uma view devolveu."""
+    resposta, status = resultado if isinstance(resultado, tuple) else (resultado, 200)
+    try:
+        return resposta.get_json(), int(status)
+    except (AttributeError, TypeError, ValueError):
+        return None, int(status) if isinstance(status, int) else 200
+
+
+
 @clientes_bp.route('', methods=['GET'])
 def listar_clientes():
     busca = request.args.get('busca', '')
@@ -32,18 +87,24 @@ def listar_clientes():
 
 
 @clientes_bp.route('', methods=['POST'])
+@idempotente
 def adicionar_cliente():
     cliente, erros = validators.validar_cliente(request.get_json(silent=True) or {})
     if erros:
         return jsonify({"erro": "Dados invalidos.", "detalhes": erros}), 400
-    database.salvar_cliente(
+    # O `id` na resposta nao e enfeite: a fila offline cria o cliente com um
+    # id temporario negativo e precisa do id real para remapear as operacoes
+    # que vierem depois na mesma fila. Sem ele, a edicao seguinte era enviada
+    # contra o id negativo, tomava 404 e era descartada em silencio.
+    cliente_id = database.salvar_cliente(
         cliente['nome'], cliente['cep'], cliente['rua'], cliente['bairro'],
         cliente['cidade'], cliente['entrega_retirada'], cliente.get('observacoes', '')
     )
-    return jsonify({"mensagem": "Cliente cadastrado!"}), 201
+    return jsonify({"mensagem": "Cliente cadastrado!", "id": cliente_id}), 201
 
 
 @clientes_bp.route('/<int:id_cliente>', methods=['PUT'])
+@idempotente
 def atualizar_cliente(id_cliente):
     cliente, erros = validators.validar_cliente(request.get_json(silent=True) or {})
     if erros:
@@ -59,6 +120,7 @@ def atualizar_cliente(id_cliente):
 
 
 @clientes_bp.route('/<int:id_cliente>', methods=['DELETE'])
+@idempotente
 def excluir_cliente(id_cliente):
     linhas = database.excluir_cliente(id_cliente)
     if linhas == 0:
