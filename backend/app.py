@@ -23,6 +23,7 @@ import config
 import security
 import asaas
 import microsoft
+import capacidade
 from erp.core.contexto import (
     ContextoOperacao,
     anonimizar_ip,
@@ -227,6 +228,127 @@ def _origens_aceitas() -> set:
             aceitas.add(f'http://{alias}{sufixo}')
             aceitas.add(f'https://{alias}{sufixo}')
     return aceitas
+
+
+# ---------------------------------------------------------------------------
+# HOST DE LOOPBACK
+# ---------------------------------------------------------------------------
+# `_origens_aceitas()` monta a lista de origens validas a partir do proprio
+# header `Host`, que quem chama controla. Isso e circular: um cliente que
+# envia `Host: mal.exemplo` junto com `Origin: http://mal.exemplo` passa na
+# checagem comparando a mentira dele com ela mesma. E o vetor classico de DNS
+# rebinding contra servico em loopback -- basta um dominio que resolva para
+# 127.0.0.1 para o navegador do usuario emprestar a origem.
+#
+# O que se fixa aqui e o NOME do host, nao a porta. O nome e o que o atacante
+# precisa controlar para montar o ataque, e o conjunto legitimo tem tres
+# elementos conhecidos. A porta continua livre porque o proprio frontend seria
+# recusado se o servidor subisse em outra -- e a suite ja cobre esse caso.
+
+
+def _nome_do_host(host: str) -> str:
+    """Host sem a porta. Trata `[::1]:5000`, que um split ingenuo por ':' parte
+    no lugar errado."""
+    host = (host or '').strip().lower()
+    if host.startswith('['):
+        fecha = host.find(']')
+        return host[:fecha + 1] if fecha != -1 else host
+    return host.partition(':')[0]
+
+
+@app.before_request
+def _exigir_host_de_loopback():
+    if _nome_do_host(request.host) in config.ALIASES_LOOPBACK:
+        return None
+    log.warning("[SEGURANCA] Host recusado: %s -> %s", request.host, request.path)
+    security.log_evento_seguro(
+        "HOST_REJEITADO", f"Host: {request.host}, Path: {request.path}", "warning"
+    )
+    return jsonify({"erro": "Host nao permitido."}), 400
+
+
+# ---------------------------------------------------------------------------
+# CAPACIDADE DE ACESSO
+# ---------------------------------------------------------------------------
+@app.before_request
+def _exigir_capacidade():
+    """
+    Fecha a API para quem nao e o aplicativo.
+
+    Loopback nao e privado: qualquer processo da maquina, e qualquer pagina
+    aberta no navegador do usuario, alcanca 127.0.0.1:5000. Ate aqui um
+    `GET /api/clientes` sem cabecalho nenhum devolvia a lista completa de
+    clientes -- nome, endereco e CEP.
+
+    Ver `capacidade.py` para o desenho e para o limite honesto da protecao.
+    """
+    if app.config.get('TESTING') or not capacidade.esta_ativa():
+        return None
+    if request.path in capacidade.ROTAS_ISENTAS:
+        return None
+    if capacidade.confere(capacidade.apresentado_em(request.headers, request.cookies)):
+        return None
+
+    log.warning("[CAPACIDADE] Requisicao sem token: %s %s", request.method, request.path)
+    security.log_evento_seguro(
+        "CAPACIDADE_AUSENTE", f"{request.method} {request.path}", "warning"
+    )
+    return jsonify({"erro": "Acesso negado."}), 403
+
+
+@app.after_request
+def _semear_cookie_de_capacidade(resposta):
+    """
+    Converte o cabecalho aceito num cookie de mesma origem.
+
+    O Electron injeta o cabecalho na sessao da janela, o que cobre navegacao,
+    fetch e XHR. O cookie cobre o resto -- em especial o Service Worker, que
+    reencaminha um `Request` ja montado pela pagina e que, dependendo do
+    caminho, nao passa pela injecao.
+
+    HttpOnly para script nenhum conseguir ler; SameSite=Strict para nenhuma
+    outra origem conseguir provocar o envio.
+    """
+    if not capacidade.esta_ativa():
+        return resposta
+    if not capacidade.confere(request.headers.get(capacidade.NOME_DO_HEADER)):
+        return resposta
+    if request.cookies.get(capacidade.NOME_DO_COOKIE):
+        return resposta
+    resposta.set_cookie(
+        capacidade.NOME_DO_COOKIE,
+        capacidade.token_esperado(),
+        httponly=True,
+        samesite='Strict',
+        secure=False,  # a origem e http://127.0.0.1; Secure impediria o envio
+        path='/',
+    )
+    return resposta
+
+
+# ---------------------------------------------------------------------------
+# SONDA DE IDENTIDADE
+# ---------------------------------------------------------------------------
+@app.route('/api/health')
+def health():
+    """
+    Diz QUEM esta atendendo na porta, e se aceita a capacidade apresentada.
+
+    Existe por causa de um comportamento do Electron: ele reaproveitava
+    qualquer servidor que respondesse em 5000, sem verificar que servidor era.
+    Um processo alheio na porta herdava a janela do aplicativo -- e tudo o que
+    ela mandasse.
+
+    Nao exige capacidade, de proposito: e justamente a rota que permite
+    descobrir se a capacidade em maos serve. Nao devolve dado de negocio.
+    """
+    apresentado = capacidade.apresentado_em(request.headers, request.cookies)
+    return jsonify({
+        "servico": "adri-poltronas",
+        "versao": config.VERSAO_DO_APP,
+        "capacidade_exigida": capacidade.esta_ativa(),
+        "capacidade_aceita": (not capacidade.esta_ativa()) or capacidade.confere(apresentado),
+    })
 
 
 # ---------------------------------------------------------------------------

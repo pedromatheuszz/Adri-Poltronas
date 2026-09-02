@@ -5,9 +5,10 @@
  * proprio processo Python. Aqui o Electron abre a janela, e o Flask segue
  * como backend em processo separado.
  */
-import { app, BrowserWindow, dialog, shell } from 'electron';
+import { app, BrowserWindow, dialog, session, shell } from 'electron';
 import { join } from 'node:path';
 import { iniciarBackend, pararBackend, URL_APP } from './backend';
+import { NOME_DO_HEADER, obterToken } from './capacidade';
 
 const LARGURA_PADRAO = 1100;
 const ALTURA_PADRAO = 760;
@@ -64,6 +65,35 @@ function criarJanela(): BrowserWindow {
   return nova;
 }
 
+/**
+ * Carimba o token de capacidade em toda requisicao que sai para o backend.
+ *
+ * Precisa rodar antes do primeiro `loadURL`: o Flask recusa com 403 tudo que
+ * chegue sem o cabecalho, inclusive a pagina inicial. O filtro limita a
+ * injecao a origem local -- o token nao pode vazar para o Asaas, o ViaCEP ou
+ * qualquer outro destino que a pagina consulte.
+ */
+function injetarCapacidade(token: string): void {
+  // O filtro por padrao de URL do webRequest segue a sintaxe de match pattern
+  // do Chromium, que nao contempla porta -- `http://127.0.0.1:5000/*` nao e um
+  // padrao valido e o filtro deixaria de casar. Escuta-se tudo e compara-se a
+  // origem aqui, que e explicito e nao depende dessa sutileza.
+  session.defaultSession.webRequest.onBeforeSendHeaders(
+    { urls: ['<all_urls>'] },
+    (detalhes, prosseguir) => {
+      if (!detalhes.url.startsWith(URL_APP)) {
+        // Nunca para fora: o token nao pode vazar para o Asaas, o ViaCEP ou
+        // qualquer outro destino que a pagina consulte.
+        prosseguir({ requestHeaders: detalhes.requestHeaders });
+        return;
+      }
+      prosseguir({
+        requestHeaders: { ...detalhes.requestHeaders, [NOME_DO_HEADER]: token },
+      });
+    },
+  );
+}
+
 function mostrarErroEEncerrar(mensagem: string): void {
   dialog.showErrorBox('Adri Poltronas', mensagem);
   encerrando = true;
@@ -83,7 +113,13 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.whenReady().then(async () => {
-    const subiu = await iniciarBackend(raizProjeto, app.isPackaged, mostrarErroEEncerrar);
+    // O token precisa existir ANTES do backend subir (ele o recebe por
+    // variavel de ambiente) e antes da primeira navegacao (a propria pagina
+    // inicial ja e recusada sem ele).
+    const capacidade = obterToken(app.getPath('appData'));
+    injetarCapacidade(capacidade);
+
+    const subiu = await iniciarBackend(raizProjeto, app.isPackaged, capacidade, mostrarErroEEncerrar);
     if (!subiu) return;
 
     janela = criarJanela();

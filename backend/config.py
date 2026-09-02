@@ -1,5 +1,6 @@
 # backend/config.py
 """Configurações compartilhadas entre blueprints e app."""
+import sys
 import os
 import logging
 from dotenv import load_dotenv
@@ -108,6 +109,27 @@ ASAAS_SANDBOX = os.environ.get('ASAAS_SANDBOX', 'true').strip().lower() == 'true
 # Token que o Asaas envia no header `asaas-access-token` dos webhooks.
 # Deve ser diferente da ASAAS_API_KEY (recomendacao explicita do Asaas).
 ASAAS_WEBHOOK_TOKEN = os.environ.get('ASAAS_WEBHOOK_TOKEN', '')
+
+# Versao do aplicativo. Lida do package.json para nao existirem duas verdades:
+# o instalador, o titulo da janela e a sonda de identidade precisam concordar,
+# e um numero digitado a mao aqui envelheceria na primeira release.
+def _versao_do_package_json() -> str:
+    import json
+    for base in (getattr(sys, '_MEIPASS', None), os.path.dirname(os.path.dirname(os.path.abspath(__file__)))):
+        if not base:
+            continue
+        caminho = os.path.join(base, 'package.json')
+        try:
+            with open(caminho, 'r', encoding='utf-8') as arquivo:
+                versao = json.load(arquivo).get('version')
+            if versao:
+                return str(versao)
+        except (OSError, ValueError):
+            continue
+    return 'desconhecida'
+
+
+VERSAO_DO_APP = _versao_do_package_json()
 
 # Hosts tratados como loopback ao montar a lista de origens aceitas.
 # 127.0.0.1 e localhost apontam para o mesmo servidor, mas o navegador os
