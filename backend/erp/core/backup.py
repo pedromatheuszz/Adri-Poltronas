@@ -26,7 +26,9 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import sqlite3
+import tempfile
 import time
 from typing import Optional
 
@@ -47,6 +49,18 @@ LIMITE_POR_MOTIVO = {
 LIMITE_PADRAO = 5
 
 PREFIXO = "adri_poltronas"
+
+# Segundo destino, opcional, definido pelo operador.
+#
+# Todas as copias moram ao lado do banco, no mesmo perfil e no mesmo disco. Isso
+# cobre erro de operacao, migracao malsucedida e corrupcao de arquivo -- mas nao
+# cobre o disco morrer, o computador ser roubado nem o ransomware, que cifra a
+# pasta de backups junto com o resto.
+#
+# `ADRI_BACKUP_EXTRA` aponta para um pen drive, uma unidade de rede ou uma pasta
+# do OneDrive. E deliberadamente opcional: ligar isso por padrao copiaria dados
+# de clientes para um lugar que o operador nao escolheu.
+VARIAVEL_DESTINO_EXTRA = "ADRI_BACKUP_EXTRA"
 
 
 def pasta_de_backups(caminho_banco: str) -> str:
@@ -152,6 +166,190 @@ def criar_backup(caminho_banco: str, motivo: str) -> Optional[str]:
 
     _rotacionar(pasta, motivo)
     log.info("[BACKUP] %s -> %s", motivo, destino)
+    _copiar_para_destino_extra(destino)
+    return destino
+
+
+def _copiar_para_destino_extra(origem: str) -> Optional[str]:
+    """
+    Duplica a copia num segundo lugar, quando o operador configurou um.
+
+    Nunca levanta e nunca invalida o backup principal: se o pen drive nao esta
+    conectado, a copia local ja esta gravada e e ela que importa.
+    """
+    destino_base = (os.environ.get(VARIAVEL_DESTINO_EXTRA) or "").strip()
+    if not destino_base:
+        return None
+    try:
+        os.makedirs(destino_base, exist_ok=True)
+        destino = os.path.join(destino_base, os.path.basename(origem))
+        shutil.copy2(origem, destino)
+        log.info("[BACKUP] Copia externa -> %s", destino)
+        return destino
+    except OSError as erro:
+        log.warning("[BACKUP] Copia externa falhou: %s", erro)
+        return None
+
+
+# =============================================================================
+# Restauracao
+#
+# Ate aqui havia backup e nao havia volta: as copias existiam, e recuperar uma
+# delas exigia fechar o app, achar a pasta em %APPDATA%, entender o nome dos
+# arquivos e sobrescrever o banco na mao. Um backup sem procedimento de
+# restauracao testado e uma suposicao, nao uma garantia.
+# =============================================================================
+def listar_copias(caminho_banco: str) -> list:
+    """Copias disponiveis, da mais recente para a mais antiga."""
+    pasta = pasta_de_backups(caminho_banco)
+    copias = []
+    for motivo in (MOTIVO_PRE_MIGRACAO, MOTIVO_DIARIO):
+        for arquivo in _copias_existentes(pasta, motivo):
+            try:
+                tamanho = os.path.getsize(arquivo)
+                modificado = os.path.getmtime(arquivo)
+            except OSError:
+                continue
+            copias.append({
+                "arquivo": os.path.basename(arquivo),
+                "motivo": motivo,
+                "bytes": tamanho,
+                "criado_em": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(modificado)),
+            })
+    return sorted(copias, key=lambda c: c["arquivo"], reverse=True)
+
+
+def caminho_da_copia(caminho_banco: str, nome_do_arquivo: str) -> Optional[str]:
+    """
+    Resolve o nome de uma copia para o caminho dela, recusando qualquer coisa
+    que nao seja um nome de arquivo simples.
+
+    A checagem existe porque o nome chega pela API: sem ela, "..\\..\\Windows\\
+    system32\\config\\SAM" seria um caminho valido e a restauracao viraria uma
+    leitura arbitraria de arquivo.
+    """
+    nome = os.path.basename(nome_do_arquivo or "")
+    if not nome or nome != nome_do_arquivo:
+        return None
+    if not nome.startswith(f"{PREFIXO}_") or not nome.endswith(".db"):
+        return None
+    caminho = os.path.join(pasta_de_backups(caminho_banco), nome)
+    return caminho if os.path.isfile(caminho) else None
+
+
+def copia_e_integra(caminho_copia: str) -> bool:
+    """Confere que o arquivo abre e passa no integrity_check antes de usa-lo."""
+    try:
+        conexao = sqlite3.connect(f"file:{caminho_copia}?mode=ro", uri=True, timeout=10)
+    except sqlite3.Error:
+        return False
+    try:
+        return conexao.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    except sqlite3.Error:
+        return False
+    finally:
+        conexao.close()
+
+
+def restaurar(caminho_banco: str, caminho_copia: str) -> tuple[bool, str]:
+    """
+    Sobrescreve o banco atual com o conteudo de uma copia.
+
+    Tres cuidados, nesta ordem:
+
+    1. A copia e verificada ANTES de qualquer escrita. Restaurar de um arquivo
+       corrompido trocaria um banco ruim por um pior.
+    2. O estado atual e salvo como copia de pre-migracao. Restaurar tambem e
+       uma operacao destrutiva: se o operador escolheu o arquivo errado, ele
+       precisa de um caminho de volta.
+    3. A troca usa a API `backup()` do SQLite, e nao substituicao de arquivo. A
+       API escreve dentro de uma transacao e respeita o bloqueio -- trocar o
+       arquivo por baixo de uma conexao aberta corromperia o banco.
+
+    Devolve (deu_certo, mensagem).
+    """
+    if not os.path.isfile(caminho_copia):
+        return False, "A copia informada nao foi encontrada."
+    if not copia_e_integra(caminho_copia):
+        return False, "A copia esta corrompida e nao pode ser restaurada."
+
+    salvaguarda = criar_backup(caminho_banco, MOTIVO_PRE_MIGRACAO)
+    if os.path.exists(caminho_banco) and not salvaguarda:
+        return False, (
+            "Nao foi possivel salvar o estado atual antes de restaurar. "
+            "Verifique espaco em disco."
+        )
+
+    origem = None
+    destino = None
+    try:
+        origem = sqlite3.connect(f"file:{caminho_copia}?mode=ro", uri=True, timeout=10)
+        destino = sqlite3.connect(caminho_banco, timeout=10)
+        with destino:
+            origem.backup(destino)
+    except sqlite3.Error as erro:
+        log.exception("[BACKUP] Restauracao falhou")
+        return False, f"Falha ao restaurar: {erro}"
+    finally:
+        for conexao in (origem, destino):
+            if conexao is not None:
+                try:
+                    conexao.close()
+                except sqlite3.Error:
+                    pass
+
+    log.warning("[BACKUP] Banco restaurado a partir de %s", caminho_copia)
+    return True, (
+        f"Banco restaurado a partir de {os.path.basename(caminho_copia)}. "
+        f"O estado anterior foi guardado como {os.path.basename(salvaguarda)}."
+        if salvaguarda else
+        f"Banco restaurado a partir de {os.path.basename(caminho_copia)}."
+    )
+
+
+def copia_para_download(caminho_banco: str) -> Optional[str]:
+    """
+    Copia integra e temporaria do banco, para o download manual.
+
+    A rota de backup enviava o ARQUIVO EM USO direto pelo `send_file`. Com o
+    app aberto isso captura um estado no meio de uma transacao e deixa de fora
+    o que estiver no `-wal` -- o operador baixava um arquivo que parecia um
+    backup e podia nao abrir. Aqui vale a mesma regra do backup automatico:
+    `Connection.backup()`, com `integrity_check` antes de entregar.
+    """
+    if not os.path.exists(caminho_banco):
+        return None
+    destino = os.path.join(
+        tempfile.gettempdir(),
+        f"{PREFIXO}_download_{time.strftime('%Y%m%d_%H%M%S')}.db",
+    )
+    origem = None
+    copia = None
+    try:
+        origem = sqlite3.connect(f"file:{caminho_banco}?mode=ro", uri=True, timeout=10)
+        copia = sqlite3.connect(destino)
+        with copia:
+            origem.backup(copia)
+        if copia.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+            raise sqlite3.DatabaseError("integrity_check falhou na copia para download")
+    except (sqlite3.Error, OSError) as erro:
+        log.warning("[BACKUP] Copia para download falhou: %s", erro)
+        try:
+            if copia is not None:
+                copia.close()
+                copia = None
+            if os.path.exists(destino):
+                os.remove(destino)
+        except OSError:
+            pass
+        return None
+    finally:
+        for conexao in (origem, copia):
+            if conexao is not None:
+                try:
+                    conexao.close()
+                except sqlite3.Error:
+                    pass
     return destino
 
 

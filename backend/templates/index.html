@@ -19,8 +19,8 @@
           href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 
     <!-- Ordem obrigatoria: tokens.css declara as variaveis que style.css usa. -->
-    <link rel="stylesheet" href="/css/tokens.css?v=v76">
-    <link rel="stylesheet" href="/css/style.css?v=v76">
+    <link rel="stylesheet" href="/css/tokens.css?v=v83">
+    <link rel="stylesheet" href="/css/style.css?v=v83">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
           integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H"
           crossorigin="anonymous" referrerpolicy="no-referrer" />
@@ -44,7 +44,7 @@
                      e nomeia o modulo aberto, que e o que muda. -->
                 <p class="sidebar-titulo">Adri Poltronas</p>
                 <button type="button" class="sidebar-toggle" id="btnSidebarToggle"
-                        onclick="alternarSidebar()" title="Recolher menu"
+                        data-comando="alternarSidebar" title="Recolher menu"
                         aria-controls="sidebar" aria-expanded="true">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
                     <span class="visually-hidden">Recolher menu</span>
@@ -64,53 +64,53 @@
             <p class="nav-grupo" role="presentation">Visao geral</p>
             <button type="button" class="nav-tab active" role="tab" id="tab-dashboard"
                     aria-selected="true" aria-controls="aba-dashboard" title="Dashboard"
-                    onclick="trocarAba('dashboard')">
+                    data-comando="trocarAba" data-arg="dashboard">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
                 <span class="nav-tab-rotulo">Dashboard</span>
             </button>
             <p class="nav-grupo" role="presentation">Comercial</p>
             <button type="button" class="nav-tab" role="tab" id="tab-pedidos" tabindex="-1"
                     aria-selected="false" aria-controls="aba-pedidos" title="Pedidos"
-                    onclick="trocarAba('pedidos')">
+                    data-comando="trocarAba" data-arg="pedidos">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M9 13h6"/><path d="M9 17h4"/></svg>
                 <span class="nav-tab-rotulo">Pedidos</span>
             </button>
             <button type="button" class="nav-tab" role="tab" id="tab-clientes" tabindex="-1"
                     aria-selected="false" aria-controls="aba-clientes" title="Clientes"
-                    onclick="trocarAba('clientes')">
+                    data-comando="trocarAba" data-arg="clientes">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
                 <span class="nav-tab-rotulo">Clientes</span>
             </button>
             <button type="button" class="nav-tab" role="tab" id="tab-produtos" tabindex="-1"
                     aria-selected="false" aria-controls="aba-produtos" title="Produtos"
-                    onclick="trocarAba('produtos')">
+                    data-comando="trocarAba" data-arg="produtos">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 18v-6a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v6"/><path d="M4 15h16"/><path d="M6 18v2"/><path d="M18 18v2"/><path d="M7 9V7a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v2"/></svg>
                 <span class="nav-tab-rotulo">Produtos</span>
             </button>
             <p class="nav-grupo" role="presentation">Operacional</p>
             <button type="button" class="nav-tab" role="tab" id="tab-entregas" tabindex="-1"
                     aria-selected="false" aria-controls="aba-entregas" title="Entregas"
-                    onclick="trocarAba('entregas')">
+                    data-comando="trocarAba" data-arg="entregas">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="1" y="6" width="13" height="11" rx="1"/><path d="M14 10h4l3 3v4h-7z"/><circle cx="5.5" cy="18.5" r="1.8"/><circle cx="17.5" cy="18.5" r="1.8"/></svg>
                 <span class="nav-tab-rotulo">Entregas</span>
             </button>
             <button type="button" class="nav-tab" role="tab" id="tab-mapa" tabindex="-1"
                     aria-selected="false" aria-controls="aba-mapa" title="Mapa"
-                    onclick="trocarAba('mapa')">
+                    data-comando="trocarAba" data-arg="mapa">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
                 <span class="nav-tab-rotulo">Mapa</span>
             </button>
             <p class="nav-grupo" role="presentation">Financeiro</p>
             <button type="button" class="nav-tab" role="tab" id="tab-pagamentos" tabindex="-1"
                     aria-selected="false" aria-controls="aba-pagamentos" title="Pagamentos"
-                    onclick="trocarAba('pagamentos')">
+                    data-comando="trocarAba" data-arg="pagamentos">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
                 <span class="nav-tab-rotulo">Pagamentos</span>
             </button>
             <p class="nav-grupo" role="presentation">Analise</p>
             <button type="button" class="nav-tab" role="tab" id="tab-relatorios" tabindex="-1"
                     aria-selected="false" aria-controls="aba-relatorios" title="Relatorios"
-                    onclick="trocarAba('relatorios')">
+                    data-comando="trocarAba" data-arg="relatorios">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
                 <span class="nav-tab-rotulo">Relatorios</span>
             </button>
@@ -143,7 +143,7 @@
                     <span class="online-rotulo">Online</span>
                 </output>
 
-                <button type="button" class="btn-icon" onclick="abrirNotificacoes()"
+                <button type="button" class="btn-icon" data-comando="abrirNotificacoes"
                         title="Notificacoes" id="btnNotificacoes"
                         aria-haspopup="dialog" aria-controls="notificacoesPanel"
                         aria-expanded="false">
@@ -152,7 +152,7 @@
                     <span class="visually-hidden">Notificacoes</span>
                 </button>
 
-                <button type="button" class="btn-icon theme-toggle" onclick="toggleTheme()"
+                <button type="button" class="btn-icon theme-toggle" data-comando="toggleTheme"
                         title="Alternar tema" id="btnThemeToggle" aria-pressed="false">
                     <svg id="iconSun" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
                     <svg id="iconMoon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" hidden aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
@@ -279,7 +279,7 @@
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/></svg>
                             Pedidos
                         </h2>
-                        <button type="button" class="btn btn-primary" onclick="abrirFormularioPedido()">
+                        <button type="button" class="btn btn-primary" data-comando="abrirFormularioPedido">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                             Novo Pedido
                         </button>
@@ -336,7 +336,7 @@
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 18v-6a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v6"/><path d="M4 15h16"/></svg>
                             Produtos
                         </h2>
-                        <button type="button" class="btn btn-primary" onclick="abrirFormularioProduto()">
+                        <button type="button" class="btn btn-primary" data-comando="abrirFormularioProduto">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                             Novo Produto
                         </button>
@@ -381,7 +381,7 @@
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="1" y="6" width="13" height="11" rx="1"/><path d="M14 10h4l3 3v4h-7z"/></svg>
                             Agenda de Entregas
                         </h2>
-                        <button type="button" class="btn btn-primary" onclick="abrirFormularioEntrega()">
+                        <button type="button" class="btn btn-primary" data-comando="abrirFormularioEntrega">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                             Agendar Entrega
                         </button>
@@ -411,6 +411,20 @@
             <section id="aba-clientes" class="tab-content" hidden
                      role="tabpanel" aria-labelledby="tab-clientes" tabindex="0">
 
+                <!-- Alteracoes feitas offline que o servidor recusou. Antes
+                     elas eram apagadas em silencio: o trabalho do operador
+                     sumia sem aviso e sem forma de recuperar. O aviso so
+                     aparece quando ha algo nele. -->
+                <div id="avisoPendenciasComErro" class="aviso-erro-sync" role="alert" hidden>
+                    <div class="aviso-erro-sync-texto">
+                        <strong id="avisoPendenciasTitulo">Alteracoes nao enviadas</strong>
+                        <span id="avisoPendenciasDetalhe"></span>
+                    </div>
+                    <button type="button" class="btn btn-secundario btn-sm" id="btnVerPendenciasComErro">
+                        Ver alteracoes
+                    </button>
+                </div>
+
                 <section class="card">
                     <h2 id="formTitle" class="card-title card-title-icone">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
@@ -437,7 +451,7 @@
 
                             <div class="input-group">
                                 <label for="cep">CEP
-                                    <button type="button" class="btn-ia" onclick="sugerirBairro()"
+                                    <button type="button" class="btn-ia" data-comando="sugerirBairro"
                                             title="Consulta o CEP no ViaCEP (servico externo); se ele falhar, usa a IA para sugerir o bairro">
                                         &#10024; IA
                                     </button>
@@ -504,7 +518,7 @@
 
                         <div class="filtro-wrapper">
                             <button type="button" class="btn-select-mode" id="btnFiltro"
-                                    onclick="toggleFiltro()" aria-expanded="false"
+                                    data-comando="toggleFiltro" aria-expanded="false"
                                     aria-controls="filtroDropdown">
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
                                 <span id="txtBtnFiltro">Filtrar</span>
@@ -514,7 +528,7 @@
                             <div class="filtro-dropdown" id="filtroDropdown">
                                 <div class="filtro-header">
                                     <span>Filtros</span>
-                                    <button type="button" class="filtro-limpar" onclick="limparFiltros()">Limpar</button>
+                                    <button type="button" class="filtro-limpar" data-comando="limparFiltros">Limpar</button>
                                 </div>
 
                                 <fieldset class="filtro-section">
@@ -535,12 +549,12 @@
                                 </fieldset>
 
                                 <button type="button" class="btn btn-primary btn-bloco"
-                                        onclick="aplicarFiltros()">Aplicar Filtros</button>
+                                        data-comando="aplicarFiltros">Aplicar Filtros</button>
                             </div>
                         </div>
 
                         <button type="button" class="btn-select-mode" id="btnModoSelecao"
-                                onclick="toggleModoSelecao()" aria-pressed="false">
+                                data-comando="toggleModoSelecao" aria-pressed="false">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
                             <span id="txtBtnSelecao">Selecionar Clientes</span>
                         </button>
@@ -566,23 +580,54 @@
                         </table>
                     </div>
 
+                    <!-- Ate a versao 1.1 a tela baixava e desenhava TODOS os
+                         clientes de uma vez. Com alguns milhares de registros
+                         isso e uma pausa visivel; com dezenas de milhares, a
+                         aba trava. Agora ela carrega por pagina. -->
+                    <div class="lista-rodape" id="rodapeClientes" hidden>
+                        <span class="lista-contagem" id="contagemClientes" aria-live="polite"></span>
+                        <button type="button" class="btn btn-secundario btn-sm" id="btnCarregarMaisClientes">
+                            Carregar mais
+                        </button>
+                    </div>
+
                     <footer class="actions-excel">
-                        <button type="button" class="btn btn-microsoft" id="btnConectarMicrosoft" onclick="conectarMicrosoft()">
+                        <button type="button" class="btn btn-microsoft" id="btnConectarMicrosoft" data-comando="conectarMicrosoft">
                             <img src="/img/excel.png" alt="" width="18" height="18">
                             <span id="txtBtnConectar">Conectar Microsoft</span>
                         </button>
-                        <button type="button" class="btn btn-excel" id="btnEnviarExcel" onclick="enviarParaExcel()" disabled>
+                        <button type="button" class="btn btn-excel" id="btnEnviarExcel" data-comando="enviarParaExcel" disabled>
                             <img src="/img/excel.png" alt="" width="18" height="18">
                             Enviar para Excel
                         </button>
                         <!-- Backup do banco: a funcao existia desde sempre, mas
                              nao havia botao nem atalho que a alcancasse. -->
                         <button type="button" class="btn btn-secundario" id="btnBackupBanco"
-                                onclick="fazerBackupSQLite()" title="Baixa o banco de dados completo">
+                                data-comando="fazerBackupSQLite" title="Baixa o banco de dados completo">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                             Backup do banco
                         </button>
+                        <!-- Backup sem restauracao e uma suposicao, nao uma
+                             garantia: as copias existiam desde a versao 1.1 e
+                             recupera-las exigia fechar o app e sobrescrever o
+                             arquivo em %APPDATA% na mao. -->
+                        <button type="button" class="btn btn-secundario" id="btnRestaurarBanco"
+                                title="Volta o banco para uma copia anterior">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+                            Restaurar copia
+                        </button>
                     </footer>
+
+                    <p class="aviso-dados-externos">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                        <span>
+                            <strong>Enviar para Excel</strong> sobe uma planilha com
+                            todos os clientes -- nome, endereco e CEP -- para o OneDrive
+                            da conta Microsoft conectada.
+                            <strong>Backup do banco</strong> salva a base completa num
+                            arquivo, sem cifra: guarde em local controlado.
+                        </span>
+                    </p>
                 </section>
             </section>
 
@@ -620,11 +665,19 @@
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
                             Pagamentos
                         </h2>
-                        <button type="button" class="btn btn-primary" onclick="abrirModalNovoRecebimento()">
+                        <button type="button" class="btn btn-primary" data-comando="abrirModalNovoRecebimento">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                             Novo Recebimento
                         </button>
                     </div>
+
+                    <p class="aviso-dados-externos">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                        Ao gerar uma cobranca Pix ou boleto, o nome e o endereco do
+                        cliente, o valor e o vencimento sao enviados ao Asaas. Conciliar
+                        apenas consulta cobrancas ja emitidas -- nenhum dado novo sai
+                        da maquina.
+                    </p>
 
                     <div class="lista-toolbar">
                         <search class="input-group search-bar">
@@ -641,7 +694,15 @@
                                 <option value="Cancelado">Cancelado</option>
                             </select>
                         </div>
-                        <button type="button" class="btn btn-primary" onclick="carregarPagamentos()">Carregar</button>
+                        <button type="button" class="btn btn-primary" data-comando="carregarPagamentos">Carregar</button>
+                        <!-- O webhook do Asaas nao alcanca uma instalacao
+                             normal: o servidor local escuta em loopback. Este
+                             botao inverte a direcao e pergunta ao Asaas o
+                             estado das cobrancas em aberto. -->
+                        <button type="button" class="btn btn-secundario" id="btnConciliarAsaas"
+                                title="Consulta o Asaas e atualiza as cobrancas em aberto">
+                            Conciliar com o Asaas
+                        </button>
                     </div>
 
                     <div class="tabela-rolagem">
@@ -731,11 +792,11 @@
                     </fieldset>
 
                     <div class="form-actions">
-                        <button type="button" class="btn btn-primary" onclick="carregarRelatorio()">
+                        <button type="button" class="btn btn-primary" data-comando="carregarRelatorio">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                             Visualizar
                         </button>
-                        <button type="button" class="btn btn-secundario" onclick="exportarRelatorio()">
+                        <button type="button" class="btn btn-secundario" data-comando="exportarRelatorio">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                             Exportar Relatorio
                         </button>
@@ -798,7 +859,7 @@
                 <span>Notificacoes</span>
                 <output id="notifCounter" class="notif-counter">0 notificacao(es)</output>
             </div>
-            <button type="button" class="notif-close" onclick="fecharNotificacoes()"
+            <button type="button" class="notif-close" data-comando="fecharNotificacoes"
                     aria-label="Fechar notificacoes">&#10005;</button>
         </header>
 
@@ -809,7 +870,7 @@
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
                 Marcar todas como lidas
             </button>
-            <button type="button" class="btn notif-btn-rodape notif-btn-atualizar" onclick="atualizarNotificacoes()">Atualizar</button>
+            <button type="button" class="btn notif-btn-rodape notif-btn-atualizar" data-comando="atualizarNotificacoes">Atualizar</button>
         </footer>
     </aside>
 
@@ -835,9 +896,48 @@
             <div class="modal-icon" id="modalConfirmarIcone" aria-hidden="true"></div>
             <h2 class="modal-title" id="modalConfirmarTitulo">Confirmar</h2>
             <p class="modal-msg" id="modalConfirmarMsg"></p>
+            <!-- Campo opcional: aparece so quando confirmarAcao() recebe
+                 `campoTexto`. Usado onde a decisao do operador contraria o que
+                 o sistema apuraria sozinho e o motivo precisa ir para a
+                 auditoria. -->
+            <div id="modalConfirmarCampo" hidden>
+                <label class="modal-label" id="modalConfirmarRotulo" for="modalConfirmarTexto">Motivo</label>
+                <input type="text" class="modal-input" id="modalConfirmarTexto" maxlength="200">
+            </div>
             <div class="modal-actions">
                 <button type="button" class="modal-btn modal-btn-cancelar" id="modalConfirmarCancelar">Cancelar</button>
                 <button type="button" class="modal-btn modal-btn-confirmar" id="modalConfirmarOk">Confirmar</button>
+            </div>
+        </div>
+    </dialog>
+
+    <dialog class="modal-overlay" id="modalRestaurar" aria-labelledby="modalRestaurarTitulo">
+        <div class="modal-box modal-box-media">
+            <h2 class="modal-title" id="modalRestaurarTitulo">Restaurar uma copia</h2>
+            <p class="modal-msg">
+                O banco atual sera substituido pelo conteudo da copia escolhida.
+                Antes disso, o estado de agora e guardado como uma nova copia, entao
+                da para voltar atras.
+            </p>
+            <div id="listaCopias" class="lista-pendencias"></div>
+            <p class="modal-msg" id="modalRestaurarPasta"></p>
+            <div class="modal-actions">
+                <button type="button" class="modal-btn modal-btn-cancelar" id="modalRestaurarFechar">Fechar</button>
+            </div>
+        </div>
+    </dialog>
+
+    <dialog class="modal-overlay" id="modalPendenciasComErro" aria-labelledby="modalPendenciasTitulo">
+        <div class="modal-box modal-box-media">
+            <h2 class="modal-title" id="modalPendenciasTitulo">Alteracoes nao enviadas</h2>
+            <p class="modal-msg">
+                Estas alteracoes foram feitas sem conexao e o servidor as recusou.
+                Reenvie depois de corrigir o que motivou a recusa, ou descarte se
+                nao forem mais necessarias.
+            </p>
+            <div id="listaPendenciasComErro" class="lista-pendencias"></div>
+            <div class="modal-actions">
+                <button type="button" class="modal-btn modal-btn-cancelar" id="modalPendenciasFechar">Fechar</button>
             </div>
         </div>
     </dialog>
@@ -868,7 +968,7 @@
                      `executarImportacao()` existia completa no app.js e nunca
                      era chamada, entao Ctrl+I abria um modal sem saida. -->
                 <button type="button" class="modal-btn modal-btn-confirmar"
-                        id="modalImportarConfirmar" onclick="executarImportacao()">Importar</button>
+                        id="modalImportarConfirmar" data-comando="executarImportacao">Importar</button>
             </div>
         </div>
     </dialog>
@@ -924,7 +1024,7 @@
                 </div>
 
                 <div class="modal-actions">
-                    <button type="button" class="modal-btn modal-btn-cancelar" onclick="fecharModalNovoRecebimento()">Cancelar</button>
+                    <button type="button" class="modal-btn modal-btn-cancelar" data-comando="fecharModalNovoRecebimento">Cancelar</button>
                     <button type="submit" class="modal-btn modal-btn-confirmar modal-btn-sucesso">Registrar</button>
                 </div>
             </form>
@@ -938,7 +1038,7 @@
             <h2 class="modal-title" id="modalCobrancaTitulo">Cobranca emitida</h2>
             <div id="cobrancaConteudo" class="cobranca-conteudo"></div>
             <div class="modal-actions">
-                <button type="button" class="modal-btn modal-btn-cancelar" onclick="fecharModalCobranca()">Fechar</button>
+                <button type="button" class="modal-btn modal-btn-cancelar" data-comando="fecharModalCobranca">Fechar</button>
             </div>
         </div>
     </dialog>
@@ -991,7 +1091,7 @@
 
                 <div class="modal-actions">
                     <button type="button" class="modal-btn modal-btn-cancelar"
-                            onclick="fecharModal('modalProduto')">Cancelar</button>
+                            data-comando="fecharModal" data-arg="modalProduto">Cancelar</button>
                     <button type="submit" class="modal-btn modal-btn-confirmar modal-btn-sucesso">Salvar</button>
                 </div>
             </form>
@@ -1071,7 +1171,7 @@
                         <label for="itemPreco">Preco un. (R$)</label>
                         <input type="text" id="itemPreco" inputmode="decimal" placeholder="catalogo">
                     </div>
-                    <button type="button" class="btn btn-secundario" onclick="adicionarItemAoPedido()">Adicionar</button>
+                    <button type="button" class="btn btn-secundario" data-comando="adicionarItemAoPedido">Adicionar</button>
                 </div>
 
                 <div class="tabela-rolagem">
@@ -1095,7 +1195,7 @@
 
             <div class="modal-actions" id="pedidoAcoes">
                 <button type="button" class="modal-btn modal-btn-cancelar"
-                        onclick="fecharModal('modalPedido')">Fechar</button>
+                        data-comando="fecharModal" data-arg="modalPedido">Fechar</button>
             </div>
         </div>
     </dialog>
@@ -1141,7 +1241,7 @@
 
                 <div class="modal-actions">
                     <button type="button" class="modal-btn modal-btn-cancelar"
-                            onclick="fecharModal('modalFaturamento')">Cancelar</button>
+                            data-comando="fecharModal" data-arg="modalFaturamento">Cancelar</button>
                     <button type="submit" class="modal-btn modal-btn-confirmar modal-btn-sucesso">Faturar</button>
                 </div>
             </form>
@@ -1190,7 +1290,7 @@
 
                 <div class="modal-actions">
                     <button type="button" class="modal-btn modal-btn-cancelar"
-                            onclick="fecharModal('modalEntrega')">Cancelar</button>
+                            data-comando="fecharModal" data-arg="modalEntrega">Cancelar</button>
                     <button type="submit" class="modal-btn modal-btn-confirmar modal-btn-sucesso">Agendar</button>
                 </div>
             </form>
@@ -1203,10 +1303,10 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"
             integrity="sha384-e6nUZLBkQ86NJ6TVVKAeSaK8jWa3NhkYWZFomE39AvDbQWeie9PlQqM3pmYW5d1g"
             crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-    <script src="/js/offline.js?v=v76"></script>
-    <script src="/js/app.js?v=v76"></script>
+    <script src="/js/offline.js?v=v83"></script>
+    <script src="/js/app.js?v=v83"></script>
     <!-- Modulo comercial: Produtos, Pedidos e Agenda de Entregas.
          Arquivo separado porque app.js ja passa de 2.000 linhas. -->
-    <script src="/js/comercial.js?v=v76"></script>
+    <script src="/js/comercial.js?v=v83"></script>
 </body>
 </html>

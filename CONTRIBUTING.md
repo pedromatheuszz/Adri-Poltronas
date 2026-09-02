@@ -52,6 +52,20 @@ lint **antes** do pytest, então um import não usado reprova tudo sem a suíte
 sequer começar. E o pytest roda de dentro de `backend/` no CI — rodar da raiz
 pode esconder problema de caminho relativo.
 
+Além disso, o CI reprova por coisas que não aparecem rodando os comandos acima:
+
+| Verificação | Como reproduzir localmente |
+|---|---|
+| Cobertura mínima de 80% | `cd backend && python -m pytest ../tests --cov=. --cov-fail-under=80` |
+| Vulnerabilidade em dependência Node | `npm audit --audit-level=high` |
+| Vulnerabilidade em dependência Python | `pip-audit -r backend/requirements.txt --strict` |
+| Segredo no histórico | `gitleaks detect --source . --redact` |
+| Interface num navegador de verdade | `pip install pytest-playwright && playwright install chromium`, depois `cd backend && python -m pytest ../tests/test_e2e_interface.py` |
+
+O job `instalador` só roda na `main` e em PR para ela: é ele que constrói o
+PyInstaller e o NSIS. Um PR para `develop` não o exercita, então um problema de
+empacotamento só aparece na promoção.
+
 **4. Abre PR para `develop`**
 
 ```bash
@@ -122,9 +136,47 @@ do banco real antes de promover para a `main`.
 
 ## Pendências conhecidas
 
-- **`gitleaks` vermelho no CI.** Falha desde antes do repositório entrar no
-  git. O passo de dependências vulneráveis já passa; o de varredura de
-  segredos ainda não. Diagnosticar exige ler o log do job.
 - **Autenticação do ERP usa o OAuth da Microsoft.** Criar cliente, produto ou
   pedido exige estar conectado ao OneDrive, o que é conceitualmente errado —
-  integração não deveria definir identidade de usuário.
+  integração não deveria definir identidade de usuário. Na prática isso
+  significa que a fila offline não consegue sincronizar sem uma sessão da
+  Microsoft ativa: as alterações vão para a fila de erros com 401. Resolver
+  exige autenticação local própria, independente de integração.
+- **Não há usuários nem permissões.** Quem abre o aplicativo pode tudo.
+- **`main` não está protegida pelo GitHub.** A tabela acima diz que ninguém
+  grava direto nela — hoje isso é combinado, não regra: um `git push origin
+  main` acidental passa. Ver "Proteger a `main`" abaixo.
+- **`pagamentos.valor` ainda é `REAL`.** As tabelas do módulo comercial usam
+  centavos inteiros; a de pagamentos não. Converter exige leitura dupla
+  durante a transição e é projeto próprio.
+- **Listagens não têm paginação.** A tela de clientes baixa e renderiza todos.
+  Adequado para os milhares de registros de hoje; não para dezenas de milhares.
+- **Um computador por empresa.** SQLite em pasta de rede corrompe. Compartilhar
+  a base entre máquinas exigiria API central e banco servidor.
+
+## Proteger a `main`
+
+Enquanto isso não estiver feito, a regra "ninguém grava direto na `main`" é
+apenas um acordo. Em
+[Settings → Branches](https://github.com/pedromatheuszz/Adri-Poltronas/settings/branches),
+crie um ruleset para `main` com:
+
+- **Require a pull request before merging**
+- **Require status checks to pass** — marque todos: `test (3.10)`,
+  `test (3.11)`, `test (3.12)`, `electron`, `qt`, `dotnet`, `security` e
+  `instalador`
+- **Block force pushes**
+
+## Autoria dos commits
+
+O e-mail do autor fica visível para sempre no histórico de um repositório
+público. Para usar o endereço de encaminhamento do GitHub em vez do pessoal:
+
+```bash
+git config user.email "SEU_ID+SEU_USUARIO@users.noreply.github.com"
+```
+
+O número do ID está em
+[Settings → Emails](https://github.com/settings/emails). Isso vale para os
+commits **novos** — reescrever o histórico já publicado é outra operação, e
+muda o hash de todos os commits.

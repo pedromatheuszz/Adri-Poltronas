@@ -1301,6 +1301,85 @@ body.modo-selecao-ativo tbody tr:hover td { background: var(--cor-selecao); }
 
 .modal-input { margin-bottom: var(--esp-5); text-align: left; }
 
+/* Rotulo do campo opcional do modal de confirmacao. Alinhado a esquerda e
+   colado no proprio campo: o resto do modal e centralizado, mas rotulo de
+   formulario centralizado nao se le. */
+.modal-label {
+    display: block;
+    text-align: left;
+    font-size: var(--texto-sm);
+    font-weight: 600;
+    color: var(--cor-texto-2);
+    margin-bottom: var(--esp-2);
+}
+#modalConfirmarCampo { margin-top: var(--esp-4); }
+
+/* Aviso de alteracoes offline recusadas pelo servidor.
+   Perigo, e nao alerta: o operador perdeu trabalho e precisa decidir o que
+   fazer com ele -- nao e um lembrete que se possa adiar indefinidamente. */
+.aviso-erro-sync {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--esp-4);
+    flex-wrap: wrap;
+    padding: var(--esp-4) var(--esp-5);
+    margin-bottom: var(--esp-5);
+    background: var(--cor-perigo-suave);
+    border: 1px solid var(--cor-perigo-contorno);
+    border-radius: var(--raio-md);
+    color: var(--cor-perigo-texto);
+}
+.aviso-erro-sync-texto { display: flex; flex-direction: column; gap: 2px; }
+.aviso-erro-sync strong { font-size: var(--texto-base); }
+.aviso-erro-sync span { font-size: var(--texto-md); color: var(--cor-texto-2); }
+
+.lista-pendencias {
+    display: flex;
+    flex-direction: column;
+    gap: var(--esp-3);
+    max-height: 320px;
+    overflow-y: auto;
+    text-align: left;
+    margin-bottom: var(--esp-4);
+}
+.pendencia-erro {
+    border: 1px solid var(--cor-borda);
+    border-radius: var(--raio-md);
+    padding: var(--esp-3) var(--esp-4);
+    background: var(--cor-superficie-2);
+}
+.pendencia-erro-cabecalho {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--esp-3);
+    margin-bottom: 2px;
+}
+.pendencia-erro-nome { font-weight: 600; color: var(--cor-texto); }
+.pendencia-erro-motivo { font-size: var(--texto-md); color: var(--cor-perigo-texto); }
+.pendencia-erro-quando { font-size: var(--texto-sm); color: var(--cor-texto-3); }
+.pendencia-erro-acoes { display: flex; gap: var(--esp-2); margin-top: var(--esp-3); }
+
+/* Rodape da lista paginada. A contagem fica sempre visivel enquanto ha mais
+   de uma pagina -- saber que existem 1.240 registros e ver 200 e diferente de
+   achar que ha 200. */
+.lista-rodape {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--esp-4);
+    padding-top: var(--esp-4);
+    margin-top: var(--esp-2);
+    border-top: 1px solid var(--cor-borda-sutil);
+}
+.lista-contagem { font-size: var(--texto-md); color: var(--cor-texto-2); }
+
+/* O aviso nasceu com uma frase so, direto no <p>. Com texto mais longo e
+   trechos em negrito, o conteudo passou a viver num <span> para o icone nao
+   ser arrastado pela quebra de linha. */
+.aviso-dados-externos > span { display: block; }
+
 /* Modal que carrega formulario: o texto volta a alinhar a esquerda, porque
    rotulo de campo centralizado nao se le. */
 .payment-modal { max-width: 520px; text-align: left; }

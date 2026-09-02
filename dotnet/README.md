@@ -2,11 +2,31 @@
 
 Aplicativo desktop em C# com Avalonia UI, MVVM e Entity Framework Core.
 
-É a arquitetura **para onde o projeto está migrando**. Hoje ela cobre as cinco
-abas da interface anterior — Dashboard, Clientes, Mapa, Pagamentos e
-Relatórios. O backend Python continua existindo e as duas pilhas leem e
-escrevem **o mesmo banco SQLite**; há testes que garantem essa
-compatibilidade.
+É uma **exploração arquitetural**, não a versão que o cliente usa. Hoje ela
+cobre cinco telas — Dashboard, Clientes, Mapa, Pagamentos e Relatórios — e não
+tem catálogo de produtos nem pedidos, que são o centro do dia a dia da
+operação. Enquanto essa paridade não existir, a versão oficial é a do
+Electron/Flask.
+
+> ### Banco separado, por decisão
+>
+> Até a versão 1.1 as duas pilhas liam e escreviam **o mesmo arquivo SQLite**.
+> Isso foi revertido: cada uma trabalha na própria cópia.
+>
+> Dois sistemas escrevendo no mesmo banco, com domínios e sistemas de migração
+> diferentes, produzem divergências que nenhum teste de compatibilidade pega:
+>
+> - o Python inativa cliente (`ativo = 0`); o EF Core **remove a linha**, e com
+>   ela o histórico que aponta para o cliente;
+> - o ledger `auditoria_eventos` só é alimentado pelo Python, então toda
+>   escrita vinda do .NET era invisível na trilha de auditoria;
+> - Alembic e EF Core versionam o schema de formas incompatíveis. Se o .NET
+>   criasse o arquivo primeiro, o banco nasceria sem `alembic_version` e a
+>   migração inicial do Python tentaria criar tabelas já existentes.
+>
+> Quem precisar apontar as duas pilhas para o mesmo arquivo — um teste de
+> compatibilidade, uma importação pontual — passa `Banco__ConexaoString`
+> explicitamente. É uma decisão consciente, não mais o padrão.
 
 ## Camadas
 
@@ -77,13 +97,15 @@ Ou pela raiz do projeto: `python build.py dotnet`, `make dotnet`,
 | | |
 |---|---|
 | Provedor atual | SQLite |
-| Arquivo | `%APPDATA%/AdriPoltronas/adri_poltronas.db` (Windows), `~/.config/AdriPoltronas/` (Linux e macOS) |
-| Dono do schema | **Alembic**, do backend Python, enquanto ele existir |
+| Arquivo | `%APPDATA%/AdriPoltronas/adri_poltronas_dotnet.db` (Windows), `~/.config/AdriPoltronas/` (Linux e macOS) |
+| Banco do backend Python | `adri_poltronas.db`, na mesma pasta — **não é tocado por esta aplicação** |
+| Dono do schema | EF Core, neste arquivo |
 
-O `InicializadorDoBanco` detecta a tabela `alembic_version` e, encontrando-a,
-**não aplica** as migrações do EF Core. As duas ferramentas versionando o mesmo
-schema seria receita para banco inconsistente. A migração `EsquemaInicial`
-existe para base nova — instalação limpa ou PostgreSQL.
+O `InicializadorDoBanco` ainda detecta a tabela `alembic_version` e, se a
+encontrar, **não aplica** as migrações do EF Core. A checagem continua fazendo
+sentido para quem apontar deliberadamente as duas pilhas para o mesmo arquivo
+via `Banco__ConexaoString`: duas ferramentas versionando o mesmo schema é
+receita para banco inconsistente.
 
 ### Trocar para PostgreSQL
 

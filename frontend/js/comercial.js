@@ -312,7 +312,7 @@ function _renderizarItens(pedido) {
 function _renderizarAcoesPedido(pedido) {
     var area = document.getElementById('pedidoAcoes');
     var fechar = '<button type="button" class="modal-btn modal-btn-cancelar" ' +
-                 'onclick="fecharModal(\'modalPedido\')">Fechar</button>';
+                 'data-comando="fecharModal" data-arg="modalPedido">Fechar</button>';
     if (!pedido) { area.innerHTML = fechar; return; }
 
     var botoes = (pedido.proximos_passos || []).map(function (destino) {

@@ -20,12 +20,25 @@ a = Analysis(
         ('backend/templates', 'templates'),
         ('backend/alembic.ini', '.'),
         ('backend/migrations', 'migrations'),
+        # `config.VERSAO_DO_APP` le a versao daqui. Sem o arquivo no bundle, o
+        # app instalado se identificaria como "desconhecida" na sonda que o
+        # Electron usa para decidir se o servidor na porta e mesmo o dele.
+        ('package.json', '.'),
     ],
     hiddenimports=[
         'database', 'notificacoes_db', 'security', 'asaas', 'config', 'validators',
-        'blueprints', 'migrations_manager',
+        'blueprints', 'migrations_manager', 'capacidade', 'microsoft', 'planilha',
         'openpyxl', 'openpyxl.utils', 'et_xmlfile',
         'alembic', 'alembic.config', 'alembic.command',
+        # `alembic/env.py` chama `logging.config.fileConfig`. O PyInstaller nao
+        # enxerga isso -- o import esta dentro do env.py, que e carregado como
+        # script em tempo de execucao, nao importado estaticamente.
+        #
+        # Sem estes dois, TODA migration falhava no app empacotado com
+        # "No module named 'logging.config'", e o backend caia no schema de
+        # emergencia em silencio. O instalador nunca era construido pelo CI, e
+        # o defeito so aparecia na maquina de quem instalasse.
+        'logging.config', 'logging.handlers',
         'win32crypt',
     ],
     hookspath=[],

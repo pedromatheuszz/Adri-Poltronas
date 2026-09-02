@@ -194,25 +194,10 @@ def test_gitignore_cobre_artefatos_do_node():
 # Comportamento do entrypoint
 # --------------------------------------------------------------------------
 
-def test_preparar_banco_cai_para_criar_tabela_quando_a_migracao_falha(monkeypatch):
-    """
-    Uma instalacao sem alembic.ini legivel precisa subir com o schema basico
-    em vez de nao abrir -- a janela vazia nao diz nada ao operador.
-    """
-    import database
-    import migrations_manager
-    import servidor
-
-    def explode():
-        raise RuntimeError('alembic.ini ausente')
-
-    chamou = []
-    monkeypatch.setattr(migrations_manager, 'aplicar_migrações', explode)
-    monkeypatch.setattr(database, 'criar_tabela', lambda: chamou.append(True))
-
-    servidor.preparar_banco()
-
-    assert chamou == [True]
+# O comportamento de `preparar_banco()` -- quando cair para o schema basico e
+# quando recusar a subir -- vive em tests/test_inicializacao_banco.py, que
+# monta cada estado de banco num arquivo temporario. O teste que ficava aqui
+# exercitava o banco real da maquina e so passava por acaso.
 
 
 def test_main_desiste_quando_o_banco_nao_inicializa(monkeypatch):

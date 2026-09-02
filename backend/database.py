@@ -5,6 +5,7 @@ import logging
 import security
 import asaas
 import notificacoes_db
+from erp.core import dinheiro
 from erp.core.auditoria import registrar_evento
 from erp.core.schema_fallback import garantir_schema_fallback
 from erp.financeiro.servico_pagamentos import aplicar_evento_asaas
@@ -37,6 +38,44 @@ def obter_caminho_banco() -> str:
 DB_PATH = obter_caminho_banco()
 
 
+# O journal_mode e propriedade do ARQUIVO, nao da conexao: uma vez gravado no
+# header do banco, vale para todas as conexoes seguintes. Por isso e aplicado
+# uma vez por caminho de banco, e nao a cada `conectar_bd()` -- executar o
+# pragma em toda conexao custa uma escrita no header sem nenhum ganho.
+_MODO_WAL_APLICADO: set = set()
+
+
+def _garantir_modo_wal(conexao: sqlite3.Connection) -> None:
+    """
+    Liga o Write-Ahead Log.
+
+    No modo padrao (`delete`), uma escrita bloqueia todas as leituras. O Flask
+    roda com `threaded=True`, entao salvar um cliente enquanto o dashboard
+    carrega significava uma das duas requisicoes esperando -- e, sob carga, o
+    `database is locked` que ninguem consegue reproduzir depois.
+
+    Com WAL, leitura e escrita convivem: quem le enxerga o ultimo estado
+    consistente enquanto a escrita acontece em paralelo.
+
+    `synchronous = NORMAL` e o par recomendado do WAL: em vez de sincronizar o
+    disco a cada transacao, sincroniza no checkpoint. O risco que isso aceita e
+    perder as ultimas transacoes numa queda de energia -- nao a corrupcao do
+    banco, que o WAL continua evitando.
+    """
+    if DB_PATH in _MODO_WAL_APLICADO:
+        return
+    try:
+        modo = conexao.execute("PRAGMA journal_mode = WAL").fetchone()[0]
+        conexao.execute("PRAGMA synchronous = NORMAL")
+        if str(modo).lower() != "wal":
+            # Banco em pasta de rede nao aceita WAL. Nao e motivo para falhar:
+            # o modo antigo continua correto, so mais lento sob concorrencia.
+            log_db.warning("[BANCO] WAL indisponivel; journal_mode=%s", modo)
+    except sqlite3.Error as erro:
+        log_db.warning("[BANCO] Nao foi possivel ligar o WAL: %s", erro)
+    _MODO_WAL_APLICADO.add(DB_PATH)
+
+
 def conectar_bd() -> sqlite3.Connection:
     conexao = sqlite3.connect(DB_PATH, timeout=10)
     conexao.row_factory = sqlite3.Row
@@ -44,6 +83,7 @@ def conectar_bd() -> sqlite3.Connection:
     # pragma, as constraints presentes no schema eram apenas decorativas.
     conexao.execute("PRAGMA foreign_keys = ON")
     conexao.execute("PRAGMA busy_timeout = 10000")
+    _garantir_modo_wal(conexao)
     return conexao
 
 
@@ -91,20 +131,44 @@ def salvar_cliente(nome, cep, rua, bairro, cidade, entrega_retirada, observacoes
         return cliente_id
 
 
-def listar_clientes(busca=''):
+def _filtro_de_busca(busca: str):
+    """Devolve (fragmento_sql, parametros) para o termo de busca."""
     termo = (busca or '').strip()
+    if not termo:
+        return '', []
+    like = f'%{termo}%'
+    return ' AND (nome LIKE ? OR cidade LIKE ? OR bairro LIKE ?)', [like, like, like]
+
+
+def contar_clientes(busca='') -> int:
+    """Quantos clientes ativos atendem a busca. Base da paginacao."""
+    filtro, parametros = _filtro_de_busca(busca)
     with conectar() as conexao:
-        if termo:
-            like = f'%{termo}%'
-            linhas = conexao.execute(
-                'SELECT * FROM clientes WHERE ativo=1 AND '
-                '(nome LIKE ? OR cidade LIKE ? OR bairro LIKE ?) ORDER BY id DESC',
-                (like, like, like),
-            ).fetchall()
-        else:
-            linhas = conexao.execute(
-                'SELECT * FROM clientes WHERE ativo=1 ORDER BY id DESC'
-            ).fetchall()
+        return conexao.execute(
+            f'SELECT COUNT(*) FROM clientes WHERE ativo=1{filtro}', parametros
+        ).fetchone()[0]
+
+
+def listar_clientes(busca='', limite=None, deslocamento=0):
+    """
+    Clientes ativos, do mais recente para o mais antigo.
+
+    `limite` e opcional, e a ausencia dele devolve TUDO -- de proposito. A
+    sincronizacao do cache offline usa a lista como autoritativa: o que nao
+    esta nela e podado. Se a paginacao virasse o padrao, a segunda pagina
+    inteira seria tratada como "excluida no servidor" e sumiria do cache.
+
+    Quem pagina (a tela de clientes) passa `limite` explicitamente e sabe que
+    a resposta e parcial.
+    """
+    filtro, parametros = _filtro_de_busca(busca)
+    sql = f'SELECT * FROM clientes WHERE ativo=1{filtro} ORDER BY id DESC'
+    if limite is not None:
+        sql += ' LIMIT ? OFFSET ?'
+        parametros = parametros + [int(limite), int(deslocamento or 0)]
+
+    with conectar() as conexao:
+        linhas = conexao.execute(sql, parametros).fetchall()
     resultado = []
     for linha in linhas:
         try:
@@ -366,19 +430,28 @@ def listar_pagamentos(cliente_id=None, status=None):
 
 
 def salvar_pagamento(cliente_id, cliente_nome, valor, descricao, data_vencimento,
-                     tipo_pagamento='Pix', status='Pendente', data_pagamento=''):
+                     tipo_pagamento='Pix', status='Pendente', data_pagamento='',
+                     valor_centavos=None):
     """
     Cria um novo pagamento e retorna o ID.
 
     `status`/`data_pagamento` sao parametros porque a tela de recebimento
     registra dinheiro que JA entrou. Fixar 'Pendente' aqui fazia esse
     lancamento nascer vencido e ser contado como atrasado no mesmo instante.
+
+    `valor_centavos` e a fonte de verdade quando informado -- e o caso do
+    faturamento de pedido, que ja tem o valor rateado em centavos exatos e nao
+    deve passa-lo por float. Quando so `valor` chega (tela de recebimento
+    avulso), os centavos sao derivados dele.
     """
+    centavos = dinheiro.para_centavos(valor) if valor_centavos is None else int(valor_centavos)
+    valor = round(centavos / 100, 2)
+
     with conectar() as conexao:
         conexao.execute(
-            'INSERT INTO pagamentos (cliente_id, cliente_nome, valor, descricao, status, data_vencimento, tipo_pagamento, data_pagamento) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-            (cliente_id, cliente_nome, valor, descricao, status, data_vencimento, tipo_pagamento, data_pagamento),
+            'INSERT INTO pagamentos (cliente_id, cliente_nome, valor, valor_centavos, descricao, status, data_vencimento, tipo_pagamento, data_pagamento) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            (cliente_id, cliente_nome, valor, centavos, descricao, status, data_vencimento, tipo_pagamento, data_pagamento),
         )
         pagamento_id = conexao.execute('SELECT last_insert_rowid()').fetchone()[0]
         acao = 'Recebimento registrado' if status == 'Recebido' else 'Cobranca criada'
@@ -402,11 +475,20 @@ def atualizar_pagamento(pagamento_id, **kwargs):
     campos_permitidos = {
         'status', 'data_pagamento', 'asaas_payment_id', 'pix_payload',
         'pix_qr_code', 'boleto_url', 'nosso_numero', 'descricao',
-        'valor', 'data_vencimento', 'tipo_pagamento', 'cliente_nome',
+        'valor', 'valor_centavos', 'data_vencimento', 'tipo_pagamento',
+        'cliente_nome', 'asaas_external_reference', 'asaas_emissao_estado',
     }
     campos = {k: v for k, v in kwargs.items() if k in campos_permitidos and v is not None}
     if not campos:
         return 0
+
+    # As duas colunas de dinheiro andam juntas. Deixar `valor` mudar sozinho
+    # faria `valor_centavos` guardar o numero antigo -- e a divergencia seria
+    # silenciosa ate alguem comparar os dois em um relatorio.
+    if 'valor' in campos and 'valor_centavos' not in campos:
+        campos['valor_centavos'] = dinheiro.para_centavos(campos['valor'])
+    elif 'valor_centavos' in campos and 'valor' not in campos:
+        campos['valor'] = round(int(campos['valor_centavos']) / 100, 2)
     sets = ', '.join(f'{k}=?' for k in campos)
     vals = list(campos.values()) + [pagamento_id]
     with conectar() as conexao:
@@ -440,26 +522,75 @@ def atualizar_pagamento(pagamento_id, **kwargs):
         return linhas
 
 
+def registrar_observacao_de_pagamento(pagamento_id: int, observacao: str) -> None:
+    """
+    Anexa uma nota ao historico e a auditoria do pagamento.
+
+    Usado quando uma decisao humana contraria o que o sistema apuraria
+    sozinho -- confirmar na mao uma cobranca que o gateway ainda mostra em
+    aberto, por exemplo. Sem o registro, o numero fica certo na tela e
+    inexplicavel depois.
+    """
+    with conectar() as conexao:
+        pagamento = conexao.execute(
+            'SELECT * FROM pagamentos WHERE id=?', (pagamento_id,)
+        ).fetchone()
+        if not pagamento:
+            return
+        conexao.execute(
+            'INSERT INTO historico (cliente_id, cliente_nome, acao, detalhes) '
+            'VALUES (?, ?, ?, ?)',
+            (pagamento['cliente_id'], pagamento['cliente_nome'], 'PAGAMENTO',
+             observacao[:500]),
+        )
+        registrar_evento(
+            conexao,
+            acao="financeiro.recebivel.observacao_manual",
+            entidade="pagamento",
+            entidade_id=pagamento_id,
+            valores_novos={"observacao": observacao[:500]},
+        )
+
+
 def excluir_pagamento(pagamento_id) -> int:
     """
-    Cancela uma cobranca removendo o registro, e so se ela ainda estiver
-    Pendente. Devolve quantas linhas foram apagadas (0 ou 1).
+    Cancela uma cobranca pendente marcando-a como 'Cancelado'.
+
+    Nao apaga a linha, e a mudanca e deliberada. Registro financeiro apagado
+    e registro que nao existe: some do extrato, some da conferencia com o
+    Asaas (que continua conhecendo aquela cobranca pelo `asaas_payment_id`) e
+    some da propria trilha de auditoria, que passa a ter um evento de
+    cancelamento apontando para um id sem destino.
+
+    'Cancelado' ja era um status do dominio -- as metricas do dashboard e os
+    filtros da tela ja o tratavam. O que faltava era o caminho de cancelamento
+    usa-lo.
+
+    O nome da funcao fica como esta por ser o contrato que a rota DELETE e os
+    chamadores conhecem; o docstring e o que descreve o comportamento.
     """
     with conectar() as conexao:
         pagamento = conexao.execute('SELECT * FROM pagamentos WHERE id=?', (pagamento_id,)).fetchone()
-        cursor = conexao.execute("DELETE FROM pagamentos WHERE id=? AND status='Pendente'", (pagamento_id,))
+        cursor = conexao.execute(
+            "UPDATE pagamentos SET status='Cancelado' WHERE id=? AND status='Pendente'",
+            (pagamento_id,),
+        )
         if pagamento and cursor.rowcount > 0:
             conexao.execute(
                 'INSERT INTO historico (cliente_id, cliente_nome, acao, detalhes) VALUES (?, ?, ?, ?)',
                 (pagamento['cliente_id'], pagamento['cliente_nome'], 'PAGAMENTO',
                  f'Cobranca cancelada: R$ {pagamento["valor"]:.2f}'),
             )
+            novo = conexao.execute(
+                'SELECT * FROM pagamentos WHERE id=?', (pagamento_id,)
+            ).fetchone()
             registrar_evento(
                 conexao,
                 acao="financeiro.recebivel.cancelado",
                 entidade="pagamento",
                 entidade_id=pagamento_id,
                 valores_anteriores=pagamento,
+                valores_novos=novo,
             )
         return cursor.rowcount
 

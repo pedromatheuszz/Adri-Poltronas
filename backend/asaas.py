@@ -179,11 +179,14 @@ def obter_cliente(asaas_customer_id):
 # ---------------------------------------------------------------------------
 # Cobranças – PIX
 # ---------------------------------------------------------------------------
-def criar_cobranca_pix(asaas_customer_id, valor, data_vencimento, descricao=""):
+def criar_cobranca_pix(asaas_customer_id, valor, data_vencimento, descricao="",
+                       referencia_externa=""):
     """
     Cria uma cobrança Pix no Asaas.
     valor: float (ex: 150.00)
     data_vencimento: str 'YYYY-MM-DD'
+    referencia_externa: identificador nosso, para reconciliar depois de uma
+        chamada cujo resultado se perdeu. Ver `emissao.py`.
     Retorna dict com dados da cobrança ou '_erro'.
     """
     body = {
@@ -194,6 +197,8 @@ def criar_cobranca_pix(asaas_customer_id, valor, data_vencimento, descricao=""):
     }
     if descricao:
         body["description"] = descricao
+    if referencia_externa:
+        body["externalReference"] = referencia_externa
     return _request("POST", "/payments", body)
 
 
@@ -208,7 +213,8 @@ def obter_qr_code_pix(asaas_payment_id):
 # ---------------------------------------------------------------------------
 # Cobranças – BOLETO
 # ---------------------------------------------------------------------------
-def criar_cobranca_boleto(asaas_customer_id, valor, data_vencimento, descricao=""):
+def criar_cobranca_boleto(asaas_customer_id, valor, data_vencimento, descricao="",
+                          referencia_externa=""):
     """
     Cria uma cobrança Boleto no Asaas.
     Retorna dict com dados da cobrança (inclui 'bankSlipUrl').
@@ -222,6 +228,8 @@ def criar_cobranca_boleto(asaas_customer_id, valor, data_vencimento, descricao="
     }
     if descricao:
         body["description"] = descricao
+    if referencia_externa:
+        body["externalReference"] = referencia_externa
     return _request("POST", "/payments", body)
 
 
@@ -231,6 +239,30 @@ def criar_cobranca_boleto(asaas_customer_id, valor, data_vencimento, descricao="
 def obter_pagamento(asaas_payment_id):
     """Retorna dados completos de uma cobrança pelo ID."""
     return _request_get(f"/payments/{asaas_payment_id}")
+
+
+def buscar_por_referencia_externa(referencia_externa):
+    """
+    Procura a cobrança que carrega esta referência nossa.
+
+    É o que torna a emissão recuperável. Criar uma cobrança é uma chamada de
+    rede: o Asaas pode ter processado e a resposta ter se perdido no caminho.
+    Sem uma pergunta como esta, o sistema não teria como distinguir "não foi
+    criada" de "foi criada e eu não fiquei sabendo" — e a segunda tentativa
+    geraria uma segunda cobrança para o mesmo cliente.
+
+    Devolve o dict da cobrança, `None` quando não existe nenhuma, ou um dict
+    com '_erro' quando a própria consulta falhou. Os três casos são
+    diferentes e quem chama precisa tratá-los separadamente: em caso de erro,
+    emitir de novo seria justamente o risco que este mecanismo evita.
+    """
+    from urllib.parse import quote
+
+    resultado = _request_get(f"/payments?externalReference={quote(str(referencia_externa))}")
+    if resultado.get('_erro'):
+        return resultado
+    dados = resultado.get('data') or []
+    return dados[0] if dados else None
 
 
 def obter_status_pagamento(asaas_payment_id):

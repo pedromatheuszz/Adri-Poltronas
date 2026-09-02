@@ -5,7 +5,7 @@
 // IMPORTANTE: incremente CACHE_NAME sempre que o HTML, o CSS ou o JS mudarem.
 // O handler de `activate` apaga todo cache cujo nome nao esteja nesta lista, e
 // e isso que expurga a versao anterior da maquina do usuario.
-const CACHE_NAME = 'adri-poltronas-v9';
+const CACHE_NAME = 'adri-poltronas-v15';
 
 // Assets proprios: precache obrigatorio. Sao servidos pelo backend local,
 // entao addAll() so falha aqui se algo estiver de fato errado no bundle.

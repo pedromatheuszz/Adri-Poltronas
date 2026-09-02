@@ -7,6 +7,7 @@ from flask import Blueprint, request, jsonify
 import database
 import validators
 import asaas
+from erp.financeiro import emissao, reconciliacao
 
 log = logging.getLogger("adri.pagamentos")
 
@@ -104,61 +105,184 @@ def excluir_pagamento(pagamento_id):
 
 @pagamentos_bp.route('/<int:pagamento_id>/confirmar', methods=['POST'])
 def confirmar_pagamento(pagamento_id):
+    """
+    Marca uma cobranca como recebida.
+
+    Quando ha cobranca no Asaas, confere com o gateway antes. Sem essa
+    checagem, um clique marcava 'Recebido' com a cobranca ainda aberta la, e o
+    ERP passava a declarar uma receita que ninguem tinha recebido -- o pior
+    tipo de erro num modulo financeiro, porque o numero errado parece certo.
+
+    O operador pode forcar (`{"forcar": true}`) para o caso legitimo de
+    pagamento feito por fora do gateway. Forcar exige motivo, e o motivo vai
+    para a trilha de auditoria: e a diferenca entre uma excecao registrada e
+    um numero que ninguem sabe explicar.
+    """
     existente = database.obter_pagamento_por_id(pagamento_id)
     if not existente:
         return jsonify({"erro": "Pagamento nao encontrado."}), 404
+    if existente.get('status') == 'Recebido':
+        return jsonify({"mensagem": "Pagamento ja estava confirmado."}), 200
+
+    corpo = request.get_json(silent=True) or {}
+    forcar = bool(corpo.get('forcar'))
+    motivo = (corpo.get('motivo') or '').strip()
+
+    if forcar:
+        if not motivo:
+            return jsonify({
+                "erro": "Para confirmar sem conferir com o Asaas, informe o motivo.",
+            }), 400
+    elif asaas.esta_configurado():
+        pode, detalhe = reconciliacao.confirmar_com_o_gateway(
+            database.conectar, asaas, existente
+        )
+        if not pode:
+            return jsonify({"erro": detalhe, "pode_forcar": True}), 409
+
     database.atualizar_pagamento(pagamento_id, status='Recebido',
         data_pagamento=time.strftime('%Y-%m-%d'))
+    if forcar:
+        log.warning(
+            "[PAGAMENTO] Confirmacao manual forcada em %s. Motivo: %s",
+            pagamento_id, motivo,
+        )
+        database.registrar_observacao_de_pagamento(
+            pagamento_id, f"Confirmacao manual sem conferencia no gateway: {motivo}"
+        )
     return jsonify({"mensagem": "Pagamento confirmado!"}), 200
+
+
+@pagamentos_bp.route('/reconciliar', methods=['POST'])
+def reconciliar_pagamentos():
+    """
+    Pergunta ao Asaas o estado atual das cobrancas em aberto.
+
+    E o que substitui o webhook numa instalacao normal: o Flask escuta em
+    loopback, entao um servidor na internet nunca alcanca este endereco. Uma
+    consulta de saida atravessa qualquer firewall e nao expoe nada.
+    """
+    if not asaas.esta_configurado():
+        return jsonify({"erro": "Integracao Asaas nao configurada."}), 503
+    resumo = reconciliacao.reconciliar(database.conectar, asaas)
+    return jsonify(resumo), 200
+
+
+def _dados_da_cobranca_existente(pagamento: dict) -> dict:
+    """Resposta para uma cobranca que ja existe -- nao cria nada."""
+    tipo = pagamento.get('tipo_pagamento', 'Pix')
+    resposta = {
+        "mensagem": f"Cobranca {tipo} ja emitida para este pagamento.",
+        "asaas_payment_id": pagamento.get('asaas_payment_id', ''),
+        "tipo": tipo,
+        "ja_existia": True,
+    }
+    if tipo == 'Pix':
+        resposta['pix_payload'] = pagamento.get('pix_payload', '')
+        resposta['pix_qr_code'] = pagamento.get('pix_qr_code', '')
+    elif tipo == 'Boleto':
+        resposta['boleto_url'] = pagamento.get('boleto_url', '')
+        resposta['nosso_numero'] = pagamento.get('nosso_numero', '')
+    return resposta
 
 
 @pagamentos_bp.route('/gerar-cobranca', methods=['POST'])
 def gerar_cobranca():
-    """Gera cobranca Pix ou Boleto no Asaas e retorna os dados."""
+    """
+    Gera cobranca Pix ou Boleto no Asaas.
+
+    Idempotente: a mesma chamada repetida devolve a MESMA cobranca em vez de
+    criar outra. Ver `erp/financeiro/emissao.py` para o porque -- em resumo,
+    criar cobranca e uma chamada de rede, e sem registrar a intencao antes de
+    sair para a rede nao ha como distinguir "nao criou" de "criou e a resposta
+    se perdeu". O cliente recebia duas cobrancas do mesmo valor.
+    """
     if not asaas.esta_configurado():
         return jsonify({"erro": "Integracao Asaas nao configurada. Defina ASAAS_API_KEY."}), 503
+
     dados = request.get_json(silent=True) or {}
     pagamento_id = validators.inteiro_positivo(dados.get('pagamento_id'))
     if pagamento_id is None:
         return jsonify({"erro": "pagamento_id e obrigatorio e deve ser um numero positivo."}), 400
+
     pagamento = database.obter_pagamento_por_id(pagamento_id)
     if not pagamento:
         return jsonify({"erro": "Pagamento nao encontrado."}), 404
+
+    # 1. Ja emitida. Nao se cria outra: devolve-se a que existe.
+    if pagamento.get('asaas_payment_id'):
+        return jsonify(_dados_da_cobranca_existente(pagamento)), 200
+
+    # 2. Ha uma tentativa anterior em aberto. Pergunta ao Asaas antes de
+    #    emitir -- e o passo que evita a segunda cobranca.
+    estado_anterior = (pagamento.get('asaas_emissao_estado') or '').strip()
+    if estado_anterior in (emissao.ESTADO_INICIADA, emissao.ESTADO_FALHOU):
+        try:
+            recuperada = emissao.reconciliar_emissao_em_aberto(
+                database.conectar, pagamento, asaas
+            )
+        except emissao.EmissaoJaEmCurso as erro:
+            return jsonify({"erro": str(erro)}), 409
+        if recuperada:
+            atual = database.obter_pagamento_por_id(pagamento_id) or pagamento
+            return jsonify(_dados_da_cobranca_existente(atual)), 200
+
+    # 3. Reivindica a emissao. O UPDATE condicional la dentro e o que resolve
+    #    clique duplo e requisicoes simultaneas.
+    try:
+        referencia, pagamento = emissao.reivindicar(database.conectar, pagamento_id)
+    except emissao.EmissaoNaoPermitida as erro:
+        return jsonify({"erro": str(erro)}), 409
+    except emissao.EmissaoJaEmCurso as erro:
+        return jsonify({"erro": str(erro)}), 409
+
     cliente = database.obter_cliente_por_id(pagamento['cliente_id'])
     if not cliente:
+        emissao.falhar(database.conectar, pagamento_id, "cliente inexistente")
         return jsonify({"erro": "Cliente nao encontrado."}), 404
+
     asaas_customer_id = database.obter_ou_criar_cliente_asaas(
         pagamento['cliente_id'], cliente['nome'],
         cidade=cliente.get('cidade'), bairro=cliente.get('bairro'),
         rua=cliente.get('rua'), cep=cliente.get('cep'),
     )
     if not asaas_customer_id:
+        emissao.falhar(database.conectar, pagamento_id, "falha ao criar cliente no Asaas")
         return jsonify({"erro": "Falha ao criar cliente no Asaas."}), 502
+
     tipo = pagamento.get('tipo_pagamento', 'Pix')
     if tipo == 'Pix':
         resultado = asaas.criar_cobranca_pix(
             asaas_customer_id, pagamento['valor'], pagamento['data_vencimento'],
-            pagamento.get('descricao', ''),
+            pagamento.get('descricao', ''), referencia_externa=referencia,
         )
     elif tipo == 'Boleto':
         resultado = asaas.criar_cobranca_boleto(
             asaas_customer_id, pagamento['valor'], pagamento['data_vencimento'],
-            pagamento.get('descricao', ''),
+            pagamento.get('descricao', ''), referencia_externa=referencia,
         )
     else:
+        emissao.falhar(database.conectar, pagamento_id, f"tipo invalido: {tipo}")
         return jsonify({"erro": "Tipo de pagamento invalido."}), 400
+
     if resultado.get('_erro'):
+        # A referencia fica gravada: se a falha foi de rede, a cobranca pode
+        # ter sido criada assim mesmo, e a proxima tentativa vai perguntar.
+        emissao.falhar(database.conectar, pagamento_id, str(resultado.get('_erro')))
         return jsonify({"erro": "Falha ao gerar cobranca no Asaas.", "detalhes": resultado}), 502
+
     asaas_payment_id = resultado.get('id', '')
-    update_fields = {'asaas_payment_id': asaas_payment_id}
+    campos_extras = {}
     if tipo == 'Boleto':
-        update_fields['boleto_url'] = resultado.get('bankSlipUrl', '')
-        update_fields['nosso_numero'] = resultado.get('nossoNumero', '')
-    database.atualizar_pagamento(pagamento_id, **update_fields)
+        campos_extras['boleto_url'] = resultado.get('bankSlipUrl', '')
+        campos_extras['nosso_numero'] = resultado.get('nossoNumero', '')
+    emissao.concluir(database.conectar, pagamento_id, asaas_payment_id, **campos_extras)
+
     resposta = {
         "mensagem": f"Cobranca {tipo} gerada com sucesso!",
         "asaas_payment_id": asaas_payment_id,
         "tipo": tipo,
+        "ja_existia": False,
     }
     if tipo == 'Pix':
         pix_data = asaas.obter_qr_code_pix(asaas_payment_id)

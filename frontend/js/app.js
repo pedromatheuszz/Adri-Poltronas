@@ -188,6 +188,9 @@ function confirmarAcao(opcoes) {
     var elMsg = document.getElementById('modalConfirmarMsg');
     var btnOk = document.getElementById('modalConfirmarOk');
     var btnCancelar = document.getElementById('modalConfirmarCancelar');
+    var campo = document.getElementById('modalConfirmarCampo');
+    var rotulo = document.getElementById('modalConfirmarRotulo');
+    var entrada = document.getElementById('modalConfirmarTexto');
 
     caixa.setAttribute('data-variante', opcoes.variante || 'perigo');
     elIcone.innerHTML = ICONES_CONFIRMACAO[opcoes.icone] || ICONES_CONFIRMACAO.alerta;
@@ -195,6 +198,22 @@ function confirmarAcao(opcoes) {
     elMsg.textContent = opcoes.mensagem || '';
     btnOk.textContent = opcoes.textoConfirmar || 'Confirmar';
     btnCancelar.textContent = opcoes.textoCancelar || 'Cancelar';
+
+    // `campoTexto` transforma a confirmacao numa pergunta: usado onde a
+    // decisao do operador contraria o que o sistema apuraria sozinho e o
+    // motivo precisa acompanhar o registro. Com ele a Promise resolve com o
+    // texto (ou null ao cancelar) em vez de um booleano -- e como texto vazio
+    // e falsy, quem so testa `if (!resposta)` continua funcionando.
+    var pedeTexto = !!(opcoes.campoTexto && campo && entrada);
+    if (campo) campo.hidden = !pedeTexto;
+    if (pedeTexto) {
+        rotulo.textContent = opcoes.campoTexto.rotulo || 'Motivo';
+        entrada.placeholder = opcoes.campoTexto.exemplo || '';
+        entrada.value = '';
+        btnOk.disabled = true;
+    } else if (btnOk.disabled) {
+        btnOk.disabled = false;
+    }
 
     return new Promise(function(resolver) {
         var finalizado = false;
@@ -207,16 +226,30 @@ function confirmarAcao(opcoes) {
             btnCancelar.removeEventListener('click', aoCancelar);
             overlay.removeEventListener('click', aoClicarFora);
             document.removeEventListener('keydown', aoTeclar);
+            if (pedeTexto) {
+                entrada.removeEventListener('input', aoDigitar);
+                btnOk.disabled = false;
+            }
             resolver(resultado);
         }
 
-        function aoConfirmar() { encerrar(true); }
-        function aoCancelar() { encerrar(false); }
-        function aoClicarFora(e) { if (e.target === overlay) encerrar(false); }
+        function valorConfirmado() {
+            if (!pedeTexto) return true;
+            return entrada.value.trim();
+        }
+        function valorCancelado() { return pedeTexto ? null : false; }
+
+        function aoDigitar() { btnOk.disabled = !entrada.value.trim(); }
+        function aoConfirmar() {
+            if (pedeTexto && !entrada.value.trim()) return;
+            encerrar(valorConfirmado());
+        }
+        function aoCancelar() { encerrar(valorCancelado()); }
+        function aoClicarFora(e) { if (e.target === overlay) encerrar(valorCancelado()); }
         function aoTeclar(e) {
-            if (e.key === 'Escape') encerrar(false);
+            if (e.key === 'Escape') encerrar(valorCancelado());
             else if (e.key === 'Enter' && document.activeElement !== btnCancelar) {
-                e.preventDefault(); encerrar(true);
+                e.preventDefault(); aoConfirmar();
             }
         }
 
@@ -224,11 +257,13 @@ function confirmarAcao(opcoes) {
         btnCancelar.addEventListener('click', aoCancelar);
         overlay.addEventListener('click', aoClicarFora);
         document.addEventListener('keydown', aoTeclar);
+        if (pedeTexto) entrada.addEventListener('input', aoDigitar);
 
         abrirModal(overlay);
-        // Foco no cancelar: acao destrutiva nao deve ser confirmada por engano
-        // quem chegou ali pelo teclado.
-        setTimeout(function(){ btnCancelar.focus(); }, 60);
+        // Com campo, o foco vai para ele: o operador chegou ali para escrever.
+        // Sem campo, foco no cancelar -- acao destrutiva nao deve ser
+        // confirmada por engano por quem chegou pelo teclado.
+        setTimeout(function(){ (pedeTexto ? entrada : btnCancelar).focus(); }, 60);
     });
 }
 
@@ -297,7 +332,15 @@ function trocarAba(aba) {
     if (aba === 'entregas') { carregarEntregas(); }
     if (aba === 'mapa') { setTimeout(function() { initMapa(); carregarMapaClientes(); }, 100); }
     if (aba === 'relatorios') { carregarRelatorio(); }
-    if (aba === 'pagamentos') { carregarPagamentos(); }
+    if (aba === 'clientes') { atualizarAvisoDePendenciasComErro(); }
+    if (aba === 'pagamentos') {
+        carregarPagamentos();
+        // Conciliacao silenciosa ao abrir a aba: e o momento em que o
+        // operador vai olhar os numeros, e o webhook do Asaas nao chega aqui.
+        // `silenciosa` para nao poluir a tela com toast a cada troca de aba --
+        // so avisa quando algo realmente mudou.
+        conciliarPagamentos(true);
+    }
 }
 
 var chartInstances = {};
@@ -406,6 +449,44 @@ document.addEventListener('DOMContentLoaded', function() {
 
     var btnTodasLidas = document.getElementById('btnMarcarTodasLidas');
     if (btnTodasLidas) btnTodasLidas.addEventListener('click', marcarTodasNotificacoesLidas);
+
+    var btnConciliar = document.getElementById('btnConciliarAsaas');
+    if (btnConciliar) btnConciliar.addEventListener('click', function(){ conciliarPagamentos(false); });
+
+    var btnMais = document.getElementById('btnCarregarMaisClientes');
+    if (btnMais) btnMais.addEventListener('click', carregarMaisClientes);
+
+    var btnRestaurar = document.getElementById('btnRestaurarBanco');
+    if (btnRestaurar) btnRestaurar.addEventListener('click', abrirModalRestaurar);
+
+    var fecharRestaurar = document.getElementById('modalRestaurarFechar');
+    if (fecharRestaurar) fecharRestaurar.addEventListener('click', function(){ fecharModal('modalRestaurar'); });
+
+    var listaCopias = document.getElementById('listaCopias');
+    if (listaCopias) {
+        listaCopias.addEventListener('click', function(e) {
+            var botao = e.target.closest('button[data-restaurar]');
+            if (botao) restaurarCopia(botao.getAttribute('data-restaurar'));
+        });
+    }
+
+    var btnVerPendencias = document.getElementById('btnVerPendenciasComErro');
+    if (btnVerPendencias) btnVerPendencias.addEventListener('click', abrirPendenciasComErro);
+
+    var fecharPendencias = document.getElementById('modalPendenciasFechar');
+    if (fecharPendencias) fecharPendencias.addEventListener('click', function(){ fecharModal('modalPendenciasComErro'); });
+
+    var listaPendencias = document.getElementById('listaPendenciasComErro');
+    if (listaPendencias) {
+        // Delegacao: os botoes nascem a cada abertura do modal, e prende-los
+        // um a um vazaria listener a cada renderizacao.
+        listaPendencias.addEventListener('click', function(e) {
+            var botao = e.target.closest('button[data-reenviar], button[data-descartar]');
+            if (botao) _acaoNaPendenciaComErro(botao);
+        });
+    }
+
+    atualizarAvisoDePendenciasComErro();
 
     var modalNomeCancelar = document.getElementById('modalNomeCancelar');
     var modalNomeConfirmar = document.getElementById('modalNomeConfirmar');
@@ -986,27 +1067,66 @@ function fecharNotificacoes() {
     if (botao) botao.setAttribute('aria-expanded', 'false');
 }
 
+// Paginacao da lista de clientes.
+//
+// Ate a versao 1.1 a tela pedia TODOS os clientes e desenhava todos de uma vez.
+// Com alguns milhares de registros isso e uma pausa visivel a cada troca de
+// aba; com dezenas de milhares, a aba trava -- montar dezenas de milhares de
+// <tr> por concatenacao de string nao tem como sair barato.
+//
+// 200 por pagina cobre com folga a operacao de um dia e mantem o primeiro
+// desenho instantaneo. O resto vem por demanda.
+var TAMANHO_DA_PAGINA = 200;
+var _clientesCarregados = [];
+var _totalDeClientes = 0;
+var _buscaDaPagina = '';
+
 async function carregarClientes() {
     var busca = (document.getElementById('inputPesquisa') || {}).value || '';
-    busca = busca.trim();
+    _buscaDaPagina = busca.trim();
+    _clientesCarregados = [];
+    _totalDeClientes = 0;
     // Esqueleto antes da chamada: a lista mantem a altura e o operador ve que
     // algo esta em andamento, em vez de encarar a tabela vazia da consulta
     // anterior ate a resposta chegar.
     mostrarEsqueleto('tabelaClientes', 6, 5);
-    var r = await tentarBackend(API_URL+'?busca='+encodeURIComponent(busca));
+    return _carregarPaginaDeClientes(true);
+}
+
+async function carregarMaisClientes() {
+    return _carregarPaginaDeClientes(false);
+}
+
+async function _carregarPaginaDeClientes(primeira) {
+    var url = API_URL + '?busca=' + encodeURIComponent(_buscaDaPagina) +
+              '&limite=' + TAMANHO_DA_PAGINA +
+              '&deslocamento=' + _clientesCarregados.length;
+    var r = await tentarBackend(url);
     if (r.semBackend) { carregarClientesOffline(true); return; }
     try {
         if (!r.resposta.ok) throw new Error('Falha');
-        var clientes = await r.resposta.json();
-        // Cache para uso offline. `sincronizarCache` (e nao `cacheClientes`)
-        // porque esta lista e a autoritativa: o que nao esta nela precisa
-        // sair do cache, senao ficam residuos de registros ja excluidos e de
-        // ids temporarios negativos criados offline.
-        if (typeof OfflineManager !== 'undefined' && Array.isArray(clientes)) {
-            OfflineManager.sincronizarCache(clientes);
+        var pagina = await r.resposta.json();
+        if (!Array.isArray(pagina)) pagina = [];
+
+        var total = parseInt(r.resposta.headers.get('X-Total-Registros') || '', 10);
+        _totalDeClientes = isNaN(total) ? (_clientesCarregados.length + pagina.length) : total;
+        _clientesCarregados = _clientesCarregados.concat(pagina);
+
+        // Cache para uso offline. `sincronizarCache` poda o que nao esta na
+        // lista -- correto quando ela e a base inteira, destrutivo quando e
+        // uma pagina: a segunda pagina seria lida como "excluida no servidor".
+        // Por isso a poda so acontece quando tudo coube numa pagina so.
+        if (typeof OfflineManager !== 'undefined') {
+            if (_clientesCarregados.length >= _totalDeClientes) {
+                OfflineManager.sincronizarCache(_clientesCarregados);
+            } else {
+                OfflineManager.cacheClientes(pagina);
+            }
         }
-        clientes = clientes.filter(clientePassaFiltro);
+
+        var clientes = _clientesCarregados.filter(clientePassaFiltro);
         renderizarTabela(clientes);
+        _atualizarRodapeDaLista(clientes.length);
     } catch (error) {
         console.error('Erro ao carregar do servidor:', error);
         renderizarTabela([]);
@@ -1046,15 +1166,22 @@ async function registrarNovoCliente(dados) {
     var r = await tentarBackend(API_URL, { method: 'POST', headers: CABECALHOS_JSON, body: JSON.stringify(dados) });
     if (r.semBackend) {
         try {
-            await OfflineManager.savePendingAction('create', dados);
-            exibirToast('Salvo offline! Sera sincronizado quando voltar online.', 'success');
-            cancelarEdicao();
-            // Adicionar ao cache local com ID temporario negativo
-            var cached = await OfflineManager.getCachedClientes();
-            var novoId = -Date.now(); // ID temporario negativo para evitar conflito
+            // O id temporario nasce ANTES de enfileirar, e vai junto na
+            // pendencia. Era o elo que faltava: sem ele nada ligava a criacao
+            // na fila ao registro que o operador ve na tela, e por isso uma
+            // edicao feita em seguida ia contra o id negativo (404, descartada
+            // em silencio) e uma exclusao deixava a criacao viva na fila (o
+            // cliente reaparecia ao sincronizar).
+            var novoId = -Date.now();
             dados.id = novoId;
             dados.criado_em = new Date().toISOString();
-            dados._offline = true; // Flag para identificar offline
+            dados._offline = true;
+
+            await OfflineManager.savePendingAction('create', dados, novoId);
+            exibirToast('Salvo offline! Sera sincronizado quando voltar online.', 'success');
+            cancelarEdicao();
+
+            var cached = await OfflineManager.getCachedClientes();
             cached.push(dados);
             await OfflineManager.cacheClientes(cached);
             carregarClientesOffline(false);
@@ -1074,7 +1201,14 @@ async function atualizarClienteServidor(id, dados) {
     if (r.semBackend) {
         try {
             dados.id = id;
-            await OfflineManager.savePendingAction('update', dados);
+            if (id < 0) {
+                // Cliente que so existe aqui: o servidor nem conhece o
+                // registro, entao nao ha PUT a enviar. A edicao e absorvida
+                // pela criacao que ainda esta na fila.
+                await OfflineManager.mesclarNaCriacaoPendente(id, dados);
+            } else {
+                await OfflineManager.savePendingAction('update', dados);
+            }
             exibirToast('Atualizacao salva offline! Sera sincronizado quando voltar online.', 'success');
             cancelarEdicao();
             // Atualizar cache local
@@ -1110,7 +1244,11 @@ async function excluirClienteServidor(id) {
     if (r.semBackend) {
         try {
             if (id < 0) {
-                exibirToast('Cliente removido do cache offline.', 'success');
+                // Cancela a criacao que ainda esta na fila. Limpar so o cache,
+                // como antes, deixava o POST pendente intacto -- e o cliente
+                // excluido reaparecia assim que a conexao voltasse.
+                await OfflineManager.cancelarCriacaoPendente(id);
+                exibirToast('Cliente removido antes de ser enviado.', 'success');
             } else {
                 await OfflineManager.savePendingAction('delete', { id: id });
                 exibirToast('Exclusao salva offline! Sera sincronizado quando voltar online.', 'success');
@@ -1131,6 +1269,100 @@ async function excluirClienteServidor(id) {
         cancelarEdicao(); carregarClientes(); carregarDashboardGraficos();
     } catch (erro) { exibirToast('Erro: ' + erro.message, 'error'); }
 }
+
+
+// -----------------------------------------------------------------------------
+// Alteracoes offline que o servidor recusou
+//
+// A fila de sincronizacao apagava, sem aviso, tudo que o servidor recusasse de
+// forma definitiva (4xx) ou que esgotasse as tentativas. Na pratica: o
+// operador cadastrava um cliente sem conexao, o servidor recusava o CEP, e o
+// cadastro simplesmente desaparecia. Ninguem ficava sabendo.
+//
+// Agora essas operacoes vao para uma fila de erros. Estas funcoes sao a parte
+// visivel dela: um aviso na aba de clientes e um modal para reenviar ou
+// descartar cada uma com conhecimento de causa.
+// -----------------------------------------------------------------------------
+var ACAO_LEGIVEL = { create: 'Cadastro', update: 'Edicao', delete: 'Exclusao' };
+
+async function atualizarAvisoDePendenciasComErro() {
+    var aviso = document.getElementById('avisoPendenciasComErro');
+    if (!aviso || typeof OfflineManager === 'undefined') return;
+    try {
+        var falhas = await OfflineManager.getDeadLetters();
+        if (!falhas.length) { aviso.hidden = true; return; }
+        aviso.hidden = false;
+        var detalhe = document.getElementById('avisoPendenciasDetalhe');
+        if (detalhe) {
+            detalhe.textContent = falhas.length === 1
+                ? '1 alteracao feita offline foi recusada pelo servidor.'
+                : falhas.length + ' alteracoes feitas offline foram recusadas pelo servidor.';
+        }
+    } catch (erro) {
+        console.error('Nao foi possivel ler a fila de erros:', erro);
+    }
+}
+
+async function abrirPendenciasComErro() {
+    var lista = document.getElementById('listaPendenciasComErro');
+    if (!lista) return;
+    var falhas = await OfflineManager.getDeadLetters();
+
+    if (!falhas.length) {
+        lista.innerHTML = '<div class="empty-state"><p>Nenhuma alteracao pendente de correcao.</p></div>';
+    } else {
+        lista.innerHTML = falhas.map(function(f) {
+            var nome = (f.dados && f.dados.nome) ? f.dados.nome : ('registro #' + (f.dados && f.dados.id));
+            return '<div class="pendencia-erro">' +
+                '<div class="pendencia-erro-cabecalho">' +
+                    '<span class="pendencia-erro-nome">' +
+                        escaparHtml(ACAO_LEGIVEL[f.action] || f.action) + ': ' + escaparHtml(String(nome)) +
+                    '</span>' +
+                    '<span class="pendencia-erro-quando">' + escaparHtml(formatarQuando(f.timestamp)) + '</span>' +
+                '</div>' +
+                '<div class="pendencia-erro-motivo">' + escaparHtml(f.motivo || 'Motivo nao registrado') + '</div>' +
+                '<div class="pendencia-erro-acoes">' +
+                    '<button type="button" class="btn btn-primary btn-sm" data-reenviar="' + f.id + '">Tentar de novo</button>' +
+                    '<button type="button" class="btn btn-perigo btn-sm" data-descartar="' + f.id + '">Descartar</button>' +
+                '</div>' +
+            '</div>';
+        }).join('');
+    }
+    abrirModal('modalPendenciasComErro');
+}
+
+function formatarQuando(iso) {
+    if (!iso) return '';
+    var data = new Date(iso);
+    return isNaN(data.getTime()) ? '' : data.toLocaleString('pt-BR');
+}
+
+async function _acaoNaPendenciaComErro(elemento) {
+    var idReenviar = elemento.getAttribute('data-reenviar');
+    var idDescartar = elemento.getAttribute('data-descartar');
+
+    if (idReenviar) {
+        await OfflineManager.reenviarDeadLetter(Number(idReenviar));
+        exibirToast('Reenviando...');
+    } else if (idDescartar) {
+        var confirmado = await confirmarAcao({
+            titulo: 'Descartar alteracao',
+            mensagem: 'Esta alteracao sera perdida definitivamente. Deseja continuar?',
+            textoConfirmar: 'Descartar',
+            icone: 'excluir',
+            variante: 'perigo'
+        });
+        if (!confirmado) return;
+        await OfflineManager.descartarDeadLetter(Number(idDescartar));
+    } else {
+        return;
+    }
+
+    await abrirPendenciasComErro();
+    await atualizarAvisoDePendenciasComErro();
+    carregarClientes();
+}
+
 
 // -----------------------------------------------------------------------------
 // Estados de tabela
@@ -1158,6 +1390,32 @@ function mostrarEsqueleto(idTabela, colunas, linhas) {
     var html = '';
     for (var i = 0; i < (linhas || 5); i++) html += '<tr class="skeleton-row">' + celulas + '</tr>';
     tbody.innerHTML = html;
+}
+
+function _atualizarRodapeDaLista(visiveis) {
+    var rodape = document.getElementById('rodapeClientes');
+    var contagem = document.getElementById('contagemClientes');
+    var botao = document.getElementById('btnCarregarMaisClientes');
+    if (!rodape || !contagem || !botao) return;
+
+    var faltam = _totalDeClientes - _clientesCarregados.length;
+    if (faltam <= 0 && _totalDeClientes <= TAMANHO_DA_PAGINA) {
+        // Cabe tudo numa pagina: o rodape so ocuparia espaco.
+        rodape.hidden = true;
+        return;
+    }
+
+    rodape.hidden = false;
+    // Saber que existem 1.240 registros e ver 200 e diferente de achar que ha
+    // 200. A contagem fica visivel enquanto houver mais de uma pagina.
+    contagem.textContent = 'Mostrando ' + visiveis + ' de ' + _totalDeClientes +
+                           (visiveis !== _clientesCarregados.length
+                              ? ' (filtro aplicado sobre ' + _clientesCarregados.length + ' carregados)'
+                              : '');
+    botao.hidden = faltam <= 0;
+    botao.textContent = faltam > 0
+        ? 'Carregar mais ' + Math.min(faltam, TAMANHO_DA_PAGINA)
+        : 'Carregar mais';
 }
 
 function renderizarTabela(clientes) {
@@ -1419,7 +1677,7 @@ function _carimboDeData() {
 }
 
 function fazerBackupJSON() {
-    baixarArquivo('/api/clientes/backup/json',
+    baixarArquivo('/api/backup/json',
         'backup_adri_poltronas_' + _carimboDeData() + '.json',
         'Backup JSON salvo.');
 }
@@ -1436,9 +1694,97 @@ async function fazerBackupSQLite() {
         variante: 'atencao'
     });
     if (!confirmado) return;
-    baixarArquivo('/api/clientes/backup/sqlite',
+    baixarArquivo('/api/backup/sqlite',
         'backup_adri_poltronas_' + _carimboDeData() + '.db',
         'Backup do banco salvo.');
+}
+
+// -----------------------------------------------------------------------------
+// Restauracao de copia
+//
+// As copias eram criadas -- antes de cada migration e uma por dia -- e nao
+// havia caminho de volta pela interface: recuperar exigia fechar o app, achar
+// a pasta em %APPDATA%, entender o nome dos arquivos e sobrescrever o banco na
+// mao. Ninguem descobre que o backup nao presta antes de precisar dele.
+// -----------------------------------------------------------------------------
+var MOTIVO_LEGIVEL = {
+    'pre-migracao': 'antes de atualizar',
+    'diario': 'copia do dia'
+};
+
+async function abrirModalRestaurar() {
+    var lista = document.getElementById('listaCopias');
+    if (!lista) return;
+    lista.innerHTML = '<div class="empty-state"><p>Carregando copias...</p></div>';
+    abrirModal('modalRestaurar');
+
+    var r = await tentarBackend('/api/backup/copias');
+    if (r.semBackend) {
+        lista.innerHTML = '<div class="empty-state"><p>Sem conexao com o servidor local.</p></div>';
+        return;
+    }
+    var dados = await r.resposta.json();
+    var pasta = document.getElementById('modalRestaurarPasta');
+    if (pasta) pasta.textContent = 'Pasta das copias: ' + (dados.pasta || '');
+
+    if (!dados.copias || !dados.copias.length) {
+        lista.innerHTML = '<div class="empty-state"><p>Nenhuma copia disponivel ainda.</p></div>';
+        return;
+    }
+
+    lista.innerHTML = dados.copias.map(function(c) {
+        return '<div class="pendencia-erro">' +
+            '<div class="pendencia-erro-cabecalho">' +
+                '<span class="pendencia-erro-nome">' + escaparHtml(c.criado_em) + '</span>' +
+                '<span class="pendencia-erro-quando">' + formatarTamanho(c.bytes) + '</span>' +
+            '</div>' +
+            '<div class="pendencia-erro-quando">' +
+                escaparHtml(MOTIVO_LEGIVEL[c.motivo] || c.motivo) + '</div>' +
+            '<div class="pendencia-erro-acoes">' +
+                '<button type="button" class="btn btn-perigo btn-sm" data-restaurar="' +
+                    escaparHtml(c.arquivo) + '">Restaurar esta</button>' +
+            '</div>' +
+        '</div>';
+    }).join('');
+}
+
+function formatarTamanho(bytes) {
+    if (!bytes) return '';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+async function restaurarCopia(arquivo) {
+    var confirmado = await confirmarAcao({
+        titulo: 'Restaurar o banco',
+        mensagem: 'Tudo que foi registrado depois desta copia sera perdido. '
+                + 'O estado atual sera guardado como uma nova copia antes da troca. '
+                + 'Depois de restaurar, feche e abra o aplicativo.',
+        textoConfirmar: 'Restaurar',
+        textoCancelar: 'Voltar',
+        icone: 'alerta',
+        variante: 'perigo'
+    });
+    if (!confirmado) return;
+
+    try {
+        var resp = await fetch('/api/backup/restaurar', {
+            method: 'POST',
+            headers: CABECALHOS_JSON,
+            body: JSON.stringify({ arquivo: arquivo })
+        });
+        var dados = await resp.json();
+        if (!resp.ok) throw new Error(dados.erro || 'Erro');
+        fecharModal('modalRestaurar');
+        // Sem recarregar, as telas ja abertas seguem mostrando os dados de
+        // antes -- e uma edicao feita sobre elas gravaria por cima do que
+        // acabou de ser restaurado.
+        exibirToast(dados.mensagem + ' Recarregando...', 'success');
+        setTimeout(function() { window.location.reload(); }, 2500);
+    } catch (e) {
+        exibirToast('Nao foi possivel restaurar: ' + e.message, 'error');
+    }
 }
 
 function abrirModalImportar() {
@@ -1929,11 +2275,11 @@ function renderizarTabelaPagamentos(pagamentos) {
         var acoes = '';
         if (p.status === 'Pendente') {
             if (!p.asaas_payment_id) {
-                acoes = '<button type="button" class="btn btn-primary btn-sm" onclick="gerarCobranca(' + p.id + ')">Gerar Cobranca</button>';
+                acoes = '<button type="button" class="btn btn-primary btn-sm" data-comando="gerarCobranca" data-id="' + p.id + '">Gerar Cobranca</button>';
             } else {
-                acoes = '<button type="button" class="btn btn-sucesso btn-sm" onclick="confirmarPagamentoLocal(' + p.id + ')">Confirmar</button>';
+                acoes = '<button type="button" class="btn btn-sucesso btn-sm" data-comando="confirmarPagamentoLocal" data-id="' + p.id + '">Confirmar</button>';
             }
-            acoes += '<button type="button" class="btn btn-perigo btn-sm" onclick="cancelarPagamentoLocal(' + p.id + ')">Cancelar</button>';
+            acoes += '<button type="button" class="btn btn-perigo btn-sm" data-comando="cancelarPagamentoLocal" data-id="' + p.id + '">Cancelar</button>';
         }
         var descricao = escaparHtml(p.descricao || '-');
         return '<tr>' +
@@ -1993,7 +2339,7 @@ async function exibirDadosCobranca(pagamentoId) {
                 // (`div[style*="word-break"]`), que quebrava a copia assim que
                 // o CSS inline mudasse.
                 (payload ? '<div class="cobranca-payload" id="cobrancaPayload">' + escaparHtml(payload) + '</div>' : '') +
-                (payload ? '<button type="button" class="btn btn-primary" onclick="copiarPix()">Copiar Copia e Cola</button>' : '') +
+                (payload ? '<button type="button" class="btn btn-primary" data-comando="copiarPix">Copiar Copia e Cola</button>' : '') +
                 '</div>';
         } else if (dados.tipo_pagamento === 'Boleto') {
             var url = urlSegura(dados.boleto_url);
@@ -2023,19 +2369,106 @@ async function copiarPix() {
 }
 
 async function confirmarPagamentoLocal(pagamentoId) {
+    // O backend confere com o Asaas antes de marcar como recebido. Ate aqui
+    // um clique bastava, e o ERP passava a declarar receita que ninguem tinha
+    // recebido -- o pior tipo de erro num modulo financeiro, porque o numero
+    // errado parece certo.
+    var resposta = await _enviarConfirmacao(pagamentoId, null);
+    if (!resposta) return;
+
+    if (resposta.status === 409 && resposta.dados.pode_forcar) {
+        var motivo = await confirmarAcao({
+            titulo: 'Confirmar mesmo assim?',
+            mensagem: resposta.dados.erro,
+            textoConfirmar: 'Confirmar com motivo',
+            textoCancelar: 'Voltar',
+            icone: 'alerta',
+            variante: 'perigo',
+            campoTexto: {
+                rotulo: 'Por que esta confirmando fora do gateway?',
+                exemplo: 'Ex.: pago em dinheiro na retirada'
+            }
+        });
+        if (!motivo) return;
+        resposta = await _enviarConfirmacao(pagamentoId, motivo);
+        if (!resposta) return;
+    }
+
+    if (resposta.ok) {
+        exibirToast(resposta.dados.mensagem || 'Pagamento confirmado!');
+        carregarPagamentos();
+    } else {
+        exibirToast(resposta.dados.erro || 'Erro ao confirmar.', 'error');
+    }
+}
+
+async function _enviarConfirmacao(pagamentoId, motivo) {
+    var corpo = motivo ? { forcar: true, motivo: motivo } : {};
     try {
-        var resp = await fetch('/api/pagamentos/' + pagamentoId + '/confirmar', { method: 'POST' });
-        if (resp.ok) {
-            exibirToast('Pagamento confirmado!');
+        var resp = await fetch('/api/pagamentos/' + pagamentoId + '/confirmar', {
+            method: 'POST',
+            headers: CABECALHOS_JSON,
+            body: JSON.stringify(corpo)
+        });
+        return { ok: resp.ok, status: resp.status, dados: await resp.json().catch(function(){ return {}; }) };
+    } catch(_) {
+        exibirToast('Erro ao confirmar pagamento.', 'error');
+        return null;
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Conciliacao com o Asaas
+//
+// O webhook do Asaas nunca chega numa instalacao normal: o backend escuta em
+// 127.0.0.1:5000 e um servidor na internet nao alcanca o loopback desta
+// maquina. Sem isto, o cliente pagava o Pix, o dinheiro entrava na conta do
+// Asaas e a cobranca continuava "Pendente" na tela ate alguem confirmar na mao.
+//
+// Uma consulta de saida atravessa qualquer firewall e nao expoe nada.
+// -----------------------------------------------------------------------------
+var _conciliacaoEmCurso = false;
+
+async function conciliarPagamentos(silenciosa) {
+    if (_conciliacaoEmCurso) return;
+    _conciliacaoEmCurso = true;
+    var botao = document.getElementById('btnConciliarAsaas');
+    if (botao) botao.disabled = true;
+    if (!silenciosa) exibirToast('Consultando o Asaas...');
+    try {
+        var resp = await fetch('/api/pagamentos/reconciliar', {
+            method: 'POST', headers: CABECALHOS_JSON
+        });
+        var dados = await resp.json();
+        if (resp.status === 503) {
+            if (!silenciosa) exibirToast(dados.erro || 'Asaas nao configurado.', 'error');
+            return;
+        }
+        if (!resp.ok) throw new Error(dados.erro || 'Erro');
+
+        if (dados.atualizadas > 0) {
+            exibirToast(dados.atualizadas + ' cobranca(s) atualizada(s) pelo Asaas.');
             carregarPagamentos();
-        } else { exibirToast('Erro ao confirmar.', 'error'); }
-    } catch(_) { exibirToast('Erro ao confirmar pagamento.', 'error'); }
+            carregarDashboardGraficos();
+        } else if (!silenciosa) {
+            var texto = dados.consultadas
+                ? 'Nada mudou: ' + dados.consultadas + ' cobranca(s) conferida(s).'
+                : 'Nenhuma cobranca em aberto para conferir.';
+            if (dados.falhas) texto += ' ' + dados.falhas + ' nao respondeu(ram).';
+            exibirToast(texto);
+        }
+    } catch(e) {
+        if (!silenciosa) exibirToast('Nao foi possivel conciliar: ' + e.message, 'error');
+    } finally {
+        _conciliacaoEmCurso = false;
+        if (botao) botao.disabled = false;
+    }
 }
 
 async function cancelarPagamentoLocal(pagamentoId) {
     var confirmado = await confirmarAcao({
         titulo: 'Cancelar Cobranca',
-        mensagem: 'Esta cobranca sera cancelada e nao podera ser recuperada. Deseja continuar?',
+        mensagem: 'Esta cobranca sera marcada como cancelada. O registro continua no historico para conferencia. Deseja continuar?',
         textoConfirmar: 'Cancelar cobranca',
         textoCancelar: 'Voltar',
         icone: 'alerta',
@@ -2210,3 +2643,89 @@ async function carregarMapaClientes() {
     }
 }
 
+
+// -----------------------------------------------------------------------------
+// Comandos declarativos
+//
+// Substituem os 36 handlers `onclick=` que viviam no HTML (mais quatro
+// montados em template string aqui e um no comercial.js). O motivo nao e
+// estilo: enquanto existir um `onclick=` no markup, a Content Security Policy
+// precisa liberar `script-src 'unsafe-inline'` -- e essa liberacao vale para
+// TODO script inline da pagina, inclusive um que venha a ser injetado por um
+// campo de cadastro mal escapado. Sem os handlers, a politica recusa script
+// inline por completo.
+//
+// O atributo e `data-comando`, e nao `data-acao`, porque `data-acao` ja tem
+// dono: as notificacoes o usam com os valores "lida", "naolida" e "entrega",
+// despachados por um ouvinte proprio na lista. Dois despachantes sobre o mesmo
+// atributo disputariam os mesmos elementos.
+//
+// A LISTA BRANCA e o que torna isto seguro. Um ouvinte delegado que pegasse o
+// nome do atributo e o procurasse direto em `window` transformaria qualquer
+// HTML injetado numa forma de chamar qualquer funcao do aplicativo. Aqui, o
+// nome so vale se estiver declarado abaixo.
+//
+// A resolucao acontece no clique, e nao no carregamento: parte destas funcoes
+// vive no comercial.js, que carrega depois deste arquivo. Um mapa montado
+// agora com referencias diretas quebraria com ReferenceError.
+//
+// `data-arg` vira string; `data-id` vira numero. Dois atributos em vez de
+// adivinhar o tipo -- adivinhacao erraria em CEP com zero a esquerda e em nome
+// de modal que pareca numero.
+// -----------------------------------------------------------------------------
+var COMANDOS_PERMITIDOS = [
+    'abrirFormularioEntrega',
+    'abrirFormularioPedido',
+    'abrirFormularioProduto',
+    'abrirModalNovoRecebimento',
+    'abrirNotificacoes',
+    'adicionarItemAoPedido',
+    'alternarSidebar',
+    'aplicarFiltros',
+    'atualizarNotificacoes',
+    'cancelarPagamentoLocal',
+    'carregarPagamentos',
+    'carregarRelatorio',
+    'conectarMicrosoft',
+    'confirmarPagamentoLocal',
+    'copiarPix',
+    'enviarParaExcel',
+    'executarImportacao',
+    'exportarRelatorio',
+    'fazerBackupSQLite',
+    'fecharModal',
+    'fecharModalCobranca',
+    'fecharModalNovoRecebimento',
+    'fecharNotificacoes',
+    'gerarCobranca',
+    'limparFiltros',
+    'sugerirBairro',
+    'toggleFiltro',
+    'toggleModoSelecao',
+    'toggleTheme',
+    'trocarAba'
+];
+
+function _despacharComando(evento) {
+    var alvo = evento.target.closest('[data-comando]');
+    if (!alvo) return;
+
+    var nome = alvo.getAttribute('data-comando');
+    if (COMANDOS_PERMITIDOS.indexOf(nome) === -1) {
+        console.warn('[comando] fora da lista branca:', nome);
+        return;
+    }
+    var funcao = window[nome];
+    if (typeof funcao !== 'function') {
+        console.warn('[comando] nao encontrado:', nome);
+        return;
+    }
+
+    var id = alvo.getAttribute('data-id');
+    if (id !== null) { funcao(Number(id)); return; }
+    var arg = alvo.getAttribute('data-arg');
+    if (arg !== null) { funcao(arg); return; }
+    funcao();
+}
+
+document.addEventListener('click', _despacharComando);
