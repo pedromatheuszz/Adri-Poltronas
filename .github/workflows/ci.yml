@@ -297,9 +297,17 @@ jobs:
     # do bundle) e o electron-builder. Os dois quebram por motivos que nenhum
     # teste de unidade alcanca, e quebravam na maquina de quem empacota.
     #
-    # So na main e em pull request para ela: e o momento em que a pergunta "isto
-    # vira produto?" precisa de resposta, e o job custa varios minutos.
-    if: github.ref == 'refs/heads/main' || github.base_ref == 'main'
+    # Roda tambem na `develop`, e nao so na `main`.
+    #
+    # A ideia original era poupar minutos rodando so na promocao. Na primeira
+    # execucao real ficou claro que isso inverte a ordem: o empacotamento
+    # quebrou, e a `main` -- a branch cuja regra e "se esta aqui, funciona" --
+    # foi quem descobriu. Descobrir na `develop` custa os mesmos minutos e nao
+    # deixa a versao entregavel vermelha.
+    if: >-
+      github.ref == 'refs/heads/main'
+      || github.ref == 'refs/heads/develop'
+      || github.base_ref == 'main'
     runs-on: windows-latest
     needs: [test, electron, e2e]
 
@@ -344,7 +352,59 @@ jobs:
         echo "Bundle completo."
 
     - name: Build instalador (electron-builder)
-      run: npm run dist
+      shell: bash
+      env:
+        # O CI NAO assina. Assinar exige certificado, que nao esta (e nao deve
+        # estar) num runner publico. Sem desligar a busca automatica, o
+        # electron-builder procura um certificado no repositorio de
+        # certificados da maquina e baixa o pacote `winCodeSign` para tentar --
+        # trabalho e superficie de falha por algo que este job nao se propoe a
+        # fazer. Ele constroi para verificar que o empacotamento funciona; a
+        # assinatura de release e outro processo, com outra chave.
+        CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        # E o CI tambem NAO publica. O `--publish never` esta no script `dist`
+        # do package.json, entao vale igual aqui e na maquina de quem
+        # empacota. Ver o commit que o acrescentou: o electron-builder detecta
+        # CI e liga publicacao implicita, e foi assim que este job reprovou com
+        # o instalador ja construido.
+      run: |
+        # `set +e` e obrigatorio aqui. O GitHub roda `shell: bash` como
+        # `bash --noprofile --norc -eo pipefail`, e com `-e` o script aborta na
+        # primeira falha -- ou seja, no proprio `npm run dist`, antes de
+        # chegar a linha que publica o erro. Foi o que aconteceu na primeira
+        # tentativa: a anotacao continuou dizendo apenas "exit code 1".
+        set +e
+        npm run dist 2>&1 | tee electron-builder.log
+        CODIGO=${PIPESTATUS[0]}
+        set -e
+
+        if [ "$CODIGO" -eq 0 ]; then
+          exit 0
+        fi
+
+        # O log completo vai como artefato, mas baixar artefato exige
+        # autenticacao -- e quem olha um CI vermelho muitas vezes so alcanca a
+        # anotacao. Entao as ultimas linhas vao para la tambem.
+        echo "::group::Saida completa do electron-builder"
+        cat electron-builder.log
+        echo "::endgroup::"
+
+        # `%` antes de `%0A`, senao o proprio escape e reinterpretado; `\r`
+        # vira espaco porque a saida vem de um runner Windows.
+        MENSAGEM=$(tail -n 25 electron-builder.log \
+          | sed 's/%/%25/g; s/\r/ /g' \
+          | awk '{ printf "%s%%0A", $0 }')
+        echo "::error title=electron-builder falhou (codigo $CODIGO)::$MENSAGEM"
+        exit 1
+
+    - name: Publicar log do empacotamento
+      if: always()
+      uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4  # v5.0.0
+      with:
+        name: log-do-empacotamento
+        path: electron-builder.log
+        if-no-files-found: ignore
+        retention-days: 7
 
     - name: Publicar instalador como artefato
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4  # v5.0.0
