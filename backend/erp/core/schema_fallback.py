@@ -234,8 +234,16 @@ def garantir_schema_fallback(conexao: sqlite3.Connection) -> None:
             chave TEXT PRIMARY KEY,
             rota TEXT NOT NULL,
             metodo TEXT NOT NULL,
-            status INTEGER NOT NULL,
-            corpo TEXT NOT NULL,
+            -- `reservada` ate a rota responder; `concluida` depois. Uma
+            -- reserva orfa (processo morreu no meio) e recolhida pela poda
+            -- por idade.
+            estado TEXT NOT NULL DEFAULT 'concluida',
+            -- Hash de metodo + rota + corpo. Distingue "a mesma operacao,
+            -- reenviada" de "chave reutilizada por engano em outra".
+            impressao TEXT,
+            -- Anulaveis: uma chave reservada ainda nao tem resposta.
+            status INTEGER,
+            corpo TEXT,
             criado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
         );
 
@@ -299,6 +307,13 @@ def garantir_schema_fallback(conexao: sqlite3.Connection) -> None:
     # proximo login, que ja preenche as duas.
     # Vinculo do pagamento com o pedido que o originou. Anulaveis: os
     # lancamentos avulsos que ja existem nasceram sem pedido.
+    colunas_idempotencia = {
+        "estado": "TEXT NOT NULL DEFAULT 'concluida'",
+        "impressao": "TEXT",
+    }
+    for coluna, declaracao in colunas_idempotencia.items():
+        _garantir_coluna(conexao, "operacoes_idempotentes", coluna, declaracao)
+
     colunas_pagamentos_pedido = {
         "pedido_id": "INTEGER",
         "parcela": "INTEGER NOT NULL DEFAULT 1",
