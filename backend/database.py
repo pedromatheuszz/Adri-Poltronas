@@ -440,26 +440,75 @@ def atualizar_pagamento(pagamento_id, **kwargs):
         return linhas
 
 
+def registrar_observacao_de_pagamento(pagamento_id: int, observacao: str) -> None:
+    """
+    Anexa uma nota ao historico e a auditoria do pagamento.
+
+    Usado quando uma decisao humana contraria o que o sistema apuraria
+    sozinho -- confirmar na mao uma cobranca que o gateway ainda mostra em
+    aberto, por exemplo. Sem o registro, o numero fica certo na tela e
+    inexplicavel depois.
+    """
+    with conectar() as conexao:
+        pagamento = conexao.execute(
+            'SELECT * FROM pagamentos WHERE id=?', (pagamento_id,)
+        ).fetchone()
+        if not pagamento:
+            return
+        conexao.execute(
+            'INSERT INTO historico (cliente_id, cliente_nome, acao, detalhes) '
+            'VALUES (?, ?, ?, ?)',
+            (pagamento['cliente_id'], pagamento['cliente_nome'], 'PAGAMENTO',
+             observacao[:500]),
+        )
+        registrar_evento(
+            conexao,
+            acao="financeiro.recebivel.observacao_manual",
+            entidade="pagamento",
+            entidade_id=pagamento_id,
+            valores_novos={"observacao": observacao[:500]},
+        )
+
+
 def excluir_pagamento(pagamento_id) -> int:
     """
-    Cancela uma cobranca removendo o registro, e so se ela ainda estiver
-    Pendente. Devolve quantas linhas foram apagadas (0 ou 1).
+    Cancela uma cobranca pendente marcando-a como 'Cancelado'.
+
+    Nao apaga a linha, e a mudanca e deliberada. Registro financeiro apagado
+    e registro que nao existe: some do extrato, some da conferencia com o
+    Asaas (que continua conhecendo aquela cobranca pelo `asaas_payment_id`) e
+    some da propria trilha de auditoria, que passa a ter um evento de
+    cancelamento apontando para um id sem destino.
+
+    'Cancelado' ja era um status do dominio -- as metricas do dashboard e os
+    filtros da tela ja o tratavam. O que faltava era o caminho de cancelamento
+    usa-lo.
+
+    O nome da funcao fica como esta por ser o contrato que a rota DELETE e os
+    chamadores conhecem; o docstring e o que descreve o comportamento.
     """
     with conectar() as conexao:
         pagamento = conexao.execute('SELECT * FROM pagamentos WHERE id=?', (pagamento_id,)).fetchone()
-        cursor = conexao.execute("DELETE FROM pagamentos WHERE id=? AND status='Pendente'", (pagamento_id,))
+        cursor = conexao.execute(
+            "UPDATE pagamentos SET status='Cancelado' WHERE id=? AND status='Pendente'",
+            (pagamento_id,),
+        )
         if pagamento and cursor.rowcount > 0:
             conexao.execute(
                 'INSERT INTO historico (cliente_id, cliente_nome, acao, detalhes) VALUES (?, ?, ?, ?)',
                 (pagamento['cliente_id'], pagamento['cliente_nome'], 'PAGAMENTO',
                  f'Cobranca cancelada: R$ {pagamento["valor"]:.2f}'),
             )
+            novo = conexao.execute(
+                'SELECT * FROM pagamentos WHERE id=?', (pagamento_id,)
+            ).fetchone()
             registrar_evento(
                 conexao,
                 acao="financeiro.recebivel.cancelado",
                 entidade="pagamento",
                 entidade_id=pagamento_id,
                 valores_anteriores=pagamento,
+                valores_novos=novo,
             )
         return cursor.rowcount
 

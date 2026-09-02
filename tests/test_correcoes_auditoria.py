@@ -283,7 +283,13 @@ def test_cancelamento_de_pendente_com_sucesso(client, asaas_espiao):
 
     assert resposta.status_code == 200
     assert chamadas == ['pay_789']
-    assert database.obter_pagamento_por_id(pagamento_id) is None
+    # A linha continua no banco, agora como 'Cancelado'. Apagar registro
+    # financeiro o faz sumir do extrato, da conferencia com o Asaas (que segue
+    # conhecendo a cobranca pelo asaas_payment_id) e da propria auditoria, que
+    # ficaria com um evento de cancelamento apontando para um id sem destino.
+    cancelado = database.obter_pagamento_por_id(pagamento_id)
+    assert cancelado is not None
+    assert cancelado['status'] == 'Cancelado'
 
 
 # -----------------------------------------------------------------------------

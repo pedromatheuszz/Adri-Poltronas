@@ -188,6 +188,9 @@ function confirmarAcao(opcoes) {
     var elMsg = document.getElementById('modalConfirmarMsg');
     var btnOk = document.getElementById('modalConfirmarOk');
     var btnCancelar = document.getElementById('modalConfirmarCancelar');
+    var campo = document.getElementById('modalConfirmarCampo');
+    var rotulo = document.getElementById('modalConfirmarRotulo');
+    var entrada = document.getElementById('modalConfirmarTexto');
 
     caixa.setAttribute('data-variante', opcoes.variante || 'perigo');
     elIcone.innerHTML = ICONES_CONFIRMACAO[opcoes.icone] || ICONES_CONFIRMACAO.alerta;
@@ -195,6 +198,22 @@ function confirmarAcao(opcoes) {
     elMsg.textContent = opcoes.mensagem || '';
     btnOk.textContent = opcoes.textoConfirmar || 'Confirmar';
     btnCancelar.textContent = opcoes.textoCancelar || 'Cancelar';
+
+    // `campoTexto` transforma a confirmacao numa pergunta: usado onde a
+    // decisao do operador contraria o que o sistema apuraria sozinho e o
+    // motivo precisa acompanhar o registro. Com ele a Promise resolve com o
+    // texto (ou null ao cancelar) em vez de um booleano -- e como texto vazio
+    // e falsy, quem so testa `if (!resposta)` continua funcionando.
+    var pedeTexto = !!(opcoes.campoTexto && campo && entrada);
+    if (campo) campo.hidden = !pedeTexto;
+    if (pedeTexto) {
+        rotulo.textContent = opcoes.campoTexto.rotulo || 'Motivo';
+        entrada.placeholder = opcoes.campoTexto.exemplo || '';
+        entrada.value = '';
+        btnOk.disabled = true;
+    } else if (btnOk.disabled) {
+        btnOk.disabled = false;
+    }
 
     return new Promise(function(resolver) {
         var finalizado = false;
@@ -207,16 +226,30 @@ function confirmarAcao(opcoes) {
             btnCancelar.removeEventListener('click', aoCancelar);
             overlay.removeEventListener('click', aoClicarFora);
             document.removeEventListener('keydown', aoTeclar);
+            if (pedeTexto) {
+                entrada.removeEventListener('input', aoDigitar);
+                btnOk.disabled = false;
+            }
             resolver(resultado);
         }
 
-        function aoConfirmar() { encerrar(true); }
-        function aoCancelar() { encerrar(false); }
-        function aoClicarFora(e) { if (e.target === overlay) encerrar(false); }
+        function valorConfirmado() {
+            if (!pedeTexto) return true;
+            return entrada.value.trim();
+        }
+        function valorCancelado() { return pedeTexto ? null : false; }
+
+        function aoDigitar() { btnOk.disabled = !entrada.value.trim(); }
+        function aoConfirmar() {
+            if (pedeTexto && !entrada.value.trim()) return;
+            encerrar(valorConfirmado());
+        }
+        function aoCancelar() { encerrar(valorCancelado()); }
+        function aoClicarFora(e) { if (e.target === overlay) encerrar(valorCancelado()); }
         function aoTeclar(e) {
-            if (e.key === 'Escape') encerrar(false);
+            if (e.key === 'Escape') encerrar(valorCancelado());
             else if (e.key === 'Enter' && document.activeElement !== btnCancelar) {
-                e.preventDefault(); encerrar(true);
+                e.preventDefault(); aoConfirmar();
             }
         }
 
@@ -224,11 +257,13 @@ function confirmarAcao(opcoes) {
         btnCancelar.addEventListener('click', aoCancelar);
         overlay.addEventListener('click', aoClicarFora);
         document.addEventListener('keydown', aoTeclar);
+        if (pedeTexto) entrada.addEventListener('input', aoDigitar);
 
         abrirModal(overlay);
-        // Foco no cancelar: acao destrutiva nao deve ser confirmada por engano
-        // quem chegou ali pelo teclado.
-        setTimeout(function(){ btnCancelar.focus(); }, 60);
+        // Com campo, o foco vai para ele: o operador chegou ali para escrever.
+        // Sem campo, foco no cancelar -- acao destrutiva nao deve ser
+        // confirmada por engano por quem chegou pelo teclado.
+        setTimeout(function(){ (pedeTexto ? entrada : btnCancelar).focus(); }, 60);
     });
 }
 
@@ -297,7 +332,14 @@ function trocarAba(aba) {
     if (aba === 'entregas') { carregarEntregas(); }
     if (aba === 'mapa') { setTimeout(function() { initMapa(); carregarMapaClientes(); }, 100); }
     if (aba === 'relatorios') { carregarRelatorio(); }
-    if (aba === 'pagamentos') { carregarPagamentos(); }
+    if (aba === 'pagamentos') {
+        carregarPagamentos();
+        // Conciliacao silenciosa ao abrir a aba: e o momento em que o
+        // operador vai olhar os numeros, e o webhook do Asaas nao chega aqui.
+        // `silenciosa` para nao poluir a tela com toast a cada troca de aba --
+        // so avisa quando algo realmente mudou.
+        conciliarPagamentos(true);
+    }
 }
 
 var chartInstances = {};
@@ -406,6 +448,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
     var btnTodasLidas = document.getElementById('btnMarcarTodasLidas');
     if (btnTodasLidas) btnTodasLidas.addEventListener('click', marcarTodasNotificacoesLidas);
+
+    var btnConciliar = document.getElementById('btnConciliarAsaas');
+    if (btnConciliar) btnConciliar.addEventListener('click', function(){ conciliarPagamentos(false); });
 
     var modalNomeCancelar = document.getElementById('modalNomeCancelar');
     var modalNomeConfirmar = document.getElementById('modalNomeConfirmar');
@@ -2023,19 +2068,106 @@ async function copiarPix() {
 }
 
 async function confirmarPagamentoLocal(pagamentoId) {
+    // O backend confere com o Asaas antes de marcar como recebido. Ate aqui
+    // um clique bastava, e o ERP passava a declarar receita que ninguem tinha
+    // recebido -- o pior tipo de erro num modulo financeiro, porque o numero
+    // errado parece certo.
+    var resposta = await _enviarConfirmacao(pagamentoId, null);
+    if (!resposta) return;
+
+    if (resposta.status === 409 && resposta.dados.pode_forcar) {
+        var motivo = await confirmarAcao({
+            titulo: 'Confirmar mesmo assim?',
+            mensagem: resposta.dados.erro,
+            textoConfirmar: 'Confirmar com motivo',
+            textoCancelar: 'Voltar',
+            icone: 'alerta',
+            variante: 'perigo',
+            campoTexto: {
+                rotulo: 'Por que esta confirmando fora do gateway?',
+                exemplo: 'Ex.: pago em dinheiro na retirada'
+            }
+        });
+        if (!motivo) return;
+        resposta = await _enviarConfirmacao(pagamentoId, motivo);
+        if (!resposta) return;
+    }
+
+    if (resposta.ok) {
+        exibirToast(resposta.dados.mensagem || 'Pagamento confirmado!');
+        carregarPagamentos();
+    } else {
+        exibirToast(resposta.dados.erro || 'Erro ao confirmar.', 'error');
+    }
+}
+
+async function _enviarConfirmacao(pagamentoId, motivo) {
+    var corpo = motivo ? { forcar: true, motivo: motivo } : {};
     try {
-        var resp = await fetch('/api/pagamentos/' + pagamentoId + '/confirmar', { method: 'POST' });
-        if (resp.ok) {
-            exibirToast('Pagamento confirmado!');
+        var resp = await fetch('/api/pagamentos/' + pagamentoId + '/confirmar', {
+            method: 'POST',
+            headers: CABECALHOS_JSON,
+            body: JSON.stringify(corpo)
+        });
+        return { ok: resp.ok, status: resp.status, dados: await resp.json().catch(function(){ return {}; }) };
+    } catch(_) {
+        exibirToast('Erro ao confirmar pagamento.', 'error');
+        return null;
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Conciliacao com o Asaas
+//
+// O webhook do Asaas nunca chega numa instalacao normal: o backend escuta em
+// 127.0.0.1:5000 e um servidor na internet nao alcanca o loopback desta
+// maquina. Sem isto, o cliente pagava o Pix, o dinheiro entrava na conta do
+// Asaas e a cobranca continuava "Pendente" na tela ate alguem confirmar na mao.
+//
+// Uma consulta de saida atravessa qualquer firewall e nao expoe nada.
+// -----------------------------------------------------------------------------
+var _conciliacaoEmCurso = false;
+
+async function conciliarPagamentos(silenciosa) {
+    if (_conciliacaoEmCurso) return;
+    _conciliacaoEmCurso = true;
+    var botao = document.getElementById('btnConciliarAsaas');
+    if (botao) botao.disabled = true;
+    if (!silenciosa) exibirToast('Consultando o Asaas...');
+    try {
+        var resp = await fetch('/api/pagamentos/reconciliar', {
+            method: 'POST', headers: CABECALHOS_JSON
+        });
+        var dados = await resp.json();
+        if (resp.status === 503) {
+            if (!silenciosa) exibirToast(dados.erro || 'Asaas nao configurado.', 'error');
+            return;
+        }
+        if (!resp.ok) throw new Error(dados.erro || 'Erro');
+
+        if (dados.atualizadas > 0) {
+            exibirToast(dados.atualizadas + ' cobranca(s) atualizada(s) pelo Asaas.');
             carregarPagamentos();
-        } else { exibirToast('Erro ao confirmar.', 'error'); }
-    } catch(_) { exibirToast('Erro ao confirmar pagamento.', 'error'); }
+            carregarDashboardGraficos();
+        } else if (!silenciosa) {
+            var texto = dados.consultadas
+                ? 'Nada mudou: ' + dados.consultadas + ' cobranca(s) conferida(s).'
+                : 'Nenhuma cobranca em aberto para conferir.';
+            if (dados.falhas) texto += ' ' + dados.falhas + ' nao respondeu(ram).';
+            exibirToast(texto);
+        }
+    } catch(e) {
+        if (!silenciosa) exibirToast('Nao foi possivel conciliar: ' + e.message, 'error');
+    } finally {
+        _conciliacaoEmCurso = false;
+        if (botao) botao.disabled = false;
+    }
 }
 
 async function cancelarPagamentoLocal(pagamentoId) {
     var confirmado = await confirmarAcao({
         titulo: 'Cancelar Cobranca',
-        mensagem: 'Esta cobranca sera cancelada e nao podera ser recuperada. Deseja continuar?',
+        mensagem: 'Esta cobranca sera marcada como cancelada. O registro continua no historico para conferencia. Deseja continuar?',
         textoConfirmar: 'Cancelar cobranca',
         textoCancelar: 'Voltar',
         icone: 'alerta',

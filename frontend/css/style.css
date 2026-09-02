@@ -1301,6 +1301,19 @@ body.modo-selecao-ativo tbody tr:hover td { background: var(--cor-selecao); }
 
 .modal-input { margin-bottom: var(--esp-5); text-align: left; }
 
+/* Rotulo do campo opcional do modal de confirmacao. Alinhado a esquerda e
+   colado no proprio campo: o resto do modal e centralizado, mas rotulo de
+   formulario centralizado nao se le. */
+.modal-label {
+    display: block;
+    text-align: left;
+    font-size: var(--texto-sm);
+    font-weight: 600;
+    color: var(--cor-texto-2);
+    margin-bottom: var(--esp-2);
+}
+#modalConfirmarCampo { margin-top: var(--esp-4); }
+
 /* Modal que carrega formulario: o texto volta a alinhar a esquerda, porque
    rotulo de campo centralizado nao se le. */
 .payment-modal { max-width: 520px; text-align: left; }
