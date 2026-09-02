@@ -50,6 +50,26 @@ jobs:
     - name: Lint with ruff
       run: ruff check backend/ tests/ build.py
 
+    # As versoes travadas sao o que o PyInstaller empacota e o cliente
+    # instala. Auditar so o requirements.txt deixava passar vulnerabilidade
+    # que existe no artefato entregue -- foi assim que `cryptography` ficou
+    # fora do lock por inteiro sem ninguem notar.
+    #
+    # Roda aqui, e nao no job `security`, porque o lock e de Windows. E so na
+    # 3.12 para nao repetir a mesma checagem tres vezes.
+    #
+    # A copia para `.txt` nao e capricho: o pip-audit recusa o arquivo pela
+    # extensao ("invalid requirements input") antes de tentar le-lo. E
+    # `--no-deps` porque o lock JA e o fecho transitivo.
+    - name: Audit pinned dependencies
+      if: matrix.python-version == '3.12'
+      shell: bash
+      run: |
+        pip install pip-audit
+        cp backend/requirements.lock requirements-lock.txt
+        pip-audit --requirement requirements-lock.txt --no-deps --strict
+        rm -f requirements-lock.txt
+
     # A cobertura minima e um piso, nao uma meta. Ela existe para impedir que
     # codigo novo entre sem teste nenhum -- sem o `--cov-fail-under`, o job
     # ficava verde com a cobertura caindo a cada PR e ninguem via.
@@ -188,32 +208,14 @@ jobs:
         python -m pip install --upgrade pip
         pip install pip-audit
 
-    # Duas varreduras, e a segunda nao e redundante:
-    #
-    #   requirements.txt tem faixas de versao -- e o que um `pip install`
-    #   resolveria hoje.
-    #   requirements.lock tem as versoes exatas -- e o que o PyInstaller
-    #   empacota e o que o cliente instala.
-    #
-    # Auditar so o primeiro deixava passar vulnerabilidade que existe no
-    # artefato entregue. Foi assim que `cryptography` ficou fora do lock por
-    # inteiro sem ninguem notar.
+    # Aqui se auditam as FAIXAS de versao -- o que um `pip install` resolveria
+    # hoje. As versoes TRAVADAS (requirements.lock), que sao o que o
+    # PyInstaller empacota e o cliente instala, sao auditadas no job `test`,
+    # que roda em Windows. O lock e declaradamente "Windows / CPython 3.12":
+    # pedir a um runner Linux que avalie um fecho de dependencias que nao e o
+    # dele reprova por `pywin32`, e nao por vulnerabilidade.
     - name: Check for vulnerable dependencies (faixas)
       run: pip-audit --requirement backend/requirements.txt --strict
-
-    - name: Check for vulnerable dependencies (versoes travadas)
-      # Duas particularidades, e as duas custaram um job vermelho:
-      #
-      # A copia para `.txt` nao e capricho: o pip-audit recusa o arquivo pela
-      # extensao ("invalid requirements input") antes mesmo de tentar le-lo.
-      #
-      # `--no-deps` porque o lock JA e o fecho transitivo -- resolver de novo
-      # nao acrescenta nada e, pior, falha neste runner Linux ao tentar
-      # resolver `pywin32`, que so existe para Windows.
-      run: |
-        cp backend/requirements.lock requirements-lock.txt
-        pip-audit --requirement requirements-lock.txt --no-deps --strict
-        rm -f requirements-lock.txt
 
     # gitleaks pelo binario, e nao pela action oficial.
     #
