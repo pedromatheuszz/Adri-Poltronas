@@ -55,25 +55,91 @@ def criar_pagamento():
     return jsonify({"mensagem": "Pagamento registrado!", "id": pagamento_id}), 201
 
 
+# Campos que definem QUANTO se cobra e QUANDO. Depois que a cobranca existe no
+# Asaas, mudar qualquer um deles so no banco local cria divergencia com o que
+# o cliente recebeu: o boleto impresso continua com o valor antigo.
+CAMPOS_DA_COBRANCA = ('valor', 'valor_centavos', 'data_vencimento', 'tipo_pagamento')
+
+
 @pagamentos_bp.route('/<int:pagamento_id>', methods=['PUT'])
 def atualizar_pagamento(pagamento_id):
+    """
+    Edita os dados descritivos de um lancamento.
+
+    NAO muda status. Transicao de estado tem porta propria -- `/confirmar`
+    para receber, DELETE para cancelar -- e cada uma delas carrega a regra
+    correspondente: conferir com o gateway antes de dar por recebido, cancelar
+    no Asaas antes de encerrar localmente.
+
+    Ate aqui o PUT aceitava `status` no corpo e gravava direto. Isso fazia dele
+    uma porta dos fundos: dava para marcar 'Recebido' sem passar pela
+    conferencia, ou reabrir uma cobranca cancelada, sem nenhum registro do
+    porque. A regra vivia no comportamento da tela, que por acaso nao mandava
+    o campo -- e regra que depende de o cliente se comportar nao e regra.
+    """
     dados = request.get_json(silent=True) or {}
     existente = database.obter_pagamento_por_id(pagamento_id)
     if not existente:
         return jsonify({"erro": "Pagamento nao encontrado."}), 404
 
-    # Campos de estado ausentes no corpo sao herdados do registro atual.
-    # Sem isso o validador injetava 'Pendente' por padrao, e um PUT que so
-    # mudava a descricao revertia uma cobranca ja recebida -- apagando a
-    # receita do faturamento sem nenhum sinal para o usuario.
-    dados.setdefault('status', existente['status'])
-    dados.setdefault('data_pagamento', existente.get('data_pagamento', ''))
+    status_pedido = (dados.get('status') or '').strip()
+    if status_pedido and status_pedido != existente['status']:
+        return jsonify({
+            "erro": "O status de um pagamento nao muda por edicao. "
+                    "Use 'Confirmar' para registrar o recebimento ou "
+                    "'Cancelar' para encerrar a cobranca.",
+            "status_atual": existente['status'],
+        }), 409
+
+    # Cobranca ja emitida: o que o cliente recebeu nao pode divergir do que o
+    # ERP mostra. Descricao e nome seguem editaveis -- nao saem no boleto.
+    if (existente.get('asaas_payment_id') or '').strip():
+        alterados = [
+            campo for campo in CAMPOS_DA_COBRANCA
+            if campo in dados and _difere(dados[campo], existente.get(campo))
+        ]
+        if alterados:
+            return jsonify({
+                "erro": "Esta cobranca ja foi emitida no Asaas. Alterar "
+                        f"{', '.join(alterados)} aqui deixaria o sistema "
+                        "divergente do que o cliente recebeu. Cancele a "
+                        "cobranca e emita outra.",
+                "campos_bloqueados": alterados,
+            }), 409
+
+    # Estado vem sempre do registro atual, nunca do corpo. Sem isso o
+    # validador injetava 'Pendente' por padrao, e um PUT que so mudava a
+    # descricao revertia uma cobranca ja recebida.
+    dados['status'] = existente['status']
+    dados['data_pagamento'] = existente.get('data_pagamento', '')
 
     pagamento, erros = validators.validar_pagamento(dados)
     if erros:
         return jsonify({"erro": "Dados invalidos.", "detalhes": erros}), 400
+
+    # `status` e `data_pagamento` saem do que vai para o banco: eles ja sao os
+    # atuais, e reescreve-los so criaria evento de auditoria sem mudanca.
+    pagamento.pop('status', None)
+    pagamento.pop('data_pagamento', None)
+
     linhas = database.atualizar_pagamento(pagamento_id, **pagamento)
     return jsonify({"mensagem": "Pagamento atualizado!", "linhas": linhas}), 200
+
+
+def _difere(novo, atual) -> bool:
+    """
+    Compara valor novo com o gravado, tolerando forma.
+
+    O corpo chega em JSON: `"250.00"` e `250.0` sao o mesmo dinheiro, e tratar
+    um reenvio identico do formulario como tentativa de alteracao recusaria
+    edicoes legitimas de descricao.
+    """
+    if novo is None or atual is None:
+        return novo is not atual
+    try:
+        return abs(float(novo) - float(atual)) > 0.005
+    except (TypeError, ValueError):
+        return str(novo).strip() != str(atual).strip()
 
 
 @pagamentos_bp.route('/<int:pagamento_id>', methods=['DELETE'])
@@ -81,17 +147,38 @@ def excluir_pagamento(pagamento_id):
     existente = database.obter_pagamento_por_id(pagamento_id)
     if not existente:
         return jsonify({"erro": "Pagamento nao encontrado."}), 404
-    # A checagem vem ANTES da chamada ao Asaas. `excluir_pagamento()` so apaga
-    # cobrancas pendentes, entao cancelar remoto primeiro deixava a cobranca
-    # cancelada no gateway e viva no banco local -- divergencia permanente,
-    # sem nenhum caminho de volta pela interface.
-    if existente['status'] != 'Pendente':
-        return jsonify({"erro": "So e possivel cancelar pagamentos pendentes."}), 400
+    # A checagem vem ANTES da chamada ao Asaas. `excluir_pagamento()` so
+    # encerra cobranca aberta, entao cancelar remoto primeiro deixaria a
+    # cobranca cancelada no gateway e viva no banco local -- divergencia
+    # permanente, sem nenhum caminho de volta pela interface.
+    #
+    # 'Atrasado' entrou na lista: vencer nao quita nem cancela nada, e o
+    # cliente continua com um Pix ou boleto vivo. Recusar o cancelamento
+    # dessas era recusar justamente as cobrancas que mais precisam ser
+    # encerradas.
+    if existente['status'] not in database.STATUS_CANCELAVEIS:
+        return jsonify({
+            "erro": "So e possivel cancelar cobrancas em aberto "
+                    f"({' ou '.join(database.STATUS_CANCELAVEIS)}).",
+            "status_atual": existente['status'],
+        }), 400
 
-    if existente.get('asaas_payment_id') and asaas.esta_configurado():
+    if (existente.get('asaas_payment_id') or '').strip():
+        # Ha cobranca viva no gateway. Sem a chave do Asaas nao ha como
+        # encerra-la -- e cancelar so localmente produziria o pior desfecho
+        # possivel: o ERP diz "cancelado", o cliente recebe a cobranca e paga,
+        # e ninguem concilia. Melhor recusar e dizer por que.
+        if not asaas.esta_configurado():
+            return jsonify({
+                "erro": "Esta cobranca existe no Asaas e a integracao nao esta "
+                        "configurada. Cancelar apenas neste computador deixaria "
+                        "a cobranca viva para o cliente. Configure a "
+                        "ASAAS_API_KEY e tente de novo.",
+            }), 503
+
         resultado = asaas.cancelar_pagamento(existente['asaas_payment_id'])
         if resultado.get('_erro'):
-            # Apagar localmente aqui seria pior que falhar: a cobranca segue
+            # Encerrar localmente aqui seria pior que falhar: a cobranca segue
             # viva no Asaas, o cliente ainda pode paga-la, e o registro que
             # permitiria conciliar teria sumido.
             log.warning("Falha ao cancelar no Asaas: %s", resultado)

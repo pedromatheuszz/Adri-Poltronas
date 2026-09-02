@@ -552,9 +552,18 @@ def registrar_observacao_de_pagamento(pagamento_id: int, observacao: str) -> Non
         )
 
 
+# Status locais que ainda representam cobranca ABERTA, e portanto cancelavel.
+#
+# 'Atrasado' estava de fora, e nao devia: vencer nao quita nem cancela nada --
+# o cliente continua com um boleto ou um Pix vivo. O ERP recusava o
+# cancelamento justamente das cobrancas mais antigas, que sao as que mais
+# precisam ser encerradas.
+STATUS_CANCELAVEIS = ("Pendente", "Atrasado")
+
+
 def excluir_pagamento(pagamento_id) -> int:
     """
-    Cancela uma cobranca pendente marcando-a como 'Cancelado'.
+    Cancela uma cobranca aberta marcando-a como 'Cancelado'.
 
     Nao apaga a linha, e a mudanca e deliberada. Registro financeiro apagado
     e registro que nao existe: some do extrato, some da conferencia com o
@@ -571,9 +580,11 @@ def excluir_pagamento(pagamento_id) -> int:
     """
     with conectar() as conexao:
         pagamento = conexao.execute('SELECT * FROM pagamentos WHERE id=?', (pagamento_id,)).fetchone()
+        marcadores = ",".join("?" for _ in STATUS_CANCELAVEIS)
         cursor = conexao.execute(
-            "UPDATE pagamentos SET status='Cancelado' WHERE id=? AND status='Pendente'",
-            (pagamento_id,),
+            f"UPDATE pagamentos SET status='Cancelado' "
+            f"WHERE id=? AND status IN ({marcadores})",
+            (pagamento_id, *STATUS_CANCELAVEIS),
         )
         if pagamento and cursor.rowcount > 0:
             conexao.execute(
