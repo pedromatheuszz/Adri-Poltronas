@@ -453,6 +453,20 @@ document.addEventListener('DOMContentLoaded', function() {
     var btnConciliar = document.getElementById('btnConciliarAsaas');
     if (btnConciliar) btnConciliar.addEventListener('click', function(){ conciliarPagamentos(false); });
 
+    var btnRestaurar = document.getElementById('btnRestaurarBanco');
+    if (btnRestaurar) btnRestaurar.addEventListener('click', abrirModalRestaurar);
+
+    var fecharRestaurar = document.getElementById('modalRestaurarFechar');
+    if (fecharRestaurar) fecharRestaurar.addEventListener('click', function(){ fecharModal('modalRestaurar'); });
+
+    var listaCopias = document.getElementById('listaCopias');
+    if (listaCopias) {
+        listaCopias.addEventListener('click', function(e) {
+            var botao = e.target.closest('button[data-restaurar]');
+            if (botao) restaurarCopia(botao.getAttribute('data-restaurar'));
+        });
+    }
+
     var btnVerPendencias = document.getElementById('btnVerPendenciasComErro');
     if (btnVerPendencias) btnVerPendencias.addEventListener('click', abrirPendenciasComErro);
 
@@ -1595,7 +1609,7 @@ function _carimboDeData() {
 }
 
 function fazerBackupJSON() {
-    baixarArquivo('/api/clientes/backup/json',
+    baixarArquivo('/api/backup/json',
         'backup_adri_poltronas_' + _carimboDeData() + '.json',
         'Backup JSON salvo.');
 }
@@ -1612,9 +1626,97 @@ async function fazerBackupSQLite() {
         variante: 'atencao'
     });
     if (!confirmado) return;
-    baixarArquivo('/api/clientes/backup/sqlite',
+    baixarArquivo('/api/backup/sqlite',
         'backup_adri_poltronas_' + _carimboDeData() + '.db',
         'Backup do banco salvo.');
+}
+
+// -----------------------------------------------------------------------------
+// Restauracao de copia
+//
+// As copias eram criadas -- antes de cada migration e uma por dia -- e nao
+// havia caminho de volta pela interface: recuperar exigia fechar o app, achar
+// a pasta em %APPDATA%, entender o nome dos arquivos e sobrescrever o banco na
+// mao. Ninguem descobre que o backup nao presta antes de precisar dele.
+// -----------------------------------------------------------------------------
+var MOTIVO_LEGIVEL = {
+    'pre-migracao': 'antes de atualizar',
+    'diario': 'copia do dia'
+};
+
+async function abrirModalRestaurar() {
+    var lista = document.getElementById('listaCopias');
+    if (!lista) return;
+    lista.innerHTML = '<div class="empty-state"><p>Carregando copias...</p></div>';
+    abrirModal('modalRestaurar');
+
+    var r = await tentarBackend('/api/backup/copias');
+    if (r.semBackend) {
+        lista.innerHTML = '<div class="empty-state"><p>Sem conexao com o servidor local.</p></div>';
+        return;
+    }
+    var dados = await r.resposta.json();
+    var pasta = document.getElementById('modalRestaurarPasta');
+    if (pasta) pasta.textContent = 'Pasta das copias: ' + (dados.pasta || '');
+
+    if (!dados.copias || !dados.copias.length) {
+        lista.innerHTML = '<div class="empty-state"><p>Nenhuma copia disponivel ainda.</p></div>';
+        return;
+    }
+
+    lista.innerHTML = dados.copias.map(function(c) {
+        return '<div class="pendencia-erro">' +
+            '<div class="pendencia-erro-cabecalho">' +
+                '<span class="pendencia-erro-nome">' + escaparHtml(c.criado_em) + '</span>' +
+                '<span class="pendencia-erro-quando">' + formatarTamanho(c.bytes) + '</span>' +
+            '</div>' +
+            '<div class="pendencia-erro-quando">' +
+                escaparHtml(MOTIVO_LEGIVEL[c.motivo] || c.motivo) + '</div>' +
+            '<div class="pendencia-erro-acoes">' +
+                '<button type="button" class="btn btn-perigo btn-sm" data-restaurar="' +
+                    escaparHtml(c.arquivo) + '">Restaurar esta</button>' +
+            '</div>' +
+        '</div>';
+    }).join('');
+}
+
+function formatarTamanho(bytes) {
+    if (!bytes) return '';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+async function restaurarCopia(arquivo) {
+    var confirmado = await confirmarAcao({
+        titulo: 'Restaurar o banco',
+        mensagem: 'Tudo que foi registrado depois desta copia sera perdido. '
+                + 'O estado atual sera guardado como uma nova copia antes da troca. '
+                + 'Depois de restaurar, feche e abra o aplicativo.',
+        textoConfirmar: 'Restaurar',
+        textoCancelar: 'Voltar',
+        icone: 'alerta',
+        variante: 'perigo'
+    });
+    if (!confirmado) return;
+
+    try {
+        var resp = await fetch('/api/backup/restaurar', {
+            method: 'POST',
+            headers: CABECALHOS_JSON,
+            body: JSON.stringify({ arquivo: arquivo })
+        });
+        var dados = await resp.json();
+        if (!resp.ok) throw new Error(dados.erro || 'Erro');
+        fecharModal('modalRestaurar');
+        // Sem recarregar, as telas ja abertas seguem mostrando os dados de
+        // antes -- e uma edicao feita sobre elas gravaria por cima do que
+        // acabou de ser restaurado.
+        exibirToast(dados.mensagem + ' Recarregando...', 'success');
+        setTimeout(function() { window.location.reload(); }, 2500);
+    } catch (e) {
+        exibirToast('Nao foi possivel restaurar: ' + e.message, 'error');
+    }
 }
 
 function abrirModalImportar() {

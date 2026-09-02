@@ -49,7 +49,12 @@ def relatorios_exportar():
         writer = csv.writer(buffer)
         writer.writerow(cabecalhos)
         for c in clientes:
-            writer.writerow([c.get(campo, '') for campo in campos])
+            # Sem a neutralizacao, um campo do cadastro que comece com "=" vira
+            # formula ativa na planilha de quem abrir o arquivo. Ver
+            # `planilha.neutralizar_formula`.
+            writer.writerow([
+                planilha.neutralizar_formula(c.get(campo, '')) for campo in campos
+            ])
         buffer.seek(0)
         nome = f"relatorio_adri_{time.strftime('%Y%m%d_%H%M%S')}.csv"
         return send_file(io.BytesIO(buffer.getvalue().encode('utf-8-sig')),

@@ -619,7 +619,7 @@ def service_worker():
 from blueprints import (  # noqa: E402
     auth_bp, clientes_bp, pagamentos_bp, webhook_bp, relatorios_bp,
     ia_bp, entregas_bp, dashboard_bp, notificacoes_bp, excel_bp,
-    produtos_bp, pedidos_bp
+    produtos_bp, pedidos_bp, backup_bp
 )
 
 app.register_blueprint(auth_bp)
@@ -634,6 +634,7 @@ app.register_blueprint(notificacoes_bp)
 app.register_blueprint(excel_bp)
 app.register_blueprint(produtos_bp)
 app.register_blueprint(pedidos_bp)
+app.register_blueprint(backup_bp)
 
 
 if __name__ == '__main__':

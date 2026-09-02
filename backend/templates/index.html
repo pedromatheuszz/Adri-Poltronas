@@ -19,8 +19,8 @@
           href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 
     <!-- Ordem obrigatoria: tokens.css declara as variaveis que style.css usa. -->
-    <link rel="stylesheet" href="/css/tokens.css?v=v78">
-    <link rel="stylesheet" href="/css/style.css?v=v78">
+    <link rel="stylesheet" href="/css/tokens.css?v=v79">
+    <link rel="stylesheet" href="/css/style.css?v=v79">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
           integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H"
           crossorigin="anonymous" referrerpolicy="no-referrer" />
@@ -596,6 +596,15 @@
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                             Backup do banco
                         </button>
+                        <!-- Backup sem restauracao e uma suposicao, nao uma
+                             garantia: as copias existiam desde a versao 1.1 e
+                             recupera-las exigia fechar o app e sobrescrever o
+                             arquivo em %APPDATA% na mao. -->
+                        <button type="button" class="btn btn-secundario" id="btnRestaurarBanco"
+                                title="Volta o banco para uma copia anterior">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+                            Restaurar copia
+                        </button>
                     </footer>
                 </section>
             </section>
@@ -868,6 +877,22 @@
             <div class="modal-actions">
                 <button type="button" class="modal-btn modal-btn-cancelar" id="modalConfirmarCancelar">Cancelar</button>
                 <button type="button" class="modal-btn modal-btn-confirmar" id="modalConfirmarOk">Confirmar</button>
+            </div>
+        </div>
+    </dialog>
+
+    <dialog class="modal-overlay" id="modalRestaurar" aria-labelledby="modalRestaurarTitulo">
+        <div class="modal-box modal-box-media">
+            <h2 class="modal-title" id="modalRestaurarTitulo">Restaurar uma copia</h2>
+            <p class="modal-msg">
+                O banco atual sera substituido pelo conteudo da copia escolhida.
+                Antes disso, o estado de agora e guardado como uma nova copia, entao
+                da para voltar atras.
+            </p>
+            <div id="listaCopias" class="lista-pendencias"></div>
+            <p class="modal-msg" id="modalRestaurarPasta"></p>
+            <div class="modal-actions">
+                <button type="button" class="modal-btn modal-btn-cancelar" id="modalRestaurarFechar">Fechar</button>
             </div>
         </div>
     </dialog>
@@ -1248,10 +1273,10 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"
             integrity="sha384-e6nUZLBkQ86NJ6TVVKAeSaK8jWa3NhkYWZFomE39AvDbQWeie9PlQqM3pmYW5d1g"
             crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-    <script src="/js/offline.js?v=v78"></script>
-    <script src="/js/app.js?v=v78"></script>
+    <script src="/js/offline.js?v=v79"></script>
+    <script src="/js/app.js?v=v79"></script>
     <!-- Modulo comercial: Produtos, Pedidos e Agenda de Entregas.
          Arquivo separado porque app.js ja passa de 2.000 linhas. -->
-    <script src="/js/comercial.js?v=v78"></script>
+    <script src="/js/comercial.js?v=v79"></script>
 </body>
 </html>

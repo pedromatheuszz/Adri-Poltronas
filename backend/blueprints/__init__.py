@@ -11,6 +11,7 @@ from .dashboard import dashboard_bp
 from .notificacoes import notificacoes_bp
 from .excel import excel_bp
 from .comercial import produtos_bp, pedidos_bp
+from .backup import backup_bp
 
 __all__ = [
     'auth_bp',
@@ -25,4 +26,5 @@ __all__ = [
     'excel_bp',
     'produtos_bp',
     'pedidos_bp',
+    'backup_bp',
 ]

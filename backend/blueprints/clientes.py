@@ -4,7 +4,6 @@ import time
 import io
 import csv
 import json
-import os
 import logging
 from functools import wraps
 
@@ -161,7 +160,12 @@ def importar_clientes():
         elif nome.endswith('.json'):
             dados = json.loads(arquivo.read().decode('utf-8'))
             clientes = dados if isinstance(dados, list) else dados.get('clientes', [])
-        elif nome.endswith('.xlsx') or nome.endswith('.xls'):
+        elif nome.endswith('.xlsx'):
+            # `.xls` (Excel antigo, formato BIFF) nao chega ate aqui: o
+            # openpyxl so le OOXML, e `security.validar_upload` recusa a
+            # extensao com a instrucao de converter. Antes ela era aceita, o
+            # arquivo ia direto para `load_workbook` e o usuario recebia
+            # "nao foi possivel ler o arquivo" sem saber o que fazer.
             wb = openpyxl.load_workbook(arquivo)
             ws = wb.active
             headers = [str(cell.value or '').strip().lower() for cell in ws[1]]
@@ -233,8 +237,13 @@ def backup_json():
 
 @clientes_bp.route('/backup/sqlite')
 def backup_sqlite():
-    caminho = database.obter_caminho_banco_absoluto()
-    if not os.path.exists(caminho):
-        return jsonify({"erro": "Banco de dados nao encontrado."}), 404
-    return send_file(caminho, mimetype='application/x-sqlite3', as_attachment=True,
-        download_name=f"backup_adri_poltronas_{time.strftime('%Y%m%d_%H%M%S')}.db")
+    """
+    Alias historico de `/api/backup/sqlite`.
+
+    Delega em vez de duplicar: a versao anterior enviava o ARQUIVO EM USO pelo
+    `send_file`, o que com o app aberto captura um estado no meio de uma
+    transacao e deixa de fora o que estiver no `-wal`. O operador baixava algo
+    que parecia um backup e podia nao abrir.
+    """
+    from blueprints.backup import baixar_sqlite
+    return baixar_sqlite()
