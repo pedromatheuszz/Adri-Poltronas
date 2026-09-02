@@ -1,5 +1,7 @@
 #include "ClienteApi.h"
 
+#include "Capacidade.h"
+
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QNetworkReply>
@@ -50,7 +52,8 @@ MetricasDashboard MetricasDashboard::doJson(const QJsonObject &objeto) {
 }
 
 ClienteApi::ClienteApi(QUrl base, QObject *pai)
-    : QObject(pai), base_(std::move(base)), rede_(new QNetworkAccessManager(this)) {}
+    : QObject(pai), base_(std::move(base)), rede_(new QNetworkAccessManager(this)),
+      capacidade_(tokenDeCapacidade().toUtf8()) {}
 
 QUrl ClienteApi::urlDeClientes(const QString &busca) const {
     QUrl url = base_.resolved(QUrl(QStringLiteral("/api/clientes")));
@@ -70,6 +73,13 @@ QUrl ClienteApi::urlDoDashboard() const {
     return base_.resolved(QUrl(QStringLiteral("/api/dashboard")));
 }
 
+QNetworkRequest ClienteApi::requisicao(const QUrl &url) const {
+    QNetworkRequest pedido(url);
+    if (!capacidade_.isEmpty())
+        pedido.setRawHeader(kHeaderDaCapacidade, capacidade_);
+    return pedido;
+}
+
 void ClienteApi::tratarFalha(QNetworkReply *resposta) {
     const QByteArray corpo = resposta->readAll();
     const QJsonObject json = QJsonDocument::fromJson(corpo).object();
@@ -78,7 +88,7 @@ void ClienteApi::tratarFalha(QNetworkReply *resposta) {
 }
 
 void ClienteApi::listarClientes(const QString &busca) {
-    QNetworkReply *resposta = rede_->get(QNetworkRequest(urlDeClientes(busca)));
+    QNetworkReply *resposta = rede_->get(requisicao(urlDeClientes(busca)));
     connect(resposta, &QNetworkReply::finished, this, [this, resposta] {
         resposta->deleteLater();
         if (resposta->error() != QNetworkReply::NoError) {
@@ -95,7 +105,7 @@ void ClienteApi::listarClientes(const QString &busca) {
 }
 
 void ClienteApi::carregarMetricas() {
-    QNetworkReply *resposta = rede_->get(QNetworkRequest(urlDoDashboard()));
+    QNetworkReply *resposta = rede_->get(requisicao(urlDoDashboard()));
     connect(resposta, &QNetworkReply::finished, this, [this, resposta] {
         resposta->deleteLater();
         if (resposta->error() != QNetworkReply::NoError) {
@@ -109,12 +119,12 @@ void ClienteApi::carregarMetricas() {
 
 void ClienteApi::enviarEscrita(const QByteArray &verbo, const QUrl &url, const QJsonObject &corpo,
                                const QString &mensagemDeSucesso) {
-    QNetworkRequest requisicao(url);
-    requisicao.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    QNetworkRequest pedido = requisicao(url);
+    pedido.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
 
     const QByteArray dados =
         corpo.isEmpty() ? QByteArray() : QJsonDocument(corpo).toJson(QJsonDocument::Compact);
-    QNetworkReply *resposta = rede_->sendCustomRequest(requisicao, verbo, dados);
+    QNetworkReply *resposta = rede_->sendCustomRequest(pedido, verbo, dados);
 
     connect(resposta, &QNetworkReply::finished, this, [this, resposta, mensagemDeSucesso] {
         resposta->deleteLater();
