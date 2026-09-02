@@ -512,7 +512,10 @@ def test_nome_de_arquivo_do_onedrive_e_saneado(bruto, esperado):
 
 @pytest.mark.parametrize("bruto", [
     "../../../Documentos/relatorio",
-    "..\..\Windows\system32\payload",
+    # Raw string: sem o prefixo, `\W` e `\s` sao sequencias de escape
+    # invalidas -- o Python ainda as aceita, com SyntaxWarning, mas a partir
+    # da 3.12 o aviso e ruido a cada execucao da suite.
+    r"..\..\Windows\system32\payload",
     "pasta/subpasta/arquivo",
     "a:/b",
 ])

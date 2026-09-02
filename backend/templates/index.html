@@ -19,8 +19,8 @@
           href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 
     <!-- Ordem obrigatoria: tokens.css declara as variaveis que style.css usa. -->
-    <link rel="stylesheet" href="/css/tokens.css?v=v82">
-    <link rel="stylesheet" href="/css/style.css?v=v82">
+    <link rel="stylesheet" href="/css/tokens.css?v=v83">
+    <link rel="stylesheet" href="/css/style.css?v=v83">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
           integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H"
           crossorigin="anonymous" referrerpolicy="no-referrer" />
@@ -617,6 +617,17 @@
                             Restaurar copia
                         </button>
                     </footer>
+
+                    <p class="aviso-dados-externos">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                        <span>
+                            <strong>Enviar para Excel</strong> sobe uma planilha com
+                            todos os clientes -- nome, endereco e CEP -- para o OneDrive
+                            da conta Microsoft conectada.
+                            <strong>Backup do banco</strong> salva a base completa num
+                            arquivo, sem cifra: guarde em local controlado.
+                        </span>
+                    </p>
                 </section>
             </section>
 
@@ -659,6 +670,14 @@
                             Novo Recebimento
                         </button>
                     </div>
+
+                    <p class="aviso-dados-externos">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                        Ao gerar uma cobranca Pix ou boleto, o nome e o endereco do
+                        cliente, o valor e o vencimento sao enviados ao Asaas. Conciliar
+                        apenas consulta cobrancas ja emitidas -- nenhum dado novo sai
+                        da maquina.
+                    </p>
 
                     <div class="lista-toolbar">
                         <search class="input-group search-bar">
@@ -1284,10 +1303,10 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"
             integrity="sha384-e6nUZLBkQ86NJ6TVVKAeSaK8jWa3NhkYWZFomE39AvDbQWeie9PlQqM3pmYW5d1g"
             crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-    <script src="/js/offline.js?v=v82"></script>
-    <script src="/js/app.js?v=v82"></script>
+    <script src="/js/offline.js?v=v83"></script>
+    <script src="/js/app.js?v=v83"></script>
     <!-- Modulo comercial: Produtos, Pedidos e Agenda de Entregas.
          Arquivo separado porque app.js ja passa de 2.000 linhas. -->
-    <script src="/js/comercial.js?v=v82"></script>
+    <script src="/js/comercial.js?v=v83"></script>
 </body>
 </html>

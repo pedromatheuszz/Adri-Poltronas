@@ -1375,6 +1375,11 @@ body.modo-selecao-ativo tbody tr:hover td { background: var(--cor-selecao); }
 }
 .lista-contagem { font-size: var(--texto-md); color: var(--cor-texto-2); }
 
+/* O aviso nasceu com uma frase so, direto no <p>. Com texto mais longo e
+   trechos em negrito, o conteudo passou a viver num <span> para o icone nao
+   ser arrastado pela quebra de linha. */
+.aviso-dados-externos > span { display: block; }
+
 /* Modal que carrega formulario: o texto volta a alinhar a esquerda, porque
    rotulo de campo centralizado nao se le. */
 .payment-modal { max-width: 520px; text-align: left; }
