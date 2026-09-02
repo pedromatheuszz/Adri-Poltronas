@@ -89,6 +89,17 @@ mudanças de segurança e de integridade financeira são o centro desta versão.
   auditoria do `requirements.lock`, checksum do binário do gitleaks, actions
   fixadas por SHA e **construção do instalador**, que nunca era exercitada.
 
+- **O aplicativo instalado nunca aplicou uma migration.** `alembic/env.py`
+  chama `logging.config.fileConfig`, e o PyInstaller não enxergava esse import
+  — ele está dentro do `env.py`, carregado como script em tempo de execução.
+  Toda migração falhava no executável empacotado com
+  `No module named 'logging.config'`, e o backend caía no schema de emergência
+  em silêncio. O defeito só aparecia na máquina de quem instalasse, e foi
+  encontrado ao construir o instalador pela primeira vez.
+- O `package.json` passou a entrar no bundle: sem ele, o app instalado se
+  identificava com versão "desconhecida" na sonda que o Electron usa para
+  reconhecer o próprio backend.
+
 ### Segurança
 
 - Validação do host contra a lista de apelidos de loopback (DNS rebinding).
