@@ -91,14 +91,57 @@ def test_qt_e_electron_procuram_o_mesmo_executavel_empacotado(processo_backend_c
     assert f'{nome}.exe' in _ler(RAIZ, 'electron', 'backend.ts')
 
 
-def test_qt_reaproveita_servidor_ja_no_ar(processo_backend_cpp):
+def test_qt_sonda_a_identidade_antes_de_subir_o_proprio(processo_backend_cpp):
     """
     As duas janelas podem estar abertas ao mesmo tempo. Sem esta checagem, a
     segunda tentaria subir outro Flask na mesma porta e morreria.
+
+    Ate a 1.2.1 bastava um `connect` TCP: qualquer servidor de qualquer
+    projeto era adotado como se fosse o backend do ERP. A sonda agora
+    pergunta a /api/health QUEM esta atendendo, e se aceita a credencial que
+    temos em maos.
     """
-    assert 'servidorNoAr' in processo_backend_cpp
     corpo = processo_backend_cpp.split('bool ProcessoBackend::iniciar')[1]
-    assert corpo.index('servidorNoAr()') < corpo.index('new QProcess')
+    assert corpo.index('sondarPorta(capacidade)') < corpo.index('new QProcess')
+
+    for desfecho in ('Nosso', 'Livre', 'Estranho', 'RecusouCapacidade'):
+        assert f'EstadoDaPorta::{desfecho}' in corpo,             f'o desfecho {desfecho} nao e tratado ao iniciar'
+
+
+def test_qt_envia_o_token_de_capacidade_na_api(processo_backend_cpp):
+    """
+    O Qt era o buraco na protecao: sondava a porta e nao mandava cabecalho
+    nenhum. Ou subia um backend SEM exigencia de token -- desfazendo a
+    protecao para todo mundo --, ou tomava 403 ao falar com o do Electron.
+    """
+    cliente_api = _ler(RAIZ, 'qt-app', 'src', 'ClienteApi.cpp')
+    assert 'kHeaderDaCapacidade' in cliente_api,         'o ClienteApi nao injeta o cabecalho de capacidade'
+    # Nenhum ponto pode montar a requisicao por fora do helper: e assim que
+    # uma chamada volta a sair sem o token.
+    assert 'QNetworkRequest(url' not in cliente_api
+    assert 'rede_->get(QNetworkRequest(' not in cliente_api
+
+
+def test_qt_repassa_a_capacidade_ao_backend_que_sobe(processo_backend_cpp):
+    """Sem isso, o backend iniciado pela janela Qt nao exigiria token de
+    ninguem -- e a protecao valeria so quando o Electron subisse primeiro."""
+    assert 'kVariavelDaCapacidade' in processo_backend_cpp
+
+
+def test_qt_le_a_capacidade_do_mesmo_lugar_que_as_outras_pilhas():
+    """
+    As tres implementacoes leem o MESMO arquivo. `QStandardPaths` nao serve:
+    `GenericConfigLocation` no Windows resolve para %LOCALAPPDATA%, e nao
+    para o Roaming onde o Python e o .NET escrevem -- foi assim que a
+    primeira versao criou um segundo arquivo, com outro token.
+    """
+    capacidade = _ler(RAIZ, 'qt-app', 'src', 'Capacidade.cpp')
+    assert 'qEnvironmentVariable("APPDATA")' in capacidade
+    # A forma do CODIGO, e nao a palavra solta: o comentario do proprio
+    # arquivo cita `GenericConfigLocation` justamente para explicar por que
+    # ela nao serve, e uma busca ingenua acusaria o comentario.
+    assert 'QStandardPaths::GenericConfigLocation' not in capacidade
+    assert '.capacidade' in capacidade
 
 
 def test_qt_encerra_o_backend_que_iniciou(processo_backend_cpp):

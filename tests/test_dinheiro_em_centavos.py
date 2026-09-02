@@ -23,6 +23,7 @@ import json
 import os
 import sqlite3
 import sys
+import time
 from contextlib import closing
 
 import pytest
@@ -276,3 +277,97 @@ def test_backfill_converte_o_que_ja_existia(tmp_path, monkeypatch):
             "SELECT valor_centavos FROM pagamentos ORDER BY id")]
 
     assert centavos == [3333, 123456, 7]
+
+
+# =============================================================================
+# As leituras financeiras tambem somam centavos
+#
+# Escrever em centavos e LER em ponto flutuante desfaz metade do trabalho: o
+# total do dashboard nao bate com a soma das linhas que o operador ve na tela.
+# Ate a 1.2.1 todo relatorio fazia `SUM(valor)` sobre a coluna REAL.
+# =============================================================================
+def _receber(client, cliente_id, valor, quantos=1):
+    """
+    Cria N recebimentos ja confirmados, do mesmo valor.
+
+    Grava pelo `database`, e nao pela API, de proposito: o rate limiter do
+    Flask corta em 200 requisicoes por minuto, e um teste que precisa de 300
+    parcelas para expor erro de ponto flutuante passaria a medir o limiter em
+    vez da soma. O que se exercita aqui e a LEITURA.
+    """
+    hoje = time.strftime('%Y-%m-%d')
+    for i in range(quantos):
+        database.salvar_pagamento(
+            cliente_id, "Cliente Centavos", valor, f"Parcela {i}",
+            "2030-01-10", tipo_pagamento="Pix",
+            status="Recebido", data_pagamento=hoje,
+        )
+
+
+def test_dashboard_soma_exatamente_o_que_esta_nas_linhas(client):
+    """
+    Trezentas parcelas de 33,33 -- o caso em que o ponto flutuante acumula
+    erro visivel. Em IEEE 754, `sum([33.33] * 300)` nao devolve 9999.00.
+    """
+    cliente_id = _cliente(client)
+    _receber(client, cliente_id, 33.33, quantos=300)
+
+    metricas = database.obter_metricas_pagamentos()
+
+    assert metricas['total_recebido'] == 9999.00
+    assert metricas['qtd_recebido'] == 300
+
+    # E o total bate com a soma das linhas, feita em inteiros.
+    with database.conectar() as conexao:
+        centavos = conexao.execute(
+            "SELECT SUM(valor_centavos) FROM pagamentos WHERE status='Recebido'"
+        ).fetchone()[0]
+    assert centavos == 999900
+    assert metricas['total_recebido'] == round(centavos / 100, 2)
+
+
+def test_metricas_financeiras_somam_em_centavos(client):
+    cliente_id = _cliente(client)
+    _receber(client, cliente_id, 0.07, quantos=1000)
+
+    financeiras = database.obter_metricas_financeiras()
+
+    # Mil vezes sete centavos sao exatamente setenta reais.
+    assert financeiras['faturamento_mes'] == 70.00
+    assert financeiras['ticket_medio_mes'] == 0.07
+
+
+def test_serie_mensal_tambem_vem_de_centavos(client):
+    cliente_id = _cliente(client)
+    _receber(client, cliente_id, 19.99, quantos=101)
+
+    serie = database.obter_metricas_financeiras()['serie_mensal']
+    total_da_serie = round(sum(m['total'] for m in serie), 2)
+
+    assert total_da_serie == 2018.99
+
+
+def test_linha_sem_centavos_ainda_e_somada(client):
+    """
+    Compatibilidade durante a transicao: uma linha gravada por versao
+    anterior tem `valor` e nao tem `valor_centavos`. Ignora-la faria o
+    dashboard subnotificar receita real.
+    """
+    cliente_id = _cliente(client)
+    _receber(client, cliente_id, 100.00, quantos=1)
+    with database.conectar() as conexao:
+        conexao.execute("UPDATE pagamentos SET valor_centavos = NULL")
+
+    assert database.obter_metricas_pagamentos()['total_recebido'] == 100.00
+
+
+def test_derivacao_de_linha_antiga_arredonda_em_vez_de_truncar(client):
+    """`CAST(x * 100 AS INTEGER)` trunca. Um centavo por linha nao e
+    arredondamento -- e erro, e ele aparece exatamente na conta que o
+    contador confere."""
+    cliente_id = _cliente(client)
+    _receber(client, cliente_id, 0.29, quantos=1)
+    with database.conectar() as conexao:
+        conexao.execute("UPDATE pagamentos SET valor_centavos = NULL")
+
+    assert database.obter_metricas_pagamentos()['total_recebido'] == 0.29

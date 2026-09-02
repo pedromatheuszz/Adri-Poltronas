@@ -183,7 +183,10 @@ def test_lembrancas_antigas_sao_descartadas(client):
     removidas = idempotencia.limpar_antigas(database.conectar)
 
     assert removidas == 1
-    assert idempotencia.resposta_registrada(database.conectar, 'op-velha') is None
+    situacao, _ = idempotencia.reservar(
+        database.conectar, 'op-velha', '/api/clientes', 'POST', 'impressao-qualquer'
+    )
+    assert situacao == idempotencia.LIVRE, "a lembranca antiga nao foi descartada"
 
 
 def test_banco_sem_a_tabela_nao_derruba_a_escrita(client, monkeypatch):
@@ -195,3 +198,147 @@ def test_banco_sem_a_tabela_nao_derruba_a_escrita(client, monkeypatch):
     resposta = _criar(client, chave='op-sem-tabela')
 
     assert resposta.status_code == 201
+
+
+# =============================================================================
+# Reserva: a janela entre executar e registrar
+#
+# Ate a 1.2.1 a chave era gravada DEPOIS de a rota executar, em outra
+# transacao. Um processo encerrado ali deixava a escrita feita e a chave sem
+# registro -- e o reenvio duplicava, que e exatamente o que a chave existe
+# para impedir.
+# =============================================================================
+def test_processo_encerrado_entre_gravar_e_registrar_nao_duplica(client, monkeypatch):
+    """
+    Simula a queda depois da escrita e antes da conclusao da chave.
+
+    `concluir` e neutralizado: a rota executa por inteiro, o cliente e criado,
+    e a chave fica RESERVADA -- exatamente o estado em que o processo morreria.
+    """
+    monkeypatch.setattr(idempotencia, 'concluir', lambda *a, **k: None)
+    primeira = _criar(client, chave='op-queda')
+    assert primeira.status_code == 201
+    assert _quantos_clientes(client) == 1
+
+    # O processo voltou. A fila reenvia a mesma operacao.
+    monkeypatch.undo()
+    segunda = _criar(client, chave='op-queda')
+
+    assert segunda.status_code == 503, "reenvio depois da queda duplicaria a escrita"
+    assert _quantos_clientes(client) == 1
+
+
+def test_reserva_orfa_e_recolhida_pela_poda(client, monkeypatch):
+    """A reserva presa nao pode ser eterna: sem a poda, aquela chave
+    responderia 503 para sempre."""
+    monkeypatch.setattr(idempotencia, 'concluir', lambda *a, **k: None)
+    _criar(client, chave='op-orfa')
+    monkeypatch.undo()
+
+    with database.conectar() as conexao:
+        conexao.execute(
+            "UPDATE operacoes_idempotentes SET criado_em = datetime('now', '-30 days')"
+        )
+    assert idempotencia.limpar_antigas(database.conectar) == 1
+
+    situacao, _ = idempotencia.reservar(
+        database.conectar, 'op-orfa', '/api/clientes', 'POST', 'x'
+    )
+    assert situacao == idempotencia.LIVRE
+
+
+def test_erro_da_rota_libera_a_chave_para_nova_tentativa(client):
+    """
+    Um 400 nao pode prender a chave.
+
+    A fila corrige a causa (o operador arruma o CEP) e reenvia a MESMA
+    operacao, com a mesma chave. Se a reserva tivesse ficado, o reenvio
+    receberia 503 ate a poda passar.
+    """
+    invalido = {"nome": "", "cep": "", "rua": "", "bairro": "", "cidade": "",
+                "entrega_retirada": "Entrega"}
+    cabecalhos = {'Origin': ORIGEM_LOCAL, 'Content-Type': 'application/json',
+                  idempotencia.NOME_DO_HEADER: 'op-corrigida'}
+
+    recusada = client.post('/api/clientes', headers=cabecalhos, data=json.dumps(invalido))
+    assert recusada.status_code == 400
+
+    corrigida = _criar(client, chave='op-corrigida', nome='Agora vai')
+    assert corrigida.status_code == 201
+
+
+def test_rota_que_explode_nao_prende_a_chave(client, monkeypatch):
+    """Mesma logica, para excecao nao tratada."""
+    import database as modulo_database
+
+    def explode(*a, **k):
+        raise RuntimeError("disco cheio")
+
+    monkeypatch.setattr(modulo_database, 'salvar_cliente', explode)
+    try:
+        _criar(client, chave='op-explosao')
+    except RuntimeError:
+        pass
+    monkeypatch.undo()
+
+    situacao, _ = idempotencia.reservar(
+        database.conectar, 'op-explosao', '/api/clientes', 'POST', 'x'
+    )
+    assert situacao == idempotencia.LIVRE
+
+
+# =============================================================================
+# Impressao do corpo: a chave nao vale sozinha
+# =============================================================================
+def test_mesma_chave_com_corpo_diferente_e_recusada(client):
+    """
+    Erro de quem envia. Devolver a resposta da primeira operacao seria pior:
+    o cliente acharia que a segunda foi aplicada.
+    """
+    primeira = _criar(client, chave='op-reuso', nome='Primeiro')
+    assert primeira.status_code == 201
+
+    segunda = _criar(client, chave='op-reuso', nome='Outro nome')
+
+    assert segunda.status_code == 422
+    assert _quantos_clientes(client) == 1
+
+
+def test_mesma_chave_com_o_mesmo_corpo_continua_sendo_repeticao(client):
+    """O reenvio legitimo da fila manda exatamente o mesmo corpo."""
+    primeira = json.loads(_criar(client, chave='op-igual').data)
+    resposta = _criar(client, chave='op-igual')
+
+    assert resposta.status_code == 201
+    assert resposta.headers.get('X-Idempotencia') == 'repetida'
+    assert json.loads(resposta.data)['id'] == primeira['id']
+
+
+def test_impressao_distingue_rota_e_metodo():
+    """A mesma chave em rotas diferentes e outra operacao."""
+    corpo = b'{"nome":"X"}'
+    post_clientes = idempotencia.impressao_da_requisicao('POST', '/api/clientes', corpo)
+    put_clientes = idempotencia.impressao_da_requisicao('PUT', '/api/clientes', corpo)
+    post_outra = idempotencia.impressao_da_requisicao('POST', '/api/pedidos', corpo)
+
+    assert len({post_clientes, put_clientes, post_outra}) == 3
+
+
+def test_linha_antiga_sem_impressao_nao_vira_conflito(client):
+    """
+    Compatibilidade: as linhas gravadas pela versao anterior nao tem
+    impressao. Tratar ausencia como conflito recusaria reenvios de uma fila
+    que ja estava em curso na hora da atualizacao.
+    """
+    with database.conectar() as conexao:
+        conexao.execute(
+            "INSERT INTO operacoes_idempotentes "
+            "(chave, rota, metodo, estado, status, corpo) "
+            "VALUES ('op-legada', '/api/clientes', 'POST', 'concluida', 201, "
+            "'{\"mensagem\": \"Cliente cadastrado!\", \"id\": 99}')"
+        )
+
+    resposta = _criar(client, chave='op-legada')
+
+    assert resposta.status_code == 201
+    assert json.loads(resposta.data)['id'] == 99

@@ -146,9 +146,10 @@ do banco real antes de promover para a `main`.
 - **`main` não está protegida pelo GitHub.** A tabela acima diz que ninguém
   grava direto nela — hoje isso é combinado, não regra: um `git push origin
   main` acidental passa. Ver "Proteger a `main`" abaixo.
-- **`pagamentos.valor` ainda é `REAL`.** As tabelas do módulo comercial usam
-  centavos inteiros; a de pagamentos não. Converter exige leitura dupla
-  durante a transição e é projeto próprio.
+- **`pagamentos.valor` ainda é `REAL`, ao lado de `valor_centavos`.** As
+  escritas e todas as leituras financeiras já usam a coluna inteira; `valor`
+  segue sendo gravado para não quebrar consumidor externo. Removê-la é o
+  passo final da transição.
 - **Listagens não têm paginação.** A tela de clientes baixa e renderiza todos.
   Adequado para os milhares de registros de hoje; não para dezenas de milhares.
 - **Um computador por empresa.** SQLite em pasta de rede corrompe. Compartilhar

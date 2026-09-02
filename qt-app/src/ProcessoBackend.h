@@ -7,6 +7,7 @@
 // processo morrer com "endereco em uso".
 #pragma once
 
+#include <QByteArray>
 #include <QObject>
 #include <QProcess>
 #include <QString>
@@ -37,8 +38,22 @@ public:
     static QUrl urlDoApp();
     static Comando comandoPara(const QString &raizProjeto, bool empacotado);
 
-    /// True quando alguem ja escuta na porta. Basta a conexao TCP: o corpo da
-    /// resposta nao importa, so ter um servidor do outro lado.
+    /// O que ha na porta 5000.
+    ///
+    /// Ate a versao 1.2.1 bastava um `connect` TCP: qualquer servidor de
+    /// qualquer projeto era adotado como se fosse o backend do ERP. Agora a
+    /// sonda pergunta a `/api/health` QUEM esta atendendo, e se aceita a
+    /// credencial que temos em maos.
+    enum class EstadoDaPorta {
+        Livre,               ///< ninguem atende
+        Nosso,               ///< backend do ERP, com a nossa capacidade aceita
+        Estranho,            ///< responde, mas nao e o nosso backend
+        RecusouCapacidade,   ///< e o nosso, com token de outra instalacao
+    };
+
+    static EstadoDaPorta sondarPorta(const QByteArray &capacidade, int timeoutMs = 1500);
+
+    /// Mantido para compatibilidade dos testes existentes: "tem alguem la?".
     static bool servidorNoAr(int timeoutMs = 1000);
 
     /// Sobe o backend e so retorna quando ele responde. Em caso de falha

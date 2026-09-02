@@ -406,6 +406,80 @@ jobs:
         if-no-files-found: ignore
         retention-days: 7
 
+    # Construir o instalador prova que o empacotamento funciona. Nao prova que
+    # o que sai dele INSTALA e ABRE -- e a diferenca entre as duas coisas ja
+    # custou caro aqui: o app instalado nunca aplicava migration nenhuma, e o
+    # defeito so apareceu quando alguem rodou o executavel empacotado.
+    #
+    # O NSIS aceita instalacao silenciosa: `/S` instala, `/D` escolhe o
+    # destino -- e `/D` precisa ser o ULTIMO parametro e vir sem aspas,
+    # exigencia do proprio NSIS.
+    - name: Instalar de verdade e verificar que abre
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $instalador = (Get-ChildItem dist-instalador/*.exe | Select-Object -First 1).FullName
+        $destino = Join-Path $env:RUNNER_TEMP 'AdriInstalado'
+
+        Write-Host "Instalando $instalador em $destino"
+        $proc = Start-Process -FilePath $instalador -ArgumentList '/S',"/D=$destino" -Wait -PassThru
+        if ($proc.ExitCode -ne 0) { throw "o instalador saiu com codigo $($proc.ExitCode)" }
+
+        # O que o cliente recebe: a janela e o backend ao lado dela.
+        $exe = Join-Path $destino 'Adri Poltronas.exe'
+        $backend = Join-Path $destino 'resources/backend/AdriPoltronasBackend.exe'
+        foreach ($caminho in @($exe, $backend)) {
+          if (-not (Test-Path $caminho)) { throw "a instalacao nao produziu $caminho" }
+        }
+        Write-Host "Instalado: $((Get-ChildItem $destino -Recurse -File).Count) arquivos"
+
+        # Sobe o BACKEND INSTALADO -- nao o do repositorio -- num banco
+        # descartavel.
+        $banco = Join-Path $env:RUNNER_TEMP 'fumaca.db'
+        $env:ADRI_DB_PATH = $banco
+        $env:ADRI_API_TOKEN = 'token-de-fumaca'
+        $env:ADRI_PORTA = '5051'
+        $servidor = Start-Process -FilePath $backend -PassThru -WindowStyle Hidden
+
+        try {
+          $saude = $null
+          foreach ($tentativa in 1..40) {
+            Start-Sleep -Seconds 1
+            try {
+              $saude = Invoke-RestMethod -Uri 'http://127.0.0.1:5051/api/health' -TimeoutSec 2
+              break
+            } catch { }
+          }
+          if (-not $saude) { throw 'o backend instalado nao respondeu em 40s' }
+          if ($saude.servico -ne 'adri-poltronas') { throw "identidade inesperada: $($saude.servico)" }
+          if (-not $saude.capacidade_exigida) { throw 'o backend instalado nao exige capacidade' }
+          Write-Host "Backend instalado no ar, versao $($saude.versao)"
+
+          $recusou = $false
+          try {
+            Invoke-RestMethod -Uri 'http://127.0.0.1:5051/api/clientes' -TimeoutSec 5 | Out-Null
+          } catch { $recusou = $true }
+          if (-not $recusou) { throw 'a API respondeu sem o token de capacidade' }
+          Write-Host 'Sem token: recusado, como esperado'
+
+          $clientes = Invoke-RestMethod -Uri 'http://127.0.0.1:5051/api/clientes' -TimeoutSec 5 -Headers @{ 'X-Adri-Capacidade' = 'token-de-fumaca' }
+          Write-Host "Com token: $(@($clientes).Count) cliente(s)"
+        }
+        finally {
+          if ($servidor -and -not $servidor.HasExited) { Stop-Process -Id $servidor.Id -Force }
+        }
+
+        # A prova de que as migrations rodaram DENTRO do artefato instalado.
+        # Um banco que caiu no schema de emergencia nao chega a cabeca da
+        # cadeia -- foi assim que o defeito do `logging.config` passou
+        # despercebido ate a versao 1.2.1.
+        $revisao = (python -c "import os,sqlite3;print(sqlite3.connect(os.environ['ADRI_DB_PATH']).execute('SELECT version_num FROM alembic_version').fetchone()[0])").Trim()
+        $cabeca = (python -c "import sys;sys.path.insert(0,'backend');import migrations_manager;print(migrations_manager.revisao_alvo())").Trim()
+        Write-Host "Banco do app instalado: $revisao | cabeca da cadeia: $cabeca"
+        if ($revisao -ne $cabeca) {
+          throw "o app instalado nao aplicou as migrations (esta em '$revisao', deveria estar em '$cabeca')"
+        }
+
     - name: Publicar instalador como artefato
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4  # v5.0.0
       with:

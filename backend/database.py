@@ -552,9 +552,18 @@ def registrar_observacao_de_pagamento(pagamento_id: int, observacao: str) -> Non
         )
 
 
+# Status locais que ainda representam cobranca ABERTA, e portanto cancelavel.
+#
+# 'Atrasado' estava de fora, e nao devia: vencer nao quita nem cancela nada --
+# o cliente continua com um boleto ou um Pix vivo. O ERP recusava o
+# cancelamento justamente das cobrancas mais antigas, que sao as que mais
+# precisam ser encerradas.
+STATUS_CANCELAVEIS = ("Pendente", "Atrasado")
+
+
 def excluir_pagamento(pagamento_id) -> int:
     """
-    Cancela uma cobranca pendente marcando-a como 'Cancelado'.
+    Cancela uma cobranca aberta marcando-a como 'Cancelado'.
 
     Nao apaga a linha, e a mudanca e deliberada. Registro financeiro apagado
     e registro que nao existe: some do extrato, some da conferencia com o
@@ -571,9 +580,11 @@ def excluir_pagamento(pagamento_id) -> int:
     """
     with conectar() as conexao:
         pagamento = conexao.execute('SELECT * FROM pagamentos WHERE id=?', (pagamento_id,)).fetchone()
+        marcadores = ",".join("?" for _ in STATUS_CANCELAVEIS)
         cursor = conexao.execute(
-            "UPDATE pagamentos SET status='Cancelado' WHERE id=? AND status='Pendente'",
-            (pagamento_id,),
+            f"UPDATE pagamentos SET status='Cancelado' "
+            f"WHERE id=? AND status IN ({marcadores})",
+            (pagamento_id, *STATUS_CANCELAVEIS),
         )
         if pagamento and cursor.rowcount > 0:
             conexao.execute(
@@ -651,19 +662,47 @@ def obter_ou_criar_cliente_asaas(cliente_id, nome, cpf_cnpj=None, email=None, ci
 # dois blocos de metricas do dashboard leem daqui para nao divergirem.
 _STATUS_A_RECEBER = "('Pendente', 'Atrasado')"
 
+# Soma de dinheiro, em CENTAVOS INTEIROS.
+#
+# Todo relatorio financeiro somava `SUM(valor)` -- a coluna REAL. Escrever em
+# centavos e ler em ponto flutuante desfaz metade do trabalho: somar mil
+# parcelas de 33,33 em IEEE 754 acumula erro, e o total do dashboard nao bate
+# com a soma das linhas que o operador ve na tela.
+#
+# `COALESCE` cobre a linha que ainda nao passou pelo backfill -- um banco em
+# migracao, ou uma gravacao feita por versao anterior. Nesse caso deriva dos
+# reais, com ROUND antes do CAST: `CAST(33.335 * 100 AS INTEGER)` trunca para
+# 3333 em vez de arredondar para 3334, e um centavo por linha nao e
+# arredondamento, e erro.
+_SOMA_EM_CENTAVOS = (
+    "COALESCE(SUM(COALESCE(valor_centavos, "
+    "CAST(ROUND(COALESCE(valor, 0) * 100) AS INTEGER))), 0)"
+)
+
+
+def _reais(centavos) -> float:
+    """
+    Converte na BORDA, e so na borda.
+
+    A API continua falando em reais -- o frontend, os graficos e as planilhas
+    dependem disso. O que muda e onde a divisao acontece: uma vez, sobre o
+    total ja somado, em vez de mil vezes durante a soma.
+    """
+    return round(int(centavos or 0) / 100, 2)
+
 
 def obter_metricas_pagamentos():
     """Retorna metricas de pagamentos para o dashboard."""
     with conectar() as conexao:
         total_recebido = conexao.execute(
-            "SELECT COALESCE(SUM(valor), 0) FROM pagamentos WHERE status='Recebido'"
+            f"SELECT {_SOMA_EM_CENTAVOS} FROM pagamentos WHERE status='Recebido'"
         ).fetchone()[0]
         total_pendente = conexao.execute(
-            "SELECT COALESCE(SUM(valor), 0) FROM pagamentos "
+            f"SELECT {_SOMA_EM_CENTAVOS} FROM pagamentos "
             f"WHERE status IN {_STATUS_A_RECEBER}"
         ).fetchone()[0]
         total_atrasado = conexao.execute(
-            "SELECT COALESCE(SUM(valor), 0) FROM pagamentos "
+            f"SELECT {_SOMA_EM_CENTAVOS} FROM pagamentos "
             f"WHERE status IN {_STATUS_A_RECEBER} "
             "AND data_vencimento != '' AND date(data_vencimento) < date('now', 'localtime')"
         ).fetchone()[0]
@@ -675,9 +714,9 @@ def obter_metricas_pagamentos():
             f"WHERE status IN {_STATUS_A_RECEBER}"
         ).fetchone()[0]
     return {
-        'total_recebido': total_recebido or 0,
-        'total_pendente': total_pendente or 0,
-        'total_atrasado': total_atrasado or 0,
+        'total_recebido': _reais(total_recebido),
+        'total_pendente': _reais(total_pendente),
+        'total_atrasado': _reais(total_atrasado),
         'qtd_recebido': qtd_recebido or 0,
         'qtd_pendente': qtd_pendente or 0,
     }
@@ -701,7 +740,7 @@ def obter_metricas_financeiras(meses_historico=6):
         def receita_do_mes(deslocamento):
             """Soma recebida no mes com `deslocamento` meses a partir do atual."""
             return conexao.execute(
-                f"SELECT COALESCE(SUM(valor), 0) FROM pagamentos "
+                f"SELECT {_SOMA_EM_CENTAVOS} FROM pagamentos "
                 f"WHERE status = 'Recebido' AND strftime('%Y-%m', {_DATA_RECEBIMENTO}) = "
                 f"strftime('%Y-%m', date('now', 'localtime', ?))",
                 (f'{deslocamento} months',),
@@ -716,12 +755,12 @@ def obter_metricas_financeiras(meses_historico=6):
         ).fetchone()[0] or 0
 
         a_receber = conexao.execute(
-            "SELECT COALESCE(SUM(valor), 0) FROM pagamentos "
+            f"SELECT {_SOMA_EM_CENTAVOS} FROM pagamentos "
             f"WHERE status IN {_STATUS_A_RECEBER}"
         ).fetchone()[0] or 0
 
         em_atraso = conexao.execute(
-            "SELECT COALESCE(SUM(valor), 0) FROM pagamentos "
+            f"SELECT {_SOMA_EM_CENTAVOS} FROM pagamentos "
             "WHERE status IN ('Pendente', 'Atrasado') "
             "AND data_vencimento != '' AND date(data_vencimento) < date('now', 'localtime')"
         ).fetchone()[0] or 0
@@ -735,7 +774,8 @@ def obter_metricas_financeiras(meses_historico=6):
         # Serie mensal: consulta uma vez e preenche os meses sem receita com
         # zero, para o grafico nao pular periodos.
         linhas = conexao.execute(
-            f"SELECT strftime('%Y-%m', {_DATA_RECEBIMENTO}) AS mes, SUM(valor) AS total "
+            f"SELECT strftime('%Y-%m', {_DATA_RECEBIMENTO}) AS mes, "
+            f"{_SOMA_EM_CENTAVOS} AS total "
             f"FROM pagamentos WHERE status = 'Recebido' "
             f"AND {_DATA_RECEBIMENTO} >= date('now', 'localtime', ?) "
             f"GROUP BY mes",
@@ -748,8 +788,10 @@ def obter_metricas_financeiras(meses_historico=6):
             "SELECT strftime('%Y-%m', date('now', 'localtime', '-' || (? - n) || ' months')) AS mes FROM seq",
             (meses_historico - 1, meses_historico - 1),
         ).fetchall()
-        serie = [{'mes': m['mes'], 'total': round(por_mes.get(m['mes'], 0), 2)} for m in meses]
+        serie = [{'mes': m['mes'], 'total': _reais(por_mes.get(m['mes'], 0))} for m in meses]
 
+    # A variacao e uma razao entre dois totais: calcula-la em centavos evita
+    # que o arredondamento para reais entre no denominador.
     variacao = None
     if faturamento_anterior:
         variacao = round(((faturamento_mes - faturamento_anterior) / faturamento_anterior) * 100, 1)
@@ -757,13 +799,14 @@ def obter_metricas_financeiras(meses_historico=6):
         variacao = 100.0
 
     return {
-        'faturamento_mes': round(faturamento_mes, 2),
-        'faturamento_mes_anterior': round(faturamento_anterior, 2),
+        'faturamento_mes': _reais(faturamento_mes),
+        'faturamento_mes_anterior': _reais(faturamento_anterior),
         'variacao_percentual': variacao,
         'qtd_recebimentos_mes': qtd_mes,
-        'ticket_medio_mes': round(faturamento_mes / qtd_mes, 2) if qtd_mes else 0,
-        'a_receber': round(a_receber, 2),
-        'em_atraso': round(em_atraso, 2),
+        # Divide em centavos e converte uma vez so.
+        'ticket_medio_mes': _reais(faturamento_mes // qtd_mes) if qtd_mes else 0,
+        'a_receber': _reais(a_receber),
+        'em_atraso': _reais(em_atraso),
         'qtd_em_atraso': qtd_atraso,
         'serie_mensal': serie,
     }

@@ -48,6 +48,7 @@ Estados possiveis de `asaas_emissao_estado`:
 """
 from __future__ import annotations
 
+import datetime
 import logging
 import uuid
 from collections.abc import Callable
@@ -64,10 +65,24 @@ ESTADO_INICIADA = "iniciada"
 ESTADO_CONCLUIDA = "concluida"
 ESTADO_FALHOU = "falhou"
 
-# Estados a partir dos quais uma nova reivindicacao pode vencer. `iniciada`
-# NAO esta aqui de proposito: quem encontra esse estado precisa reconciliar
+# Estados a partir dos quais uma nova reivindicacao vence de imediato.
+# `iniciada` NAO esta aqui: quem encontra esse estado precisa reconciliar
 # antes, nunca emitir por cima.
 ESTADOS_REIVINDICAVEIS = ("", ESTADO_FALHOU)
+
+# Por quanto tempo uma reivindicacao segura a emissao.
+#
+# Sem isso, `iniciada` era um estado ABSORVENTE: se o processo morresse entre
+# reivindicar e chamar o Asaas, a proxima tentativa encontrava `iniciada`,
+# perguntava ao gateway, nao achava cobranca nenhuma -- e mesmo assim nao
+# conseguia reivindicar, porque `iniciada` nao estava na lista. O pagamento
+# respondia 409 para sempre, e a unica saida era mexer no banco na mao.
+#
+# Cinco minutos e generoso para uma chamada HTTP que o proprio cliente do
+# Asaas corta em segundos, e curto o bastante para o operador nao desistir.
+# Enquanto a concessao esta viva, uma segunda requisicao continua sendo
+# recusada -- e disso que a exclusao mutua depende.
+VALIDADE_DA_CONCESSAO_S = 300
 
 # Cobranca so se emite sobre valor que ainda esta em aberto. Emitir sobre
 # 'Recebido' cobraria de novo quem ja pagou.
@@ -80,6 +95,22 @@ class EmissaoJaEmCurso(Exception):
 
 class EmissaoNaoPermitida(Exception):
     """O pagamento nao esta em estado que aceite cobranca."""
+
+
+def _agora() -> str:
+    """Instante atual em ISO, na mesma forma que o SQLite compara como texto."""
+    return datetime.datetime.now().isoformat(timespec="seconds")
+
+
+def _limite_de_expiracao() -> str:
+    """
+    Instante antes do qual uma concessao ja nao vale mais.
+
+    Formato ISO ordenavel de proposito: assim a comparacao pode acontecer no
+    proprio SQL, dentro do UPDATE condicional, sem passar por Python.
+    """
+    limite = datetime.datetime.now() - datetime.timedelta(seconds=VALIDADE_DA_CONCESSAO_S)
+    return limite.isoformat(timespec="seconds")
 
 
 def nova_referencia() -> str:
@@ -96,13 +127,24 @@ def reivindicar(conectar: FabricaConexao, pagamento_id: int) -> tuple[str, dict]
     """
     Marca a intencao de emitir e devolve (referencia, pagamento).
 
-    O UPDATE e condicional: so vence quem encontrar o estado ainda livre. Dois
-    cliques simultaneos produzem um vencedor e um `EmissaoJaEmCurso` -- que e
-    exatamente o que se quer, porque o segundo nao tem como saber se o
-    primeiro ja criou a cobranca.
+    O UPDATE e condicional, e a condicao tem duas metades:
+
+    * o estado esta livre (nunca se tentou, ou a tentativa anterior falhou de
+      forma conhecida) -- reivindica na hora;
+    * o estado e `iniciada` mas a CONCESSAO EXPIROU -- reivindica tambem,
+      assumindo que quem a segurava morreu.
+
+    A segunda metade e o que impede `iniciada` de ser um estado absorvente. Um
+    processo encerrado entre reivindicar e chamar o Asaas deixava o pagamento
+    travado em 409 para sempre, sem caminho de volta pela interface.
+
+    Enquanto a concessao esta viva, uma segunda requisicao continua sendo
+    recusada: dois cliques simultaneos produzem um vencedor e um
+    `EmissaoJaEmCurso`, porque o segundo nao tem como saber se o primeiro ja
+    criou a cobranca.
 
     Levanta `EmissaoNaoPermitida` quando o pagamento nao aceita cobranca, e
-    `EmissaoJaEmCurso` quando outra reivindicacao esta em aberto.
+    `EmissaoJaEmCurso` quando ha reivindicacao viva.
     """
     with conectar() as conexao:
         linha = conexao.execute(
@@ -119,14 +161,38 @@ def reivindicar(conectar: FabricaConexao, pagamento_id: int) -> tuple[str, dict]
             )
 
         referencia = nova_referencia()
+        agora = _agora()
+        # A comparacao de expiracao acontece DENTRO do UPDATE, e nao antes
+        # dele: ler o estado, decidir em Python e escrever depois abriria uma
+        # janela em que duas requisicoes leem "expirada" e ambas reivindicam.
         cursor = conexao.execute(
-            "UPDATE pagamentos SET asaas_external_reference=?, asaas_emissao_estado=? "
-            "WHERE id=? AND COALESCE(asaas_emissao_estado,'') IN (?, ?)",
-            (referencia, ESTADO_INICIADA, pagamento_id, *ESTADOS_REIVINDICAVEIS),
+            "UPDATE pagamentos "
+            "   SET asaas_external_reference=?, asaas_emissao_estado=?, "
+            "       asaas_emissao_inicio=? "
+            " WHERE id=? "
+            "   AND (COALESCE(asaas_emissao_estado,'') IN (?, ?) "
+            "        OR (asaas_emissao_estado = ? "
+            "            AND COALESCE(asaas_emissao_inicio,'') < ?))",
+            (
+                referencia, ESTADO_INICIADA, agora, pagamento_id,
+                *ESTADOS_REIVINDICAVEIS,
+                ESTADO_INICIADA, _limite_de_expiracao(),
+            ),
         )
         if cursor.rowcount == 0:
             raise EmissaoJaEmCurso(
-                "Ja ha uma emissao em andamento para esta cobranca."
+                "Ja ha uma emissao em andamento para esta cobranca. "
+                "Tente novamente em alguns minutos."
+            )
+
+        anterior = (linha["asaas_emissao_estado"] or "").strip()
+        if anterior == ESTADO_INICIADA:
+            # Vale registrar: significa que uma tentativa anterior nao chegou
+            # ao fim, e a auditoria e onde isso fica visivel depois.
+            log.warning(
+                "[EMISSAO] Concessao expirada retomada no pagamento %s "
+                "(referencia anterior: %s)",
+                pagamento_id, linha["asaas_external_reference"],
             )
 
         registrar_evento(
@@ -134,10 +200,14 @@ def reivindicar(conectar: FabricaConexao, pagamento_id: int) -> tuple[str, dict]
             acao="financeiro.cobranca.emissao_iniciada",
             entidade="pagamento",
             entidade_id=pagamento_id,
-            valores_novos={"asaas_external_reference": referencia},
+            valores_novos={
+                "asaas_external_reference": referencia,
+                "retomada_de_concessao_expirada": anterior == ESTADO_INICIADA,
+            },
         )
         pagamento["asaas_external_reference"] = referencia
         pagamento["asaas_emissao_estado"] = ESTADO_INICIADA
+        pagamento["asaas_emissao_inicio"] = agora
         return referencia, pagamento
 
 

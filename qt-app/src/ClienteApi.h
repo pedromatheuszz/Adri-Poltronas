@@ -9,6 +9,7 @@
 #include <QJsonObject>
 #include <QList>
 #include <QNetworkAccessManager>
+#include <QNetworkRequest>
 #include <QObject>
 #include <QString>
 #include <QUrl>
@@ -68,11 +69,20 @@ private:
     /// Traduz erro de rede em mensagem legivel, preferindo a chave `erro` que
     /// a API sempre devolve -- o frontend web depende dela e nos tambem.
     void tratarFalha(class QNetworkReply *resposta);
+
+    /// Monta a requisicao com o token de capacidade.
+    ///
+    /// TODA chamada passa por aqui. Ate a versao 1.2.1 cada ponto montava seu
+    /// proprio QNetworkRequest e nenhum enviava cabecalho nenhum -- o Qt
+    /// simplesmente nao alcancava o backend protegido.
+    QNetworkRequest requisicao(const QUrl &url) const;
     void enviarEscrita(const QByteArray &verbo, const QUrl &url, const QJsonObject &corpo,
                        const QString &mensagemDeSucesso);
 
     QUrl base_;
     QNetworkAccessManager *rede_;
+    /// Lido uma vez, na construcao: o arquivo nao muda enquanto o app roda.
+    QByteArray capacidade_;
 };
 
 }  // namespace adri

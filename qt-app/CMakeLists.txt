@@ -12,6 +12,7 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets Network Test)
 # A logica fica numa biblioteca para que os testes possam link-la sem arrastar
 # o main(): sem isso so daria para testar a interface pela GUI, na mao.
 add_library(adri_qt_core STATIC
+    src/Capacidade.cpp
     src/ClienteApi.cpp
     src/DialogoCliente.cpp
     src/JanelaPrincipal.cpp
@@ -45,3 +46,7 @@ add_test(NAME modelo_clientes COMMAND test_modelo_clientes)
 add_executable(test_processo_backend tests/test_processo_backend.cpp)
 target_link_libraries(test_processo_backend PRIVATE adri_qt_core Qt6::Test)
 add_test(NAME processo_backend COMMAND test_processo_backend)
+
+add_executable(test_capacidade tests/test_capacidade.cpp)
+target_link_libraries(test_capacidade PRIVATE adri_qt_core Qt6::Test)
+add_test(NAME capacidade COMMAND test_capacidade)

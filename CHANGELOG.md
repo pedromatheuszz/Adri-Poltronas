@@ -31,6 +31,66 @@ execução real.
 
 ---
 
+## [1.3.0] — 2026-09-02
+
+Correção dos pontos levantados na reavaliação técnica do commit `fa78284`. O
+foco são os três bloqueios que impediam operação financeira real.
+
+### Corrigido — bloqueios financeiros
+
+- **Emissão de cobrança podia travar para sempre.** `iniciada` era um estado
+  absorvente: um processo encerrado entre reivindicar a emissão e chamar o
+  Asaas deixava o pagamento respondendo 409 indefinidamente — a tentativa
+  seguinte consultava o gateway, não achava cobrança nenhuma, e ainda assim
+  não conseguia reivindicar. A única saída era mexer no banco à mão. A
+  reivindicação passou a ser uma **concessão com prazo** (5 minutos): expirada,
+  outra tentativa a retoma; viva, a exclusão mútua continua valendo.
+
+- **O `PUT` era porta dos fundos da máquina de estados.** Aceitava `status` no
+  corpo e gravava direto — dava para marcar "Recebido" sem passar pela
+  conferência com o gateway. E aceitava alterar valor, vencimento e tipo de uma
+  cobrança **já emitida**, deixando o boleto que o cliente tem na mão diferente
+  do que o ERP mostra. A regra que impedia o estrago vivia no comportamento da
+  tela; agora vive no backend.
+
+- **Cancelamento podia divergir do Asaas.** Com cobrança no gateway e sem chave
+  configurada, o sistema cancelava apenas localmente: o ERP dizia "cancelado",
+  o cliente recebia a cobrança e pagava. E cobranças `Atrasado` não podiam ser
+  canceladas, embora vencer não quite nem cancele nada — eram justamente as
+  mais antigas que não podiam ser encerradas.
+
+### Corrigido — integridade e segurança
+
+- **A chave de idempotência passou a ser reservada antes da escrita.** Ela era
+  gravada depois, em outra transação: um processo encerrado nessa janela
+  deixava a escrita feita e a chave sem registro, e o reenvio da fila
+  duplicava. Agora a intenção é registrada primeiro, e a repetição recua em vez
+  de repetir. A reserva guarda também um **hash de método + rota + corpo**:
+  reaproveitar a mesma chave para outra operação devolvia, em silêncio, a
+  resposta da primeira.
+
+- **O Qt deixou de ser o buraco na proteção da API local.** Ele sondava apenas
+  se havia alguém na porta 5000 e não enviava cabeçalho nenhum — na prática, ou
+  subia um backend **sem** exigência de token, desfazendo a proteção para todo
+  mundo, ou tomava 403 ao tentar conversar com o backend do Electron. Agora lê
+  o mesmo arquivo de capacidade das outras duas pilhas e a sonda pergunta
+  *quem* está atendendo.
+
+- **Os relatórios financeiros passaram a somar centavos.** Escrever em centavos
+  e ler em ponto flutuante desfaz metade do trabalho: somar 300 parcelas de
+  33,33 em IEEE 754 não devolve 9.999,00, e o total do dashboard não batia com
+  a soma das linhas na tela.
+
+### Adicionado
+
+- **O CI instala o instalador e o exercita**, em vez de apenas construí-lo. Ele
+  verifica que o app instalado abre, exige a capacidade, recusa quem não a
+  apresenta — e que o banco criado por ele chega à cabeça da cadeia de
+  migrations. Um bundle sem `alembic.ini` responde `/api/health` normalmente;
+  olhar só a resposta HTTP deixaria passar o defeito da 1.2.
+
+---
+
 ## [1.2.0] — 2026-09-01
 
 Correção dos pontos levantados no diagnóstico técnico do commit `c50c2ec`. As
@@ -173,5 +233,6 @@ dashboard, mapa, relatórios, notificações, exportação para o OneDrive e
 interface renovada em Electron.
 
 [1.2.1]: https://github.com/pedromatheuszz/Adri-Poltronas/releases/tag/v1.2.1
+[1.3.0]: https://github.com/pedromatheuszz/Adri-Poltronas/releases/tag/v1.3.0
 [1.2.0]: https://github.com/pedromatheuszz/Adri-Poltronas/releases/tag/v1.2.0
 [1.1.0]: https://github.com/pedromatheuszz/Adri-Poltronas/releases/tag/v1.1.0
