@@ -1,0 +1,133 @@
+name: Publicar release
+
+# Dispara ao empurrar uma tag `v*`. O fluxo continua sendo o do
+# CONTRIBUTING.md -- promover para a `main`, marcar a versao, empurrar a tag --
+# e a publicacao passa a ser consequencia disso, em vez de um passo manual que
+# alguem lembra de fazer.
+#
+# Ate aqui existiam tags e a pagina de Releases estava vazia: quem quisesse o
+# instalador precisava construi-lo.
+on:
+  push:
+    tags:
+      - 'v*'
+
+# O token precisa poder criar release. Declarado no minimo necessario: sem
+# isto o GITHUB_TOKEN e somente leitura, e com mais que isto o job poderia
+# escrever no codigo.
+permissions:
+  contents: write
+
+jobs:
+  publicar:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
+
+    - name: Set up Python
+      uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c  # v6.0.0
+      with:
+        python-version: '3.12'
+
+    - name: Set up Node
+      uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903  # v6.0.0
+      with:
+        node-version: '22'
+        cache: 'npm'
+
+    # O lock, e nao o requirements.txt: o que vai para o cliente precisa ser a
+    # mesma arvore de dependencias que o job `security` audita.
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r backend/requirements.lock
+        pip install pyinstaller
+        npm ci
+
+    # A tag e o package.json precisam concordar. Divergirem significa que
+    # alguem marcou a versao sem subir o numero -- e o instalador sairia com o
+    # nome de uma versao que nao e a que esta sendo publicada.
+    - name: Conferir se a tag casa com o package.json
+      shell: bash
+      run: |
+        NA_TAG="${GITHUB_REF_NAME#v}"
+        NO_PACOTE=$(node -p "require('./package.json').version")
+        echo "tag: $NA_TAG | package.json: $NO_PACOTE"
+        if [ "$NA_TAG" != "$NO_PACOTE" ]; then
+          echo "::error::A tag $GITHUB_REF_NAME nao corresponde a versao $NO_PACOTE do package.json."
+          exit 1
+        fi
+
+    - name: Build backend (PyInstaller)
+      run: pyinstaller AdriPoltronasBackend.spec --noconfirm
+
+    - name: Build instalador (electron-builder)
+      env:
+        # O mesmo racional do job `instalador` do CI: este workflow nao
+        # assina. Assinar exige certificado, que nao esta e nao deve estar num
+        # runner publico -- ver docs/code-signing.md para o dia em que houver.
+        CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      run: npm run dist
+
+    # Checksum e o que permite a quem baixa verificar que o arquivo e o mesmo
+    # que saiu daqui. Nao substitui assinatura digital -- o SmartScreen segue
+    # alertando --, mas e o minimo defensavel enquanto nao ha certificado.
+    - name: Gerar checksum
+      shell: bash
+      run: |
+        cd dist-instalador
+        ARQUIVO=$(ls *.exe | head -1)
+        sha256sum "$ARQUIVO" | tee "$ARQUIVO.sha256"
+
+    # As notas saem do CHANGELOG, e nao de um texto escrito na hora: o que a
+    # release conta precisa ser o mesmo que o repositorio conta.
+    - name: Extrair as notas do CHANGELOG
+      shell: bash
+      run: |
+        python - <<'PY' > notas.md
+        import io, os, re
+        versao = os.environ["GITHUB_REF_NAME"].lstrip("v")
+        texto = io.open("CHANGELOG.md", encoding="utf-8").read()
+        # Do cabecalho desta versao ate o proximo cabecalho de versao.
+        padrao = rf"^## \[{re.escape(versao)}\].*?$(.*?)(?=^## \[|\Z)"
+        achado = re.search(padrao, texto, re.MULTILINE | re.DOTALL)
+        if achado:
+            print(achado.group(1).strip())
+        else:
+            print(f"Versao {versao}. Ver CHANGELOG.md para o detalhe.")
+        PY
+        cat notas.md
+
+    - name: Publicar a release
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        cd dist-instalador
+        ARQUIVO=$(ls *.exe | head -1)
+        {
+          cat ../notas.md
+          echo ""
+          echo "---"
+          echo ""
+          echo '### Verificar o download'
+          echo ""
+          echo 'O instalador **nao e assinado digitalmente** -- o Windows SmartScreen'
+          echo 'vai alertar. Confira o checksum antes de instalar:'
+          echo ""
+          echo '```powershell'
+          echo "Get-FileHash $ARQUIVO -Algorithm SHA256"
+          echo '```'
+          echo ""
+          echo 'Deve bater com:'
+          echo ""
+          echo '```'
+          cat "$ARQUIVO.sha256"
+          echo '```'
+        } > ../corpo.md
+
+        gh release create "$GITHUB_REF_NAME" \
+          "$ARQUIVO" "$ARQUIVO.sha256" \
+          --title "$GITHUB_REF_NAME" \
+          --notes-file ../corpo.md

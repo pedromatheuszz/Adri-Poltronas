@@ -209,11 +209,36 @@ def preparar_banco() -> None:
         log.info("Backup diario: %s", diario)
 
 
+def proteger_credenciais() -> None:
+    """
+    Tira do texto puro as credenciais que ainda estiverem no `.env`.
+
+    Roda a cada abertura, e nao so uma vez: um operador pode colar uma chave
+    nova no `.env` a qualquer momento -- e o modelo gravado em %APPDATA%
+    convida a isso. Sem uma passada por boot, a chave nova ficaria em claro
+    para sempre.
+
+    Nunca levanta. Falhar aqui nao pode impedir o app de abrir: as chaves
+    continuam funcionando de onde estao, so que menos protegidas.
+    """
+    try:
+        import config
+        import segredos
+
+        migradas = segredos.migrar_do_env(config.caminho_env_do_usuario())
+        if migradas:
+            log.info("Credenciais movidas para o cofre cifrado: %s", ", ".join(migradas))
+    except Exception:
+        log.exception("Nao foi possivel proteger as credenciais; seguindo assim mesmo")
+
+
 def main() -> int:
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
+    proteger_credenciais()
+
     try:
         preparar_banco()
     except ErroDePreparacaoDoBanco as erro:

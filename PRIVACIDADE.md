@@ -18,6 +18,7 @@ Ele descreve o comportamento real do software. Não é parecer jurídico.
 | Pedidos e itens | `pedidos`, `pedido_itens` | O que foi vendido |
 | Ações realizadas | `historico`, `auditoria_eventos` | Rastreabilidade |
 | Conta Microsoft conectada | `sessao` | Exportar para o OneDrive |
+| Chaves de integração (Asaas, Gemini) | `.segredos` | Cifradas com DPAPI |
 | Identificador do cliente no Asaas | `clientes_asaas` | Emitir cobrança |
 
 **O que o sistema NÃO guarda:** CPF/CNPJ, telefone, e-mail, dados de cartão,
@@ -102,8 +103,13 @@ O software cuida de parte; o resto depende de como a máquina é usada.
   controlado.
 - **Não há controle de acesso no aplicativo.** Quem abre, vê tudo. Use conta de
   usuário do Windows com senha.
-- **Segredos ficam em `%APPDATA%\AdriPoltronas\.env`**, em texto. Quem lê o
-  perfil do usuário lê as chaves do Asaas e do Gemini.
+- **As chaves de integração ficam cifradas** em
+  `%APPDATA%\AdriPoltronas\.segredos`, protegidas por DPAPI e amarradas à sua
+  conta do Windows — copiar o arquivo para outra máquina não serve de nada. A
+  migração é automática: uma chave colada no `.env` é movida para o cofre na
+  próxima abertura, com cópia do arquivo original em `.env.bak`.
+  **O que isso não protege:** código rodando como o seu próprio usuário pode
+  pedir ao DPAPI que decifre. Contra ele, o que vale é cifrar o disco.
 - **Chave do Asaas em produção move dinheiro de verdade.** Mantenha em sandbox
   até haver certeza.
 

@@ -143,6 +143,10 @@ do banco real antes de promover para a `main`.
   Microsoft ativa: as alterações vão para a fila de erros com 401. Resolver
   exige autenticação local própria, independente de integração.
 - **Não há usuários nem permissões.** Quem abre o aplicativo pode tudo.
+- **Releases são publicadas por tag.** `git push origin vX.Y.Z` dispara o
+  workflow `release.yml`, que constrói o instalador, gera o checksum e publica.
+  A tag precisa casar com a `version` do `package.json` — o workflow reprova se
+  divergirem.
 - **`main` não está protegida pelo GitHub.** A tabela acima diz que ninguém
   grava direto nela — hoje isso é combinado, não regra: um `git push origin
   main` acidental passa. Ver "Proteger a `main`" abaixo.

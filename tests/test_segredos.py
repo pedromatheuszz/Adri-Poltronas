@@ -1,0 +1,278 @@
+"""
+Cofre das credenciais de integracao.
+
+`ASAAS_API_KEY` e `GEMINI_API_KEY` viviam em texto puro em
+`%APPDATA%\\AdriPoltronas\\.env`. Qualquer processo rodando como o mesmo
+usuario -- e qualquer pessoa que abrisse a pasta -- lia as chaves. A do Asaas,
+em producao, movimenta dinheiro de verdade.
+
+Os tokens da Microsoft ja eram cifrados com DPAPI desde a 1.0; as chaves de
+integracao ficaram de fora, e nao havia motivo tecnico: e a mesma
+infraestrutura.
+
+O que estes testes protegem:
+
+* que a chave sai mesmo do texto claro, e nao apenas ganha uma copia cifrada;
+* que o `.env` original e preservado antes de ser reescrito -- mexer na
+  configuracao do usuario sem deixar volta seria trocar um risco por outro;
+* que a precedencia nao se inverte: ambiente vence cofre, cofre vence arquivo.
+"""
+import os
+import sys
+
+import pytest
+
+RAIZ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.join(RAIZ, 'backend'))
+
+import segredos  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def cofre_isolado(tmp_path, monkeypatch):
+    """
+    %APPDATA% proprio por teste.
+
+    Sem isso os testes escreveriam no cofre real do desenvolvedor -- e um
+    teste que mexe em credencial de verdade e um teste que ninguem quer
+    rodar.
+    """
+    monkeypatch.setenv('APPDATA', str(tmp_path))
+    (tmp_path / "AdriPoltronas").mkdir()
+    monkeypatch.setattr(segredos, '_cache', None)
+    monkeypatch.setattr(segredos, '_origem_env', set())
+    yield tmp_path
+    monkeypatch.setattr(segredos, '_cache', None)
+
+
+def _escrever_env(pasta, conteudo: str) -> str:
+    caminho = os.path.join(str(pasta), "AdriPoltronas", ".env")
+    with open(caminho, "w", encoding="utf-8") as arquivo:
+        arquivo.write(conteudo)
+    return caminho
+
+
+ENV_COM_SEGREDOS = """# Configuracao do Adri Poltronas.
+ADRI_FLASK_SECRET=segredo-de-sessao
+GEMINI_API_KEY=AIzaSyFALSA
+ASAAS_API_KEY=$aact_hmlg_FALSA
+ASAAS_SANDBOX=true
+"""
+
+
+# =============================================================================
+# Ida e volta
+# =============================================================================
+def test_grava_cifrado_e_le_de_volta(cofre_isolado):
+    assert segredos.gravar({'ASAAS_API_KEY': '$aact_prod_XYZ'}) is True
+
+    with open(segredos.caminho_do_cofre(), encoding="utf-8") as arquivo:
+        bruto = arquivo.read()
+
+    # A propriedade que importa: o valor NAO aparece no arquivo.
+    assert '$aact_prod_XYZ' not in bruto
+    assert 'ASAAS_API_KEY=' in bruto
+
+    segredos._cache = None
+    assert segredos.obter('ASAAS_API_KEY') == '$aact_prod_XYZ'
+
+
+def test_gravar_preserva_as_chaves_que_ja_estavam(cofre_isolado):
+    """Gravar uma credencial nao pode apagar as outras -- seria trocar a
+    protecao de uma pela perda das demais."""
+    segredos.gravar({'ASAAS_API_KEY': 'primeira'})
+    segredos.gravar({'GEMINI_API_KEY': 'segunda'})
+
+    segredos._cache = None
+    assert segredos.obter('ASAAS_API_KEY') == 'primeira'
+    assert segredos.obter('GEMINI_API_KEY') == 'segunda'
+
+
+def test_cofre_inexistente_nao_quebra_a_leitura(cofre_isolado):
+    assert segredos.obter('ASAAS_API_KEY') == ''
+    assert segredos.obter('ASAAS_API_KEY', 'padrao') == 'padrao'
+
+
+def test_cofre_corrompido_nao_derruba_o_aplicativo(cofre_isolado):
+    """Perder uma credencial e ruim; nao abrir e pior."""
+    with open(segredos.caminho_do_cofre(), "w", encoding="utf-8") as arquivo:
+        arquivo.write("ASAAS_API_KEY=DPAPI1:bytes-que-nao-decifram\n")
+
+    segredos._cache = None
+    assert segredos.obter('ASAAS_API_KEY') == ''
+
+
+def test_no_app_empacotado_o_cofre_recusa_valor_em_texto_claro(cofre_isolado, monkeypatch):
+    """
+    Contrato do `security.decifrar`: em producao, valor sem prefixo de
+    cifragem e RECUSADO -- melhor a integracao parar de funcionar, com o
+    motivo no log, do que o sistema tratar como normal um segredo em claro
+    onde deveria haver um cifrado.
+
+    Em desenvolvimento o mesmo valor e aceito, e e deliberado: facilita
+    depurar sem exigir DPAPI.
+    """
+    import security
+
+    with open(segredos.caminho_do_cofre(), "w", encoding="utf-8") as arquivo:
+        arquivo.write("ASAAS_API_KEY=chave-em-texto-puro\n")
+
+    monkeypatch.setattr(security, 'PRODUCAO', True)
+    segredos._cache = None
+    assert segredos.obter('ASAAS_API_KEY') == ''
+
+    monkeypatch.setattr(security, 'PRODUCAO', False)
+    segredos._cache = None
+    assert segredos.obter('ASAAS_API_KEY') == 'chave-em-texto-puro'
+
+
+# =============================================================================
+# Migracao: a chave precisa SAIR do texto claro
+# =============================================================================
+def test_migracao_tira_a_chave_do_env(cofre_isolado):
+    caminho = _escrever_env(cofre_isolado, ENV_COM_SEGREDOS)
+
+    migradas = segredos.migrar_do_env(caminho)
+
+    assert migradas == ['ASAAS_API_KEY', 'GEMINI_API_KEY']
+
+    with open(caminho, encoding="utf-8") as arquivo:
+        depois = arquivo.read()
+
+    # A regressao central: uma copia cifrada nao adianta se o texto claro
+    # continua la.
+    assert 'AIzaSyFALSA' not in depois
+    assert '$aact_hmlg_FALSA' not in depois
+    # E o operador precisa entender para onde a chave foi.
+    assert '.segredos' in depois
+
+
+def test_migracao_preserva_o_que_nao_e_credencial(cofre_isolado):
+    """`ADRI_FLASK_SECRET` e segredo de sessao, regeneravel, e perde-lo custa
+    apenas relogin. `ASAAS_SANDBOX` nem segredo e."""
+    caminho = _escrever_env(cofre_isolado, ENV_COM_SEGREDOS)
+    segredos.migrar_do_env(caminho)
+
+    with open(caminho, encoding="utf-8") as arquivo:
+        depois = arquivo.read()
+
+    assert 'ADRI_FLASK_SECRET=segredo-de-sessao' in depois
+    assert 'ASAAS_SANDBOX=true' in depois
+
+
+def test_migracao_guarda_copia_antes_de_reescrever(cofre_isolado):
+    """Mexer no arquivo de configuracao do usuario sem deixar volta seria
+    trocar um risco por outro."""
+    caminho = _escrever_env(cofre_isolado, ENV_COM_SEGREDOS)
+    segredos.migrar_do_env(caminho)
+
+    with open(caminho + ".bak", encoding="utf-8") as arquivo:
+        copia = arquivo.read()
+
+    assert copia == ENV_COM_SEGREDOS
+
+
+def test_migracao_e_idempotente(cofre_isolado):
+    """Roda a cada abertura do app. A segunda passada nao tem o que fazer."""
+    caminho = _escrever_env(cofre_isolado, ENV_COM_SEGREDOS)
+    primeira = segredos.migrar_do_env(caminho)
+    segunda = segredos.migrar_do_env(caminho)
+
+    assert primeira
+    assert segunda == []
+
+
+def test_chave_nova_colada_depois_tambem_e_migrada(cofre_isolado):
+    """
+    O modelo gravado em %APPDATA% convida o operador a colar chave no `.env`.
+    Sem uma passada por boot, a chave nova ficaria em claro para sempre.
+    """
+    caminho = _escrever_env(cofre_isolado, ENV_COM_SEGREDOS)
+    segredos.migrar_do_env(caminho)
+
+    with open(caminho, "a", encoding="utf-8") as arquivo:
+        arquivo.write("\nASAAS_WEBHOOK_TOKEN=colado-depois\n")
+
+    assert segredos.migrar_do_env(caminho) == ['ASAAS_WEBHOOK_TOKEN']
+
+    segredos._cache = None
+    assert segredos.obter('ASAAS_WEBHOOK_TOKEN') == 'colado-depois'
+    with open(caminho, encoding="utf-8") as arquivo:
+        assert 'colado-depois' not in arquivo.read()
+
+
+def test_env_sem_credencial_nao_e_tocado(cofre_isolado):
+    caminho = _escrever_env(cofre_isolado, "ADRI_FLASK_SECRET=so-isso\n")
+
+    assert segredos.migrar_do_env(caminho) == []
+    assert not os.path.exists(caminho + ".bak"), "reescreveu um arquivo que nao precisava"
+
+
+def test_env_inexistente_nao_quebra(cofre_isolado):
+    assert segredos.migrar_do_env(os.path.join(str(cofre_isolado), "nao-existe.env")) == []
+    assert segredos.migrar_do_env("") == []
+
+
+def test_valor_comentado_nao_e_migrado(cofre_isolado):
+    """Uma linha comentada e uma chave que o operador desativou de proposito."""
+    caminho = _escrever_env(cofre_isolado, "# ASAAS_API_KEY=antiga\nASAAS_SANDBOX=true\n")
+
+    assert segredos.migrar_do_env(caminho) == []
+
+
+# =============================================================================
+# Precedencia
+# =============================================================================
+def test_ambiente_injetado_vence_o_cofre(cofre_isolado, monkeypatch):
+    """
+    E como o CI, a suite e um operador testando uma chave nova injetam
+    valores sem gravar nada.
+    """
+    segredos.gravar({'ASAAS_API_KEY': 'do-cofre'})
+    monkeypatch.setenv('ASAAS_API_KEY', 'injetada')
+
+    segredos._cache = None
+    assert segredos.obter('ASAAS_API_KEY') == 'injetada'
+
+
+def test_cofre_vence_o_que_veio_do_arquivo(cofre_isolado, monkeypatch):
+    """
+    Durante a migracao as duas fontes coexistem. Se o `.env` vencesse, a
+    versao cifrada nunca seria usada -- e o cofre viraria enfeite.
+    """
+    segredos.gravar({'ASAAS_API_KEY': 'do-cofre'})
+    # Simula o que `load_dotenv` faz: coloca em os.environ e anota a origem.
+    monkeypatch.setenv('ASAAS_API_KEY', 'do-arquivo')
+    segredos.registrar_origem_env({'ASAAS_API_KEY'})
+
+    segredos._cache = None
+    assert segredos.obter('ASAAS_API_KEY') == 'do-cofre'
+
+
+def test_arquivo_vale_quando_o_cofre_esta_vazio(cofre_isolado, monkeypatch):
+    """Compatibilidade com instalacao que ainda nao migrou."""
+    monkeypatch.setenv('GEMINI_API_KEY', 'do-arquivo')
+    segredos.registrar_origem_env({'GEMINI_API_KEY'})
+
+    assert segredos.obter('GEMINI_API_KEY') == 'do-arquivo'
+
+
+# =============================================================================
+# O que o cofre guarda
+# =============================================================================
+def test_apenas_credenciais_de_integracao_sao_protegidas():
+    """
+    `ADRI_FLASK_SECRET` fica de fora de proposito: e um segredo de sessao,
+    regeneravel, e perde-lo custa apenas relogin. Proteger tudo indistinta-
+    mente tornaria a recuperacao de uma instalacao mais dificil sem ganho.
+    """
+    assert set(segredos.CHAVES_PROTEGIDAS) == {
+        'ASAAS_API_KEY', 'GEMINI_API_KEY', 'ASAAS_WEBHOOK_TOKEN'
+    }
+    assert 'ADRI_FLASK_SECRET' not in segredos.CHAVES_PROTEGIDAS
+
+
+def test_o_cofre_fica_junto_do_banco_e_dos_logs(cofre_isolado):
+    caminho = segredos.caminho_do_cofre()
+    assert caminho.endswith(os.path.join("AdriPoltronas", ".segredos"))
+    assert str(cofre_isolado) in caminho
