@@ -6,6 +6,22 @@ on:
   pull_request:
     branches: [ main, develop ]
 
+# Actions fixadas por SHA, e nao por tag.
+#
+# Tag em Git e movel: `@v4` aponta para o que o dono do repositorio decidir, e
+# quem controla a action passa a executar codigo dentro deste pipeline sem que
+# nada aqui mude. Ja houve comprometimento assim em actions populares. O SHA e
+# imutavel -- o comentario ao lado diz qual versao ele e, para a atualizacao
+# continuar sendo legivel.
+#
+#   actions/checkout@v5.0.0        08c6903cd8c0fde910a37f88322edcfb5dd907a8
+#   actions/setup-python@v6.0.0    e797f83bcb11b83ae66e0230d6156d7c80228e7c
+#   actions/setup-node@v6.0.0      2028fbc5c25fe9cf00d9f06a71cc4710d4507903
+#   actions/setup-dotnet@v5.0.0    d4c94342e560b34958eacfc5d055d21461ed1c5d
+#   actions/upload-artifact@v5.0.0 330a01c490aca151604b8cf639adc76d48f6c5d4
+#   codecov/codecov-action@v5.5.1  5a1091511ad55cbe89839c7260b706298ca349f7
+#   jurplel/install-qt-action@v4.3.0  d325aaf2a8baeeda41ad0b5d39f84a6af9bcf005
+
 jobs:
   test:
     # A aplicacao e Windows-only (DPAPI via pywin32, instalador NSIS).
@@ -17,10 +33,10 @@ jobs:
         python-version: ['3.10', '3.11', '3.12']
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
 
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c  # v6.0.0
       with:
         python-version: ${{ matrix.python-version }}
         cache: 'pip'
@@ -34,35 +50,52 @@ jobs:
     - name: Lint with ruff
       run: ruff check backend/ tests/ build.py
 
+    # A cobertura minima e um piso, nao uma meta. Ela existe para impedir que
+    # codigo novo entre sem teste nenhum -- sem o `--cov-fail-under`, o job
+    # ficava verde com a cobertura caindo a cada PR e ninguem via.
     - name: Run tests with coverage
       working-directory: backend
       run: >-
         python -m pytest ../tests -v --tb=short
         --cov=. --cov-report=term-missing --cov-report=xml:../coverage.xml
+        --cov-fail-under=80
 
     - name: Upload coverage reports
       if: matrix.python-version == '3.12'
-      uses: codecov/codecov-action@v4
+      uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7  # v5.5.1
       with:
         files: ./coverage.xml
         flags: unittests
         name: codecov-umbrella
+      # Sem token configurado, o envio falha. Isso nao pode reprovar o
+      # pipeline: a cobertura ja e verificada acima, pelo `--cov-fail-under`.
+      # O Codecov aqui e visualizacao, nao portao.
       continue-on-error: true
 
   electron:
     runs-on: windows-latest
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
 
     - name: Set up Node
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903  # v6.0.0
       with:
         node-version: '22'
         cache: 'npm'
 
     - name: Install Node dependencies
       run: npm ci
+
+    # O `npm ci` ja imprimia o resumo de vulnerabilidades e seguia em frente:
+    # o pipeline ficou verde por meses com 13 altas e 1 critica na cadeia do
+    # electron-builder. Auditar de proposito, e reprovar, e o que faz a
+    # informacao virar decisao.
+    #
+    # `--audit-level=high`: moderada em dependencia de build nao justifica
+    # travar entrega; alta e critica justificam.
+    - name: Audit Node dependencies
+      run: npm audit --audit-level=high
 
     - name: Typecheck (tsc --noEmit)
       run: npm run typecheck
@@ -76,10 +109,10 @@ jobs:
     runs-on: windows-latest
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
 
     - name: Install Qt
-      uses: jurplel/install-qt-action@v4
+      uses: jurplel/install-qt-action@d325aaf2a8baeeda41ad0b5d39f84a6af9bcf005  # v4.3.0
       with:
         version: '6.8.3'
         arch: 'win64_mingw'
@@ -100,16 +133,31 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
 
     - name: Set up .NET
-      uses: actions/setup-dotnet@v4
+      uses: actions/setup-dotnet@d4c94342e560b34958eacfc5d055d21461ed1c5d  # v5.0.0
       with:
         dotnet-version: '8.0.x'
 
     - name: Restore
       working-directory: dotnet
       run: dotnet restore
+
+    # Mesma logica do `npm audit`: o ecossistema .NET tambem tem CVE, e o
+    # pipeline nao olhava para ele.
+    - name: Audit NuGet packages
+      working-directory: dotnet
+      run: |
+        # `|| true` porque o passo roda com `bash -e`: o proprio comando pode
+        # sair diferente de zero por motivos alheios ao que se quer medir, e
+        # quem decide aqui e o grep sobre a saida.
+        SAIDA=$(dotnet list package --vulnerable --include-transitive 2>&1 || true)
+        echo "$SAIDA"
+        if echo "$SAIDA" | grep -qE '\s(High|Critical)\s'; then
+          echo "::error::Pacote NuGet com vulnerabilidade alta ou critica."
+          exit 1
+        fi
 
     - name: Build
       working-directory: dotnet
@@ -123,7 +171,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
       with:
         # Historico completo: a varredura de segredos precisa olhar TODOS os
         # commits, nao so o ultimo. Com o clone raso padrao (depth 1) o
@@ -131,7 +179,7 @@ jobs:
         fetch-depth: 0
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c  # v6.0.0
       with:
         python-version: '3.12'
 
@@ -140,9 +188,26 @@ jobs:
         python -m pip install --upgrade pip
         pip install pip-audit
 
-    - name: Check for vulnerable dependencies
-      # Sem `|| true`: uma dependencia vulneravel precisa reprovar o pipeline.
+    # Duas varreduras, e a segunda nao e redundante:
+    #
+    #   requirements.txt tem faixas de versao -- e o que um `pip install`
+    #   resolveria hoje.
+    #   requirements.lock tem as versoes exatas -- e o que o PyInstaller
+    #   empacota e o que o cliente instala.
+    #
+    # Auditar so o primeiro deixava passar vulnerabilidade que existe no
+    # artefato entregue. Foi assim que `cryptography` ficou fora do lock por
+    # inteiro sem ninguem notar.
+    - name: Check for vulnerable dependencies (faixas)
       run: pip-audit --requirement backend/requirements.txt --strict
+
+    - name: Check for vulnerable dependencies (versoes travadas)
+      # A copia para `.txt` nao e capricho: o pip-audit recusa o arquivo pela
+      # extensao ("invalid requirements input") antes mesmo de tentar le-lo.
+      run: |
+        cp backend/requirements.lock requirements-lock.txt
+        pip-audit --requirement requirements-lock.txt --strict
+        rm -f requirements-lock.txt
 
     # gitleaks pelo binario, e nao pela action oficial.
     #
@@ -157,12 +222,89 @@ jobs:
     - name: Scan for committed secrets
       env:
         VERSAO_GITLEAKS: 8.30.1
+        # SHA-256 do tarball oficial da versao acima. Sem esta conferencia, o
+        # pipeline executaria como root o que quer que o servidor devolvesse
+        # naquela URL -- e um download nao verificado dentro do CI e um
+        # caminho de comprometimento da cadeia de build.
+        SHA256_GITLEAKS: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
       run: |
+        ARQUIVO="gitleaks_${VERSAO_GITLEAKS}_linux_x64.tar.gz"
         curl -sSfL -o gitleaks.tar.gz \
-          "https://github.com/gitleaks/gitleaks/releases/download/v${VERSAO_GITLEAKS}/gitleaks_${VERSAO_GITLEAKS}_linux_x64.tar.gz"
+          "https://github.com/gitleaks/gitleaks/releases/download/v${VERSAO_GITLEAKS}/${ARQUIVO}"
+        echo "${SHA256_GITLEAKS}  gitleaks.tar.gz" | sha256sum --check --status || {
+          echo "::error::O binario baixado do gitleaks nao confere com o checksum esperado."
+          echo "Recebido: $(sha256sum gitleaks.tar.gz | cut -d' ' -f1)"
+          exit 1
+        }
         tar -xzf gitleaks.tar.gz gitleaks
         chmod +x gitleaks
         # `--redact` para o log do CI nunca imprimir o segredo encontrado --
         # o log e publico neste repositorio.
         ./gitleaks detect --source . --no-banner --redact --verbose
         rm -f gitleaks gitleaks.tar.gz
+
+  instalador:
+    # O que o cliente instala nunca era construido pelo CI.
+    #
+    # "Verde" significava que o codigo compila e os testes de unidade passam --
+    # nao que existe um instalador funcional. Entre uma coisa e outra estao o
+    # PyInstaller (que precisa achar alembic.ini, migrations e templates dentro
+    # do bundle) e o electron-builder. Os dois quebram por motivos que nenhum
+    # teste de unidade alcanca, e quebravam na maquina de quem empacota.
+    #
+    # So na main e em pull request para ela: e o momento em que a pergunta "isto
+    # vira produto?" precisa de resposta, e o job custa varios minutos.
+    if: github.ref == 'refs/heads/main' || github.base_ref == 'main'
+    runs-on: windows-latest
+    needs: [test, electron]
+
+    steps:
+    - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
+
+    - name: Set up Python
+      uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c  # v6.0.0
+      with:
+        python-version: '3.12'
+
+    - name: Set up Node
+      uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903  # v6.0.0
+      with:
+        node-version: '22'
+        cache: 'npm'
+
+    # O lock, e nao o requirements.txt: o que vai para o instalador precisa ser
+    # a mesma arvore de dependencias auditada no job `security`.
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r backend/requirements.lock
+        pip install pyinstaller
+        npm ci
+
+    - name: Build backend (PyInstaller)
+      run: pyinstaller AdriPoltronasBackend.spec --noconfirm
+
+    # O bundle precisa levar consigo o que o backend procura em tempo de
+    # execucao. Faltando qualquer um destes, o app instalado abre e cai no
+    # schema de emergencia -- ou nao abre.
+    - name: Verificar conteudo do bundle
+      shell: bash
+      run: |
+        for RECURSO in alembic.ini migrations templates; do
+          if [ ! -e "dist/AdriPoltronasBackend/_internal/$RECURSO" ]; then
+            echo "::error::O bundle nao levou '$RECURSO'."
+            exit 1
+          fi
+        done
+        echo "Bundle completo."
+
+    - name: Build instalador (electron-builder)
+      run: npm run dist
+
+    - name: Publicar instalador como artefato
+      uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4  # v5.0.0
+      with:
+        name: instalador-windows
+        path: dist-instalador/*.exe
+        if-no-files-found: error
+        retention-days: 14

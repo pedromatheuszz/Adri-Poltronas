@@ -2207,11 +2207,11 @@ function renderizarTabelaPagamentos(pagamentos) {
         var acoes = '';
         if (p.status === 'Pendente') {
             if (!p.asaas_payment_id) {
-                acoes = '<button type="button" class="btn btn-primary btn-sm" onclick="gerarCobranca(' + p.id + ')">Gerar Cobranca</button>';
+                acoes = '<button type="button" class="btn btn-primary btn-sm" data-comando="gerarCobranca" data-id="' + p.id + '">Gerar Cobranca</button>';
             } else {
-                acoes = '<button type="button" class="btn btn-sucesso btn-sm" onclick="confirmarPagamentoLocal(' + p.id + ')">Confirmar</button>';
+                acoes = '<button type="button" class="btn btn-sucesso btn-sm" data-comando="confirmarPagamentoLocal" data-id="' + p.id + '">Confirmar</button>';
             }
-            acoes += '<button type="button" class="btn btn-perigo btn-sm" onclick="cancelarPagamentoLocal(' + p.id + ')">Cancelar</button>';
+            acoes += '<button type="button" class="btn btn-perigo btn-sm" data-comando="cancelarPagamentoLocal" data-id="' + p.id + '">Cancelar</button>';
         }
         var descricao = escaparHtml(p.descricao || '-');
         return '<tr>' +
@@ -2271,7 +2271,7 @@ async function exibirDadosCobranca(pagamentoId) {
                 // (`div[style*="word-break"]`), que quebrava a copia assim que
                 // o CSS inline mudasse.
                 (payload ? '<div class="cobranca-payload" id="cobrancaPayload">' + escaparHtml(payload) + '</div>' : '') +
-                (payload ? '<button type="button" class="btn btn-primary" onclick="copiarPix()">Copiar Copia e Cola</button>' : '') +
+                (payload ? '<button type="button" class="btn btn-primary" data-comando="copiarPix">Copiar Copia e Cola</button>' : '') +
                 '</div>';
         } else if (dados.tipo_pagamento === 'Boleto') {
             var url = urlSegura(dados.boleto_url);
@@ -2575,3 +2575,89 @@ async function carregarMapaClientes() {
     }
 }
 
+
+// -----------------------------------------------------------------------------
+// Comandos declarativos
+//
+// Substituem os 36 handlers `onclick=` que viviam no HTML (mais quatro
+// montados em template string aqui e um no comercial.js). O motivo nao e
+// estilo: enquanto existir um `onclick=` no markup, a Content Security Policy
+// precisa liberar `script-src 'unsafe-inline'` -- e essa liberacao vale para
+// TODO script inline da pagina, inclusive um que venha a ser injetado por um
+// campo de cadastro mal escapado. Sem os handlers, a politica recusa script
+// inline por completo.
+//
+// O atributo e `data-comando`, e nao `data-acao`, porque `data-acao` ja tem
+// dono: as notificacoes o usam com os valores "lida", "naolida" e "entrega",
+// despachados por um ouvinte proprio na lista. Dois despachantes sobre o mesmo
+// atributo disputariam os mesmos elementos.
+//
+// A LISTA BRANCA e o que torna isto seguro. Um ouvinte delegado que pegasse o
+// nome do atributo e o procurasse direto em `window` transformaria qualquer
+// HTML injetado numa forma de chamar qualquer funcao do aplicativo. Aqui, o
+// nome so vale se estiver declarado abaixo.
+//
+// A resolucao acontece no clique, e nao no carregamento: parte destas funcoes
+// vive no comercial.js, que carrega depois deste arquivo. Um mapa montado
+// agora com referencias diretas quebraria com ReferenceError.
+//
+// `data-arg` vira string; `data-id` vira numero. Dois atributos em vez de
+// adivinhar o tipo -- adivinhacao erraria em CEP com zero a esquerda e em nome
+// de modal que pareca numero.
+// -----------------------------------------------------------------------------
+var COMANDOS_PERMITIDOS = [
+    'abrirFormularioEntrega',
+    'abrirFormularioPedido',
+    'abrirFormularioProduto',
+    'abrirModalNovoRecebimento',
+    'abrirNotificacoes',
+    'adicionarItemAoPedido',
+    'alternarSidebar',
+    'aplicarFiltros',
+    'atualizarNotificacoes',
+    'cancelarPagamentoLocal',
+    'carregarPagamentos',
+    'carregarRelatorio',
+    'conectarMicrosoft',
+    'confirmarPagamentoLocal',
+    'copiarPix',
+    'enviarParaExcel',
+    'executarImportacao',
+    'exportarRelatorio',
+    'fazerBackupSQLite',
+    'fecharModal',
+    'fecharModalCobranca',
+    'fecharModalNovoRecebimento',
+    'fecharNotificacoes',
+    'gerarCobranca',
+    'limparFiltros',
+    'sugerirBairro',
+    'toggleFiltro',
+    'toggleModoSelecao',
+    'toggleTheme',
+    'trocarAba'
+];
+
+function _despacharComando(evento) {
+    var alvo = evento.target.closest('[data-comando]');
+    if (!alvo) return;
+
+    var nome = alvo.getAttribute('data-comando');
+    if (COMANDOS_PERMITIDOS.indexOf(nome) === -1) {
+        console.warn('[comando] fora da lista branca:', nome);
+        return;
+    }
+    var funcao = window[nome];
+    if (typeof funcao !== 'function') {
+        console.warn('[comando] nao encontrado:', nome);
+        return;
+    }
+
+    var id = alvo.getAttribute('data-id');
+    if (id !== null) { funcao(Number(id)); return; }
+    var arg = alvo.getAttribute('data-arg');
+    if (arg !== null) { funcao(arg); return; }
+    funcao();
+}
+
+document.addEventListener('click', _despacharComando);

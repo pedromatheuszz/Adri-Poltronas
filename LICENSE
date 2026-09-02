@@ -1,0 +1,38 @@
+Copyright (c) 2026 Pedro Matheus. Todos os direitos reservados.
+
+SOFTWARE PROPRIETARIO
+
+Este software e disponibilizado publicamente para consulta e avaliacao. O
+codigo-fonte estar visivel no GitHub NAO o coloca em dominio publico nem o
+licencia para uso.
+
+Sem autorizacao previa e por escrito do titular dos direitos, nao e permitido:
+
+  - usar o software, no todo ou em parte, para qualquer finalidade;
+  - copiar, distribuir, publicar ou disponibilizar a terceiros;
+  - modificar, adaptar, traduzir ou criar obras derivadas;
+  - sublicenciar, vender, alugar ou ceder;
+  - remover ou alterar avisos de autoria.
+
+E permitido, sem autorizacao previa:
+
+  - ler o codigo para fins de estudo, auditoria ou avaliacao;
+  - relatar defeitos e vulnerabilidades (ver SECURITY.md);
+  - propor alteracoes por pull request, cedendo ao titular os direitos sobre a
+    contribuicao enviada.
+
+O SOFTWARE E FORNECIDO "COMO ESTA", SEM GARANTIA DE QUALQUER NATUREZA, EXPRESSA
+OU IMPLICITA, INCLUINDO MAS NAO SE LIMITANDO AS GARANTIAS DE COMERCIABILIDADE,
+ADEQUACAO A UMA FINALIDADE ESPECIFICA E NAO VIOLACAO. EM NENHUMA HIPOTESE O
+AUTOR SERA RESPONSAVEL POR QUALQUER RECLAMACAO, DANO OU OUTRA RESPONSABILIDADE,
+SEJA EM ACAO CONTRATUAL, EXTRACONTRATUAL OU DE OUTRA FORMA, DECORRENTE DE OU
+RELACIONADA AO SOFTWARE OU AO SEU USO.
+
+Este arquivo torna explicito o que o `package.json` ja declarava com
+"license": "UNLICENSED". Um repositorio publico sem arquivo de licenca ja e,
+por padrao, "todos os direitos reservados" -- mas quem chega nele nao tem como
+saber disso sem ler a lei de direitos autorais. Para abrir o codigo sob uma
+licenca livre (MIT, Apache-2.0), substitua o texto acima e ajuste o campo
+"license" do package.json.
+
+Contato: https://github.com/pedromatheuszz

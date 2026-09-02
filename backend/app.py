@@ -1,6 +1,7 @@
 import logging
 import os
 import secrets
+from logging.handlers import RotatingFileHandler
 import uuid
 import json
 import sys
@@ -32,10 +33,27 @@ from erp.core.contexto import (
 )
 
 LOG_DIR = os.path.join(os.environ.get("APPDATA", os.getcwd()), "AdriPoltronas", "logs")
+
+# Rotacao: 5 arquivos de 2 MB.
+#
+# O `FileHandler` anterior escrevia num unico `app.log` que crescia sem limite.
+# Numa instalacao que roda todo dia por anos isso vira um arquivo de centenas
+# de megabytes -- inutil para depurar (ninguem abre) e desagradavel de ter na
+# pasta do usuario. Com rotacao, os ultimos 10 MB ficam sempre disponiveis e o
+# resto sai sozinho.
+TAMANHO_MAXIMO_LOG = 2 * 1024 * 1024
+ARQUIVOS_DE_LOG_MANTIDOS = 5
+
 try:
     os.makedirs(LOG_DIR, exist_ok=True)
     _log_path = os.path.join(LOG_DIR, "app.log")
-    _handlers = [logging.FileHandler(_log_path, encoding="utf-8"), logging.StreamHandler(sys.stderr)]
+    _arquivo = RotatingFileHandler(
+        _log_path,
+        maxBytes=TAMANHO_MAXIMO_LOG,
+        backupCount=ARQUIVOS_DE_LOG_MANTIDOS,
+        encoding="utf-8",
+    )
+    _handlers = [_arquivo, logging.StreamHandler(sys.stderr)]
 except OSError:
     _handlers = [logging.StreamHandler(sys.stderr)]
 
@@ -188,17 +206,23 @@ def _csp_header() -> str:
     """
     Politica de seguranca de conteudo aplicada a todas as respostas.
 
-    'unsafe-inline' em script-src segue necessario enquanto o index.html usar
-    handlers `onclick=` inline (sao 22 hoje). Um nonce seria mais forte, mas
-    precisa ser gerado por requisicao E injetado no template -- gera-lo no
-    after_request, sem repassa-lo ao HTML, bloquearia todo script inline da
-    pagina, ou seja, a interface inteira. Ate os handlers sairem do markup, o
-    que a politica de fato restringe e DE ONDE script/estilo/dados podem vir,
-    que e o vetor que importa num app servido em loopback.
+    `script-src` NAO libera mais 'unsafe-inline'. Ate a versao 1.1 liberava,
+    porque o index.html carregava 36 handlers `onclick=` -- e essa liberacao
+    nao e seletiva: ela vale para TODO script inline da pagina, inclusive um
+    que viesse a ser injetado por um campo de cadastro mal escapado. Com os
+    handlers substituidos por acoes declarativas (`data-acao`, despachadas por
+    um registro em app.js), a politica passa a recusar script inline por
+    completo.
+
+    `style-src` mantem 'unsafe-inline', e nao e descuido: o Leaflet e o Chart.js
+    posicionam elementos escrevendo no atributo `style` em tempo de execucao.
+    Sem a liberacao, o mapa e os graficos param de desenhar. Estilo injetado
+    permite defacement e vazamento por seletor, nao execucao de codigo -- e a
+    troca, aqui, e consciente.
     """
     return "; ".join([
         "default-src 'self'",
-        "script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net",
+        "script-src 'self' https://unpkg.com https://cdn.jsdelivr.net",
         "style-src 'self' 'unsafe-inline' https://unpkg.com https://fonts.googleapis.com",
         "font-src 'self' https://fonts.gstatic.com",
         "img-src 'self' data: blob: https://*.tile.openstreetmap.org https://unpkg.com",

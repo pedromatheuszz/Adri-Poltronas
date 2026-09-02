@@ -291,8 +291,8 @@ estão em [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### Qualidade
 
-**435 testes** cobrindo regras de negócio, API, segurança, validação, migrations
-e contratos do front-end.
+**520 testes** e 85% de cobertura, cobrindo regras de negócio, API, segurança,
+validação, migrations e contratos do front-end. O CI reprova abaixo de 80%.
 
 ```powershell
 python -m ruff check backend tests build.py
@@ -348,9 +348,23 @@ não gerar expectativa errada:
   sessão OAuth da Microsoft, o que é conceitualmente errado — integração não
   deveria definir identidade de usuário. Na prática, criar cliente, produto ou
   pedido exige estar conectado ao OneDrive.
-- **Webhook do Asaas inalcançável pela internet.** O servidor é loopback;
-  confirmar recebimento automático exige túnel ou proxy reverso.
+- **Webhook do Asaas inalcançável pela internet.** O servidor é loopback, e
+  nenhum servidor externo alcança esse endereço. Quem cobre isso é a
+  conciliação ativa: o sistema pergunta ao Asaas o estado das cobranças em
+  aberto ao abrir a aba de Pagamentos e no botão "Conciliar com o Asaas". O
+  webhook continua no lugar para quem tiver infraestrutura para recebê-lo.
 - **Executável sem assinatura digital.** O SmartScreen alerta na instalação.
+- **Banco e backups não são cifrados em repouso.** O arquivo contém nome,
+  endereço e CEP de clientes reais; um disco sem BitLocker, perdido ou
+  roubado, entrega tudo. Ver [PRIVACIDADE.md](PRIVACIDADE.md).
+- **Exclusão de cliente é lógica, não física.** O registro sai das telas e das
+  exportações, mas permanece no banco e nos backups — o histórico, os
+  pagamentos e a auditoria apontam para ele. Um pedido de exclusão sob a LGPD
+  não é atendido pela tela de exclusão.
+- **Um computador por empresa.** Não há arquitetura para várias máquinas
+  compartilharem a mesma base; SQLite em pasta de rede corrompe.
+- **Listagens sem paginação.** A tela de clientes baixa e renderiza todos os
+  registros. Adequado para os milhares de hoje, não para dezenas de milhares.
 
 O caminho pretendido está em
 [docs/ERP_DIAGNOSTICO_E_ROADMAP.md](docs/ERP_DIAGNOSTICO_E_ROADMAP.md).
@@ -360,8 +374,12 @@ O caminho pretendido está em
 ## Documentação
 
 - [Como trabalhar neste repositório](CONTRIBUTING.md) — fluxo de branches e critérios de entrega
+- [Registro de mudanças](CHANGELOG.md) — o que entrou em cada versão
+- [Segurança](SECURITY.md) — como relatar falha, e o modelo de ameaça com seus limites
+- [Dados pessoais e LGPD](PRIVACIDADE.md) — o que é guardado, por quanto tempo e o que sai da máquina
 - [Padrão da API](API_STANDARD.md) — contrato das rotas
 - [Build e desenvolvimento](BUILD_GUIDE.md) — empacotamento e instalador
 - [Diagnóstico e roadmap ERP](docs/ERP_DIAGNOSTICO_E_ROADMAP.md) — estado e evolução
 - [Code signing](docs/code-signing.md) — assinatura do executável
-- [Aplicativo .NET/Avalonia](dotnet/README.md) — interface alternativa, experimental
+- [Aplicativo .NET/Avalonia](dotnet/README.md) — exploração arquitetural, banco próprio, não distribuída
+- [Licença](LICENSE) — software proprietário; o código é público para consulta

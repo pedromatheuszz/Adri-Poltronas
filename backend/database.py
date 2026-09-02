@@ -37,6 +37,44 @@ def obter_caminho_banco() -> str:
 DB_PATH = obter_caminho_banco()
 
 
+# O journal_mode e propriedade do ARQUIVO, nao da conexao: uma vez gravado no
+# header do banco, vale para todas as conexoes seguintes. Por isso e aplicado
+# uma vez por caminho de banco, e nao a cada `conectar_bd()` -- executar o
+# pragma em toda conexao custa uma escrita no header sem nenhum ganho.
+_MODO_WAL_APLICADO: set = set()
+
+
+def _garantir_modo_wal(conexao: sqlite3.Connection) -> None:
+    """
+    Liga o Write-Ahead Log.
+
+    No modo padrao (`delete`), uma escrita bloqueia todas as leituras. O Flask
+    roda com `threaded=True`, entao salvar um cliente enquanto o dashboard
+    carrega significava uma das duas requisicoes esperando -- e, sob carga, o
+    `database is locked` que ninguem consegue reproduzir depois.
+
+    Com WAL, leitura e escrita convivem: quem le enxerga o ultimo estado
+    consistente enquanto a escrita acontece em paralelo.
+
+    `synchronous = NORMAL` e o par recomendado do WAL: em vez de sincronizar o
+    disco a cada transacao, sincroniza no checkpoint. O risco que isso aceita e
+    perder as ultimas transacoes numa queda de energia -- nao a corrupcao do
+    banco, que o WAL continua evitando.
+    """
+    if DB_PATH in _MODO_WAL_APLICADO:
+        return
+    try:
+        modo = conexao.execute("PRAGMA journal_mode = WAL").fetchone()[0]
+        conexao.execute("PRAGMA synchronous = NORMAL")
+        if str(modo).lower() != "wal":
+            # Banco em pasta de rede nao aceita WAL. Nao e motivo para falhar:
+            # o modo antigo continua correto, so mais lento sob concorrencia.
+            log_db.warning("[BANCO] WAL indisponivel; journal_mode=%s", modo)
+    except sqlite3.Error as erro:
+        log_db.warning("[BANCO] Nao foi possivel ligar o WAL: %s", erro)
+    _MODO_WAL_APLICADO.add(DB_PATH)
+
+
 def conectar_bd() -> sqlite3.Connection:
     conexao = sqlite3.connect(DB_PATH, timeout=10)
     conexao.row_factory = sqlite3.Row
@@ -44,6 +82,7 @@ def conectar_bd() -> sqlite3.Connection:
     # pragma, as constraints presentes no schema eram apenas decorativas.
     conexao.execute("PRAGMA foreign_keys = ON")
     conexao.execute("PRAGMA busy_timeout = 10000")
+    _garantir_modo_wal(conexao)
     return conexao
 
 
