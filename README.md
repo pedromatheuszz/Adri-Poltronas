@@ -291,8 +291,10 @@ estão em [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### Qualidade
 
-**520 testes** e 85% de cobertura, cobrindo regras de negócio, API, segurança,
-validação, migrations e contratos do front-end. O CI reprova abaixo de 80%.
+**568 testes** e 85% de cobertura, cobrindo regras de negócio, API, segurança,
+validação, migrations e contratos do front-end. Dentro deles, **19 rodam a
+interface num navegador de verdade** — abas, modais, cadastro pela tela,
+acessibilidade. O CI reprova abaixo de 80% de cobertura.
 
 ```powershell
 python -m ruff check backend tests build.py

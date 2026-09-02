@@ -26,7 +26,16 @@ from app import app  # noqa: E402
 log = logging.getLogger("adri.servidor")
 
 HOST = "127.0.0.1"  # loopback apenas -- nao exposto na rede
-PORTA = 5000  # fixa: o redirect_uri do OAuth Microsoft aponta para ela
+
+# A porta e 5000 porque o redirect_uri do OAuth Microsoft esta registrado no
+# Azure como http://localhost:5000/callback -- sortear porta quebraria o login
+# do OneDrive.
+#
+# `ADRI_PORTA` existe para a suite ponta a ponta, que precisa subir o backend
+# sem disputar a porta com o aplicativo aberto do desenvolvedor (o que faria o
+# teste conversar com o banco de producao dele). Numa porta diferente, o login
+# da Microsoft nao funciona -- e a unica coisa que nao funciona.
+PORTA = int(os.environ.get("ADRI_PORTA") or 5000)
 
 # Prefixo que o Electron procura no stderr para distinguir "o banco esta
 # quebrado, com instrucoes" de um traceback qualquer.

@@ -243,6 +243,43 @@ jobs:
         ./gitleaks detect --source . --no-banner --redact --verbose
         rm -f gitleaks gitleaks.tar.gz
 
+  e2e:
+    # O JavaScript da interface rodando num navegador de verdade.
+    #
+    # O job `test` exercita o backend e verifica o front-end lendo os arquivos
+    # e procurando trechos de texto. Isso pega regressao de contrato ("o
+    # seletor sumiu do HTML") e nao pega nada do que acontece quando o codigo
+    # roda -- um ReferenceError numa funcao so chamada por clique, um ouvinte
+    # registrado antes do elemento existir, um modal que abre e nao fecha.
+    #
+    # Job separado porque instalar o Chromium leva alguns minutos, e porque
+    # uma falha aqui tem natureza diferente: e comportamento, nao unidade.
+    runs-on: windows-latest
+    needs: [test]
+
+    steps:
+    - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
+
+    - name: Set up Python
+      uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c  # v6.0.0
+      with:
+        python-version: '3.12'
+        cache: 'pip'
+        cache-dependency-path: backend/requirements.txt
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r backend/requirements.txt
+        pip install pytest-playwright
+
+    - name: Install Chromium
+      run: python -m playwright install --with-deps chromium
+
+    - name: Run end-to-end tests
+      working-directory: backend
+      run: python -m pytest ../tests/test_e2e_interface.py -v --tb=short
+
   instalador:
     # O que o cliente instala nunca era construido pelo CI.
     #
@@ -256,7 +293,7 @@ jobs:
     # vira produto?" precisa de resposta, e o job custa varios minutos.
     if: github.ref == 'refs/heads/main' || github.base_ref == 'main'
     runs-on: windows-latest
-    needs: [test, electron]
+    needs: [test, electron, e2e]
 
     steps:
     - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0

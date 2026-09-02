@@ -60,6 +60,7 @@ Além disso, o CI reprova por coisas que não aparecem rodando os comandos acima
 | Vulnerabilidade em dependência Node | `npm audit --audit-level=high` |
 | Vulnerabilidade em dependência Python | `pip-audit -r backend/requirements.txt --strict` |
 | Segredo no histórico | `gitleaks detect --source . --redact` |
+| Interface num navegador de verdade | `pip install pytest-playwright && playwright install chromium`, depois `cd backend && python -m pytest ../tests/test_e2e_interface.py` |
 
 O job `instalador` só roda na `main` e em PR para ela: é ele que constrói o
 PyInstaller e o NSIS. Um PR para `develop` não o exercita, então um problema de

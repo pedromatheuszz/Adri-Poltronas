@@ -76,6 +76,10 @@ mudanças de segurança e de integridade financeira são o centro desta versão.
 - **Cópia de backup para um segundo destino** (`ADRI_BACKUP_EXTRA`).
 - **Fila de erros visível** para alterações offline recusadas, com reenvio e
   descarte.
+- **19 testes ponta a ponta** rodando o JavaScript da interface num navegador
+  de verdade (Playwright). O resto da suíte verificava o front-end lendo os
+  arquivos e procurando trechos de texto — isso pega "o seletor sumiu do
+  HTML" e não pega nada do que acontece quando o código roda.
 - **Paginação na lista de clientes** (200 por página, com contagem do total).
   A tela baixava e desenhava todos os registros de uma vez.
 - `SECURITY.md`, `PRIVACIDADE.md`, `LICENSE`, `CODEOWNERS`, este arquivo e o
