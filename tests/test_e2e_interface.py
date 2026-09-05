@@ -327,6 +327,29 @@ def pagina(navegador, servidor):
     # a pagina nunca fica "ociosa" pelo criterio do Playwright.
     pagina.goto(servidor, wait_until="load")
     pagina.wait_for_selector("#aba-dashboard", timeout=15000)
+
+    # Esperar o DOM nao basta: o app so pede dados DEPOIS de confirmar sessao
+    # e licenca, e ate a resposta chegar a lista esta em esqueleto. Um teste
+    # que comeca a clicar nesse meio-tempo compete com a carga inicial -- ele
+    # cadastra, busca, e a carga que estava em voo repinta a tabela por cima
+    # do resultado, deixando o esqueleto na tela no instante da leitura.
+    #
+    # A falha aparecia como `'Bruno Lima' not in ' 	 	...'`, que nao
+    # se parece com um problema de tempo e custa caro para diagnosticar. A
+    # janela sempre existiu; ela ficou larga o bastante para doer quando a
+    # abertura passou a fazer duas consultas antes de carregar.
+    # A condicao precisa de um sinal POSITIVO de que a carga terminou. "Sem
+    # esqueleto" nao serve: a tabela comeca VAZIA, sem esqueleto nenhum, e a
+    # espera passaria na janela entre o inicio da carga e o desenho do
+    # esqueleto. `renderizarTabela` sempre escreve algo -- as linhas, ou o
+    # estado vazio -- entao ter filho e nao ter esqueleto e o par que
+    # significa "acabou".
+    pagina.wait_for_function(
+        "() => { const t = document.getElementById('tabelaClientes');"
+        " return t && t.children.length > 0"
+        " && t.querySelectorAll('tr.skeleton-row').length === 0; }",
+        timeout=15000,
+    )
     pagina.erros_de_javascript = erros
 
     yield pagina
@@ -453,7 +476,30 @@ def test_busca_filtra_a_lista(pagina):
         pagina.wait_for_selector(f"#tabelaClientes:has-text('{nome}')", timeout=8000)
 
     pagina.fill("#inputPesquisa", "Bruno")
-    pagina.wait_for_timeout(900)  # a busca e debounced
+
+    # Espera o RESULTADO, e nao o relogio.
+    #
+    # Aqui havia `wait_for_timeout(900)` para cobrir o debounce da busca: passa
+    # na maquina de quem escreveu e falha num runner carregado, lendo o
+    # esqueleto de carregamento -- uma tabela de espacos duros, sem nome
+    # nenhum.
+    #
+    # Os TRES fatos precisam valer AO MESMO TEMPO, numa condicao so. Separa-los
+    # nao funciona, e o motivo e sutil: "tem Bruno" ja era verdade antes da
+    # busca, porque ele acabou de ser cadastrado; e "nao tem Ana" fica
+    # verdadeiro no ESQUELETO, que nao tem nome nenhum. Duas esperas em
+    # sequencia passam nos estados errados e a leitura cai no meio da
+    # repintura.
+    pagina.wait_for_function(
+        """() => {
+            const t = document.getElementById('tabelaClientes');
+            if (!t || t.querySelectorAll('tr.skeleton-row').length) return false;
+            const texto = t.innerText;
+            return texto.includes('Bruno Lima') && !texto.includes('Ana Souza');
+        }""",
+        timeout=8000,
+    )
+
 
     tabela = pagina.locator("#tabelaClientes").inner_text()
     assert "Bruno Lima" in tabela
