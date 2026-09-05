@@ -9,6 +9,7 @@ lidam com dinheiro e com o token do OneDrive.
 """
 import io
 import json
+import logging
 import os
 import sys
 import tempfile
@@ -179,6 +180,116 @@ def test_get_e_delete_traduzem_falha_de_conexao(urlopen_falso):
     urlopen_falso['resposta'] = urllib.error.URLError('sem rota')
     assert asaas._request_get('/x')['_erro'] is True
     assert asaas._request_delete('/x')['_erro'] is True
+
+
+# -----------------------------------------------------------------------------
+# O que a recusa do Asaas escreve no log
+#
+# Os tres tratadores de HTTPError gravavam o corpo BRUTO da resposta. Numa
+# recusa de criacao de cliente esse corpo repete o que foi enviado -- nome,
+# CPF/CNPJ, e-mail, telefone -- em texto claro, num `app.log` que fica em
+# %APPDATA% sem cifragem e roda por 5 arquivos de 2 MB.
+#
+# Destoava do proprio projeto: os tokens da Microsoft e as chaves de
+# integracao sao cifrados via DPAPI, o PRIVACIDADE.md trata dado de cliente
+# como sensivel, e o roadmap ja exigia "webhook sem payload sensivel nos logs".
+# A mesma regra vale para o cliente HTTP de saida.
+# -----------------------------------------------------------------------------
+@pytest.fixture
+def log_do_asaas():
+    """
+    Captura o que `adri.asaas` registra, com handler proprio.
+
+    O `caplog` do pytest depende de o registro propagar ate a raiz, e isso nao
+    se sustenta na suite completa: estes mesmos testes passavam sozinhos e
+    capturavam zero registro quando rodavam depois dos outros arquivos, porque
+    a configuracao global de logging que `app.py` monta no import nem sempre
+    chega no mesmo estado. Um handler pendurado direto no logger do modulo nao
+    depende de estado que o teste nao controla.
+    """
+    registros = []
+
+    class _Coletor(logging.Handler):
+        def emit(self, registro):
+            registros.append(registro.getMessage())
+
+    logger = logging.getLogger('adri.asaas')
+    handler = _Coletor()
+    nivel_original = logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.ERROR)
+    try:
+        yield registros
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(nivel_original)
+
+
+CORPO_COM_CADASTRO = {
+    "errors": [{
+        "code": "invalid_cpfCnpj",
+        "description": "O CPF 529.982.247-25 de Maria Souza e invalido.",
+    }],
+    "name": "Maria Souza",
+    "cpfCnpj": "52998224725",
+    "email": "maria@exemplo.com",
+    "mobilePhone": "47999998888",
+}
+
+DADOS_PESSOAIS = ["Maria Souza", "52998224725", "529.982.247-25",
+                  "maria@exemplo.com", "47999998888"]
+
+
+@pytest.mark.parametrize("chamada", [
+    lambda: asaas._request('POST', '/customers', {"name": "Maria Souza"}),
+    lambda: asaas._request_get('/customers/cus_1'),
+    lambda: asaas._request_delete('/customers/cus_1'),
+])
+def test_recusa_do_asaas_nao_leva_dado_pessoal_para_o_log(urlopen_falso, log_do_asaas, chamada):
+    urlopen_falso['resposta'] = _erro_http(400, CORPO_COM_CADASTRO)
+
+    chamada()
+
+    registrado = " | ".join(log_do_asaas)
+    assert registrado, "a recusa precisa continuar aparecendo no log"
+    for pessoal in DADOS_PESSOAIS:
+        assert pessoal not in registrado, f"{pessoal!r} vazou para o log"
+
+
+def test_o_log_ainda_diz_qual_foi_a_causa(urlopen_falso, log_do_asaas):
+    """Tirar o corpo do log nao pode transformar a recusa num evento mudo: o
+    codigo do Asaas e o que permite diagnosticar sem repetir o cadastro."""
+    urlopen_falso['resposta'] = _erro_http(400, CORPO_COM_CADASTRO)
+
+    asaas._request('POST', '/customers', {"name": "Maria Souza"})
+
+    registrado = " | ".join(log_do_asaas)
+    assert 'invalid_cpfCnpj' in registrado
+    assert '400' in registrado
+
+
+def test_corpo_sem_codigo_de_erro_vira_diagnostico_generico(urlopen_falso, log_do_asaas):
+    """Um 502 do proxy devolve HTML, nao o JSON do Asaas. Sem codigo nao ha o
+    que citar sem arriscar conteudo -- entao nao se cita nada."""
+    urlopen_falso['resposta'] = _erro_http(502, b'<html>Bad Gateway maria@exemplo.com</html>')
+
+    asaas._request_get('/payments/1')
+
+    registrado = " | ".join(log_do_asaas)
+    assert 'maria@exemplo.com' not in registrado
+    assert 'sem codigo' in registrado
+
+
+def test_a_resposta_devolvida_a_quem_chamou_nao_muda(urlopen_falso):
+    """A limpeza e do LOG. O dicionario de retorno segue igual -- e dele que
+    saem as mensagens que o operador ve na tela."""
+    urlopen_falso['resposta'] = _erro_http(400, CORPO_COM_CADASTRO)
+
+    resultado = asaas._request('POST', '/customers', {"name": "Maria Souza"})
+
+    assert resultado['_erro'] is True
+    assert resultado['_status'] == 400
+    assert resultado['errors'][0]['code'] == 'invalid_cpfCnpj'
 
 
 # =============================================================================

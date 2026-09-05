@@ -1,5 +1,33 @@
 Adri Poltronas
 Sistema desktop para organizar clientes, locações, pedidos, entregas, pagamentos e a rotina diária da Adri Poltronas.
+
+---
+
+> ## ⚠️ Versão beta — em desenvolvimento
+>
+> **A versão atual (1.4.0) é uma beta e não deve ser tratada como software
+> concluído.** Ela funciona e é usada, mas está em desenvolvimento ativo: há
+> funcionalidades sendo construídas, comportamentos que ainda mudam entre
+> versões, e áreas em que o projeto sabe onde estão os próprios limites.
+>
+> O que isso significa na prática para quem for instalar:
+>
+> - **Faça backup.** O aplicativo tem backup automático e restauração pela
+>   interface, e vale usar. Migração de banco entre versões é testada, mas
+>   beta é beta.
+> - **Comportamentos ainda mudam.** A autenticação hoje é a sessão Microsoft,
+>   uma limitação conhecida e registrada em [CONTRIBUTING.md](CONTRIBUTING.md).
+>   O controle de licença é comercial, não uma proteção de segurança — o limite
+>   honesto está escrito em [LICENCA_E_PAGAMENTO.md](LICENCA_E_PAGAMENTO.md).
+> - **O que já é sólido está no [CHANGELOG.md](CHANGELOG.md)**, versão a versão,
+>   com o motivo de cada mudança. Cada entrega passa por 744 testes
+>   automatizados e por um CI que constrói o instalador e o executa de verdade
+>   antes de aprovar.
+>
+> Relatos de problema e sugestões são bem-vindos enquanto isso.
+
+---
+
 Sobre o software
 O Adri Poltronas é um aplicativo desktop profissional para Windows, inspirado em sistemas de gestão empresarial e desenvolvido especialmente para a rotina da Adri Poltronas, empresa que realiza a locação de poltronas elétricas com elevação, muito utilizadas durante períodos de recuperação e pós-operatório.
 O aplicativo centraliza as principais informações do negócio em um só lugar. Ele ajuda a reduzir a dependência de planilhas separadas, anotações, mensagens antigas e controles manuais, oferecendo mais organização, agilidade e segurança para acompanhar cada atendimento.

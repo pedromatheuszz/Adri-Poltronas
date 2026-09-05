@@ -37,10 +37,21 @@ usuario ja pode abrir o banco direto, entao contra ele o token nao acrescenta
 nada. O que ele fecha e o vetor real de um servico em loopback -- pagina web,
 script de terceiro, ferramenta curiosa -- que chuta a porta 5000 as cegas.
 
-Quando a variavel de ambiente nao esta definida, a exigencia fica DESLIGADA e
-um aviso vai para o log. E o que mantem `python backend/servidor.py` sozinho
-no terminal e a suite de testes funcionando. A instalacao empacotada sempre
-passa pelo Electron, que sempre define o token.
+Por que a ausencia da variavel nao desliga mais nada
+---------------------------------------------------
+Ate a 1.3.0 `esta_ativa()` devolvia False quando `ADRI_API_TOKEN` nao estava
+no ambiente, e o guarda entao liberava a API inteira com um aviso no log. Isso
+e um fail-open: bastava o Electron falhar em repassar a variavel ao processo
+filho -- erro de spawn, antivirus no meio do caminho, backend orfao
+reaproveitado de outra execucao -- para o servidor subir com tudo aberto, e
+nada na interface indicava isso.
+
+Agora a exigencia e sempre ligada. Quando a variavel nao vem pronta, o proprio
+backend le (ou cria) o token no perfil do usuario -- o mesmo arquivo que o
+Electron ja usa, entao os dois convergem para o mesmo segredo sem precisarem
+conversar. Desligar virou opt-in explicito por `ADRI_API_SEM_TOKEN=1`, com
+aviso no log e visivel em `/api/health`, e serve apenas para rodar
+`python backend/servidor.py` sozinho no terminal.
 """
 from __future__ import annotations
 
@@ -52,6 +63,12 @@ import secrets
 log = logging.getLogger("adri.capacidade")
 
 VARIAVEL_DE_AMBIENTE = "ADRI_API_TOKEN"
+
+# Unica forma de desligar a exigencia. Existe para o desenvolvimento local, e
+# e deliberadamente feia de escrever: quem a define esta abrindo a API para
+# qualquer processo da maquina e precisa saber disso.
+VARIAVEL_DE_DESLIGAMENTO = "ADRI_API_SEM_TOKEN"
+
 NOME_DO_HEADER = "X-Adri-Capacidade"
 NOME_DO_COOKIE = "adri_capacidade"
 NOME_DO_ARQUIVO = ".capacidade"
@@ -77,13 +94,79 @@ ROTAS_ISENTAS = frozenset({
 })
 
 
+# Token de reserva ja lido do disco, por pasta de dados. Sem isto,
+# `token_esperado()` -- que roda em toda requisicao, dentro de `confere()` --
+# abriria o arquivo do perfil a cada chamada.
+_reserva_por_pasta: dict = {}
+
+
+def desligada_explicitamente() -> bool:
+    """Verdadeiro so quando alguem pediu, por escrito, para abrir a API."""
+    return (os.environ.get(VARIAVEL_DE_DESLIGAMENTO) or "").strip() == "1"
+
+
+def pasta_do_perfil() -> str:
+    """
+    Pasta onde vive o token de reserva: a mesma do banco.
+
+    O import e tardio de proposito. `capacidade` e um modulo de funcoes puras
+    que `app.py` carrega cedo; amarra-lo no topo a `database`, que abre o
+    SQLite e puxa meia dezena de modulos de dominio, inverteria essa ordem sem
+    necessidade.
+    """
+    import database
+    return os.path.dirname(os.path.abspath(database.obter_caminho_banco()))
+
+
+def _token_de_reserva() -> str:
+    pasta = pasta_do_perfil()
+    token = _reserva_por_pasta.get(pasta)
+    if token is None:
+        token = carregar_ou_criar(pasta)
+        _reserva_por_pasta[pasta] = token
+    return token
+
+
 def token_esperado() -> str:
-    """Token desta execucao, ou string vazia quando a exigencia esta desligada."""
-    return (os.environ.get(VARIAVEL_DE_AMBIENTE) or "").strip()
+    """
+    Token desta execucao, ou string vazia quando a exigencia esta desligada.
+
+    A variavel de ambiente e o caminho normal: o Electron gera o token e o
+    passa ao processo filho. Quando ela nao chega, cair no arquivo do perfil e
+    o que impede a falha de virar liberacao geral -- o Electron le esse mesmo
+    arquivo, entao na pratica os dois continuam falando o mesmo segredo.
+    """
+    if desligada_explicitamente():
+        return ""
+    do_ambiente = (os.environ.get(VARIAVEL_DE_AMBIENTE) or "").strip()
+    if do_ambiente:
+        return do_ambiente
+    return _token_de_reserva()
+
+
+# `esta_ativa()` roda em todo request. O aviso de desligamento sai uma vez por
+# processo: repetido por requisicao ele afogaria o log justamente na execucao
+# em que ha algo errado para ler nele.
+_desligamento_ja_avisado = False
 
 
 def esta_ativa() -> bool:
-    return bool(token_esperado())
+    """
+    A exigencia so cai por pedido explicito.
+
+    Antes isto era `bool(token_esperado())`, o que transformava "a variavel nao
+    chegou" em "pode entrar sem token". Ver o cabecalho do modulo.
+    """
+    global _desligamento_ja_avisado
+    if desligada_explicitamente():
+        if not _desligamento_ja_avisado:
+            log.warning(
+                "[CAPACIDADE] Exigencia DESLIGADA por %s=1. A API responde a "
+                "qualquer processo da maquina.", VARIAVEL_DE_DESLIGAMENTO
+            )
+            _desligamento_ja_avisado = True
+        return False
+    return True
 
 
 def gerar_token() -> str:

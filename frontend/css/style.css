@@ -2402,3 +2402,109 @@ button, [role="tab"], summary { touch-action: manipulation; }
         border-color: var(--cor-texto-2);
     }
 }
+
+/* Selo da ultima conciliacao com o Asaas.
+   Fica ao lado do botao "Conciliar": o app concilia sozinho a cada 20 minutos
+   e o operador precisa conseguir ver, sem clicar em nada, se o valor na tela
+   e de agora ou de horas atras. Peso visual baixo de proposito -- e contexto
+   do numero, nao um numero a mais. */
+.selo-conciliacao {
+    align-self: center;
+    color: var(--cor-texto-3);
+    font-size: 0.8rem;
+    /* Encolhe antes de estourar o cartao. Sem `min-width: 0` um item flex nao
+       diminui abaixo do proprio texto, e o selo saia pela borda direita em vez
+       de ceder espaco aos campos da barra. */
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+
+/* -----------------------------------------------------------------------------
+   Estado "sem conta conectada"
+
+   Substitui o conteudo em vez de flutuar sobre ele. A diferenca importa: um
+   veu translucido por cima ainda deixa ler "R$ 0,00 em atraso" atras, e esse
+   numero nao e verdade -- e o zero escrito no HTML, nao o cadastro. O que a
+   tela nao pode fazer e informar errado com ar de informacao certa.
+   ----------------------------------------------------------------------------- */
+.app-shell.sem-conexao main > .tab-content { display: none !important; }
+
+.painel-sem-conexao { display: flex; justify-content: center; padding: var(--esp-6) var(--esp-4); }
+.painel-sem-conexao[hidden] { display: none; }
+
+.painel-sem-conexao__caixa {
+    max-width: 34rem;
+    text-align: center;
+    background: var(--cor-superficie);
+    border: 1px solid var(--cor-borda);
+    border-radius: var(--raio-3, 12px);
+    padding: var(--esp-6) var(--esp-5);
+}
+
+.painel-sem-conexao__icone { color: var(--cor-texto-3); margin-bottom: var(--esp-3); }
+
+.painel-sem-conexao__caixa h2 {
+    margin: 0 0 var(--esp-3);
+    font-size: 1.25rem;
+    color: var(--cor-texto);
+}
+
+.painel-sem-conexao__caixa p {
+    margin: 0 0 var(--esp-3);
+    color: var(--cor-texto-2);
+    line-height: 1.6;
+}
+
+.painel-sem-conexao__nota { font-size: 0.9rem; color: var(--cor-texto-3); }
+
+.painel-sem-conexao__caixa .btn { margin-top: var(--esp-2); }
+
+
+/* -----------------------------------------------------------------------------
+   Licenca de uso
+   ----------------------------------------------------------------------------- */
+.app-shell.licenca-vencida main > .tab-content { display: none !important; }
+
+.licenca-valor {
+    font-size: 1.6rem;
+    font-weight: 600;
+    color: var(--cor-texto);
+    margin: 0 0 var(--esp-3);
+}
+
+.licenca-cobranca { margin-top: var(--esp-4); }
+.licenca-cobranca[hidden] { display: none; }
+.licenca-cobranca img { max-width: 220px; margin: 0 auto var(--esp-3); display: block; }
+
+.licenca-payload {
+    font-family: var(--fonte-mono, monospace);
+    font-size: 0.72rem;
+    word-break: break-all;
+    background: var(--cor-superficie-2);
+    border: 1px solid var(--cor-borda);
+    border-radius: 6px;
+    padding: var(--esp-2);
+    margin-bottom: var(--esp-3);
+    max-height: 6rem;
+    overflow-y: auto;
+}
+
+.licenca-aguardando {
+    font-size: 0.9rem;
+    color: var(--cor-texto-2);
+    margin-top: var(--esp-3);
+}
+
+/* A faixa do periodo de teste. Peso baixo enquanto sobra tempo -- avisar com
+   urgencia durante 30 dias ensina o operador a nao ver o aviso. */
+.aviso-teste {
+    margin: var(--esp-1) 0 0;
+    font-size: 0.8rem;
+    color: var(--cor-texto-3);
+}
+.aviso-teste[hidden] { display: none; }
+.aviso-teste.urgente { color: var(--cor-alerta-texto); font-weight: 600; }

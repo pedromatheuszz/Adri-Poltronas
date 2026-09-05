@@ -210,6 +210,44 @@ def test_webhook_valido_nao_depende_de_sessao_microsoft(client, monkeypatch):
     assert resposta.status_code == 200
 
 
+def test_webhook_com_host_externo_chega_ao_proprio_token(client, monkeypatch):
+    """
+    O webhook estava isento do guarda de origem e do de capacidade, e nao do
+    de host de loopback -- que roda antes dos dois. Qualquer Host diferente de
+    127.0.0.1 levava 400 ANTES de o token do Asaas ser sequer lido.
+
+    Hoje isso nao causa dano, porque nada chega de fora mesmo. Vira problema no
+    dia do relay publico que `reconciliacao.py` menciona: o Asaas receberia
+    400 e a causa pareceria erro de configuracao dele, nao uma checagem local.
+    """
+    monkeypatch.setattr(config, 'ASAAS_WEBHOOK_TOKEN', 'token_correto')
+    app_module.app.config['TESTING'] = False
+    try:
+        recusado = _post_webhook(client, {'asaas-access-token': 'errado',
+                                          'Host': 'minhaloja.com.br'})
+        aceito = _post_webhook(client, {'asaas-access-token': 'token_correto',
+                                        'Host': 'minhaloja.com.br'})
+    finally:
+        app_module.app.config['TESTING'] = True
+
+    # Quem decide e o token do Asaas, que e o controle correto para quem vem
+    # de fora -- e nao o Host, que o proprio chamador escolhe.
+    assert recusado.status_code == 401
+    assert aceito.status_code == 200
+
+
+def test_host_externo_continua_recusado_no_resto_da_api(client):
+    """A isencao vale para UMA rota, a que chega de fora por desenho. O vetor
+    de DNS rebinding contra o resto da API segue fechado."""
+    app_module.app.config['TESTING'] = False
+    try:
+        resposta = client.get('/api/clientes', headers={'Host': 'minhaloja.com.br'})
+    finally:
+        app_module.app.config['TESTING'] = True
+
+    assert resposta.status_code == 400
+
+
 # -----------------------------------------------------------------------------
 # A1 - asaas lia os.environ no import, antes do load_dotenv
 # -----------------------------------------------------------------------------
@@ -717,3 +755,97 @@ def test_erro_do_dashboard_nao_vaza_detalhe_interno(client, monkeypatch):
     assert corpo['erro'] == "Erro interno do servidor."
     assert 'id' in corpo
     assert 'secreto' not in resposta.get_data(as_text=True)
+
+
+# =============================================================================
+# A migracao emudecia o log do aplicativo
+#
+# Achado que apareceu enquanto se testava outra coisa: os testes do log do
+# Asaas passavam sozinhos e capturavam ZERO registro quando rodavam depois
+# deste arquivo. A causa nao era do teste.
+#
+# `fileConfig` tem `disable_existing_loggers=True` por padrao, e o env.py do
+# Alembic o chamava sem argumento. Todo logger ja criado e nao declarado em
+# alembic.ini era desligado -- e `servidor.py` importa `app` (que cria
+# `adri.app`, `adri.asaas`, `adri.security`, `adri.db`, `adri.capacidade`)
+# antes de chamar `preparar_banco()`, que roda `command.upgrade` em todo boot.
+#
+# Resultado em producao: a partir da primeira migracao de cada execucao, o
+# aplicativo parava de escrever no proprio app.log. Sem estardalhaco -- o
+# arquivo continuava la, so nao recebia mais os avisos de AUTH, CAPACIDADE e
+# SEGURANCA, nem o log que o QUICK_REFERENCE manda o operador enviar quando
+# algo da errado.
+# =============================================================================
+NOMES_DE_LOGGER = ['adri.app', 'adri.asaas', 'adri.security', 'adri.db',
+                   'adri.capacidade']
+
+
+def _migrar_em_banco_novo(tmp_path, monkeypatch):
+    import migrations_manager
+
+    monkeypatch.setenv('ADRI_DB_PATH', str(tmp_path / 'migrar.db'))
+    monkeypatch.setattr(database, 'DB_PATH', str(tmp_path / 'migrar.db'))
+    migrations_manager.aplicar_migrações()
+
+
+def test_a_migracao_nao_desliga_os_loggers_do_aplicativo(tmp_path, monkeypatch):
+    """Metade do estrago: `disable_existing_loggers`, que e True por padrao."""
+    import logging
+
+    loggers = [logging.getLogger(nome) for nome in NOMES_DE_LOGGER]
+    for logger in loggers:
+        logger.disabled = False
+
+    _migrar_em_banco_novo(tmp_path, monkeypatch)
+
+    desligados = [logger.name for logger in loggers if logger.disabled]
+    assert not desligados, f"a migracao emudeceu {desligados}"
+
+
+def test_a_migracao_nao_leva_embora_o_arquivo_de_log(tmp_path, monkeypatch):
+    """
+    A outra metade, e a mais grave.
+
+    `[logger_root]` do alembic.ini declara `handlers = console`, e `fileConfig`
+    SUBSTITUI os handlers da raiz em vez de acrescentar. O RotatingFileHandler
+    que escreve o `app.log` em %APPDATA% ia embora junto -- entao nem WARNING
+    nem ERROR chegavam mais ao arquivo. Some a trilha de [AUTH], [CAPACIDADE]
+    e [SEGURANCA], e some o log que o QUICK_REFERENCE manda o operador enviar.
+    """
+    import logging
+
+    raiz = logging.getLogger()
+    marcador = logging.NullHandler()
+    raiz.addHandler(marcador)
+    try:
+        _migrar_em_banco_novo(tmp_path, monkeypatch)
+        assert marcador in raiz.handlers,             "a migracao trocou os handlers da raiz pelos do alembic.ini"
+    finally:
+        if marcador in raiz.handlers:
+            raiz.removeHandler(marcador)
+
+
+def test_a_migracao_nao_rebaixa_o_nivel_da_raiz(tmp_path, monkeypatch):
+    """`level = WARN` no alembic.ini derrubava todo `log.info` do aplicativo:
+    os loggers `adri.*` sao NOTSET e herdam o nivel da raiz."""
+    import logging
+
+    raiz = logging.getLogger()
+    nivel_antes = raiz.level
+    raiz.setLevel(logging.INFO)
+    try:
+        _migrar_em_banco_novo(tmp_path, monkeypatch)
+        assert raiz.level == logging.INFO,             f"a raiz foi rebaixada para {logging.getLevelName(raiz.level)}"
+    finally:
+        raiz.setLevel(nivel_antes)
+
+
+def test_o_env_do_alembic_declara_a_intencao():
+    """Guarda contra a regressao mais provavel: alguem regenerar o env.py a
+    partir do modelo do Alembic, que vem sem o argumento."""
+    caminho = os.path.join(os.path.dirname(__file__), '..', 'backend',
+                           'migrations', 'env.py')
+    with open(caminho, encoding='utf-8') as arquivo:
+        fonte = arquivo.read()
+
+    assert 'disable_existing_loggers=False' in fonte

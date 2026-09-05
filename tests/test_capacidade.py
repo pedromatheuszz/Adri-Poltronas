@@ -11,10 +11,11 @@ simplesmente NAO enviando esses cabecalhos. Na pratica:
 
 devolvia a lista inteira de clientes, com nome, endereco e CEP.
 
-Estes testes cobrem as tres propriedades que sustentam a correcao: que o token
-e exigido, que a comparacao nao vaza pelo tempo de resposta, e que a exigencia
-some quando o backend roda sozinho -- senao a suite e o `python servidor.py`
-no terminal parariam de funcionar.
+Estes testes cobrem as propriedades que sustentam a correcao: que o token e
+exigido, que a comparacao nao vaza pelo tempo de resposta, e -- desde a
+correcao do fail-open -- que a exigencia NAO cai sozinha quando a variavel de
+ambiente nao chega. Ate a 1.3.0 ela caia, e uma falha do Electron em repassar
+a variavel abria a API inteira. Desligar hoje exige `ADRI_API_SEM_TOKEN=1`.
 
 O teste do cabecalho no `_exigir_capacidade` roda sobre o app real com
 TESTING desligado, porque em modo de teste o guarda e propositalmente
@@ -38,19 +39,62 @@ def com_token(monkeypatch):
 
 
 @pytest.fixture
-def sem_token(monkeypatch):
+def perfil_temporario(monkeypatch, tmp_path):
+    """
+    Redireciona o token de reserva para uma pasta descartavel.
+
+    Sem a variavel de ambiente, `token_esperado()` cai no arquivo do perfil --
+    que fica ao lado do banco. Apontar `ADRI_DB_PATH` para `tmp_path` evita
+    que a suite crie um `.capacidade` no %APPDATA% de quem roda os testes, e o
+    cache precisa ser esvaziado junto porque ele guarda por pasta.
+    """
+    monkeypatch.setenv('ADRI_DB_PATH', str(tmp_path / 'perfil.db'))
+    capacidade._reserva_por_pasta.clear()
+    yield tmp_path
+    capacidade._reserva_por_pasta.clear()
+
+
+@pytest.fixture
+def sem_token(monkeypatch, perfil_temporario):
     monkeypatch.delenv(capacidade.VARIAVEL_DE_AMBIENTE, raising=False)
+    monkeypatch.delenv(capacidade.VARIAVEL_DE_DESLIGAMENTO, raising=False)
+    return perfil_temporario
+
+
+@pytest.fixture
+def desligada(monkeypatch):
+    monkeypatch.setenv(capacidade.VARIAVEL_DE_DESLIGAMENTO, '1')
 
 
 # =============================================================================
 # Liga e desliga
 # =============================================================================
-def test_exigencia_desligada_sem_variavel_de_ambiente(sem_token):
-    """`python backend/servidor.py` no terminal e a suite precisam continuar
-    funcionando. A instalacao empacotada sempre passa pelo Electron, que
-    sempre define o token."""
-    assert capacidade.esta_ativa() is False
-    assert capacidade.token_esperado() == ''
+def test_exigencia_continua_ligada_sem_variavel_de_ambiente(sem_token):
+    """
+    O fail-open que a 1.3.1 fecha.
+
+    Se o Electron falhar em repassar `ADRI_API_TOKEN` ao processo filho -- erro
+    de spawn, antivirus, backend orfao de outra execucao -- o servidor subia
+    com a API inteira aberta. Agora a ausencia da variavel cai no token do
+    perfil, e a exigencia permanece de pe.
+    """
+    assert capacidade.esta_ativa() is True
+
+    token = capacidade.token_esperado()
+    assert len(token) == capacidade.BYTES_DO_TOKEN * 2
+    assert capacidade.confere(token) is True
+    assert capacidade.confere('chute') is False
+
+
+def test_token_do_perfil_e_o_mesmo_que_o_electron_leria(sem_token):
+    """
+    O Electron le `.capacidade` do perfil para montar o cabecalho. O backend
+    caindo no MESMO arquivo e o que faz os dois convergirem sem conversarem --
+    sem isso, a reserva viraria um token que ninguem apresenta e o app abriria
+    uma janela onde nenhuma chamada funciona.
+    """
+    do_arquivo = capacidade.carregar_ou_criar(capacidade.pasta_do_perfil())
+    assert capacidade.token_esperado() == do_arquivo
 
 
 def test_exigencia_ligada_com_variavel_de_ambiente(com_token):
@@ -58,11 +102,21 @@ def test_exigencia_ligada_com_variavel_de_ambiente(com_token):
     assert capacidade.token_esperado() == com_token
 
 
-def test_variavel_com_espacos_em_branco_nao_liga_a_exigencia(monkeypatch):
+def test_variavel_com_espacos_em_branco_cai_no_token_do_perfil(sem_token, monkeypatch):
     """Um `set ADRI_API_TOKEN=` no script de inicializacao deixa a variavel
-    definida e vazia. Tratar isso como token valido faria a API recusar tudo."""
+    definida e vazia. Isso nao pode virar token valido -- a API recusaria tudo
+    -- nem liberacao geral, que era o comportamento anterior."""
     monkeypatch.setenv(capacidade.VARIAVEL_DE_AMBIENTE, '   ')
+    assert capacidade.esta_ativa() is True
+    assert capacidade.token_esperado() == capacidade._token_de_reserva()
+
+
+def test_desligar_exige_opt_in_por_escrito(desligada):
+    """A unica porta de saida, e ela existe para `python backend/servidor.py`
+    no terminal. Fora dai, quem a usa esta abrindo a API para qualquer processo
+    da maquina."""
     assert capacidade.esta_ativa() is False
+    assert capacidade.token_esperado() == ''
 
 
 # =============================================================================
@@ -88,7 +142,7 @@ def test_prefixo_correto_nao_basta(com_token):
     assert capacidade.confere(com_token + 'a') is False
 
 
-def test_nada_e_aceito_quando_a_exigencia_esta_desligada(sem_token):
+def test_nada_e_aceito_quando_a_exigencia_esta_desligada(desligada):
     """Com a exigencia desligada quem decide e o `before_request`, que nem
     chega a chamar `confere`. A funcao em si nunca aprova no vazio -- caso
     contrario, esquecer de definir o token viraria 'tudo liberado' vindo do
@@ -174,6 +228,12 @@ def cliente_com_guarda_ligado(monkeypatch, tmp_path):
 
     monkeypatch.setattr(database, 'DB_PATH', str(tmp_path / 'guarda.db'))
     database.criar_tabela()
+
+    # Sessao semeada porque, desde que a leitura tambem exige autenticacao,
+    # um GET sem sessao pararia no guarda de AUTH (401) antes de chegar ao de
+    # capacidade -- e estes testes existem para medir o de capacidade. Com a
+    # sessao no lugar, o unico motivo possivel para uma recusa aqui e o token.
+    database.salvar_sessao('token-de-teste', 'operador@exemplo.local')
 
     modulo_app.app.config['TESTING'] = False
     try:

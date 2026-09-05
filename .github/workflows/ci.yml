@@ -455,15 +455,48 @@ jobs:
           if (-not $saude.capacidade_exigida) { throw 'o backend instalado nao exige capacidade' }
           Write-Host "Backend instalado no ar, versao $($saude.versao)"
 
-          $recusou = $false
-          try {
-            Invoke-RestMethod -Uri 'http://127.0.0.1:5051/api/clientes' -TimeoutSec 5 | Out-Null
-          } catch { $recusou = $true }
-          if (-not $recusou) { throw 'a API respondeu sem o token de capacidade' }
-          Write-Host 'Sem token: recusado, como esperado'
+          # O contrato tem TRES degraus desde a 1.3.1, e nao dois. Ate a
+          # 1.3.0 o token de capacidade bastava para ler: /api/clientes
+          # devolvia o cadastro inteiro -- nome, CEP, endereco -- a quem
+          # apresentasse so o cabecalho. Agora a leitura tambem exige sessao.
+          #
+          # Conferir o codigo, e nao apenas "deu erro", e o que separa
+          # "recusado pelo guarda certo" de "recusado por qualquer motivo":
+          # 403 e a capacidade falando, 401 e a autenticacao.
+          function Get-StatusDaLeitura($cabecalhos) {
+            try {
+              Invoke-WebRequest -Uri 'http://127.0.0.1:5051/api/clientes' `
+                -TimeoutSec 5 -Headers $cabecalhos -UseBasicParsing | Out-Null
+              return 200
+            } catch {
+              return [int]$_.Exception.Response.StatusCode
+            }
+          }
 
-          $clientes = Invoke-RestMethod -Uri 'http://127.0.0.1:5051/api/clientes' -TimeoutSec 5 -Headers @{ 'X-Adri-Capacidade' = 'token-de-fumaca' }
-          Write-Host "Com token: $(@($clientes).Count) cliente(s)"
+          $comToken = @{ 'X-Adri-Capacidade' = 'token-de-fumaca' }
+
+          $semToken = Get-StatusDaLeitura @{}
+          if ($semToken -ne 403) { throw "sem token de capacidade: esperava 403, veio $semToken" }
+          Write-Host 'Sem token de capacidade: 403, como esperado'
+
+          $semSessao = Get-StatusDaLeitura $comToken
+          if ($semSessao -ne 401) { throw "com token e sem sessao: esperava 401, veio $semSessao" }
+          Write-Host 'Com token e sem sessao: 401, como esperado'
+
+          # Semeia a sessao Microsoft no banco do app instalado, que e o mesmo
+          # que tests/test_e2e_interface.py faz e pelo mesmo motivo: a
+          # autenticacao deste ERP e o OAuth da Microsoft (limitacao conhecida,
+          # registrada no CONTRIBUTING.md), entao sem uma sessao gravada nao ha
+          # como exercitar a leitura -- nem aqui, nem no uso real.
+          #
+          # O `cifrar` do repositorio nao esta congelado, entao grava com
+          # prefixo DPAPI1:. O backend instalado, esse sim congelado, decifra
+          # pelo mesmo caminho -- mesmo usuario, mesma maquina.
+          python -c "import os,sys; sys.path.insert(0,'backend'); import database; database.DB_PATH=os.environ['ADRI_DB_PATH']; database.salvar_sessao('token-de-fumaca','operador@exemplo.local')"
+          if ($LASTEXITCODE -ne 0) { throw 'nao foi possivel semear a sessao no banco do app instalado' }
+
+          $clientes = Invoke-RestMethod -Uri 'http://127.0.0.1:5051/api/clientes' -TimeoutSec 5 -Headers $comToken
+          Write-Host "Com token e sessao: $(@($clientes).Count) cliente(s)"
         }
         finally {
           if ($servidor -and -not $servidor.HasExited) { Stop-Process -Id $servidor.Id -Force }

@@ -24,6 +24,7 @@ COMO RODAR
 Sem o Playwright instalado, o arquivo inteiro e pulado -- a suite normal nao
 depende dele. No CI ha um job proprio.
 """
+import contextlib
 import os
 import socket
 import subprocess
@@ -79,11 +80,30 @@ def _semear_sessao(caminho_do_banco) -> None:
         database.DB_PATH = original
 
 
-@pytest.fixture(scope="module")
-def servidor(tmp_path_factory):
-    """Sobe o backend real, num banco descartavel."""
-    banco = tmp_path_factory.mktemp("e2e") / "e2e.db"
-    _semear_sessao(banco)
+def _semear_cliente(caminho_do_banco) -> None:
+    """
+    Grava um cliente, e NAO uma sessao.
+
+    Serve ao teste do estado desconectado: e preciso haver cadastro no banco
+    para provar que ele nao aparece na tela. Um banco vazio deixaria passar
+    exatamente o defeito que se quer pegar.
+    """
+    sys.path.insert(0, BACKEND)
+    import database
+
+    original = database.DB_PATH
+    database.DB_PATH = str(caminho_do_banco)
+    try:
+        database.criar_tabela()
+        database.salvar_cliente("Maria Souza", "89201-000", "Rua X",
+                                "Centro", "Joinville", "Entrega", "")
+    finally:
+        database.DB_PATH = original
+
+
+@contextlib.contextmanager
+def _backend_no_ar(banco):
+    """Sobe o backend real sobre `banco` e devolve a URL base."""
     porta = _porta_livre()
 
     ambiente = {
@@ -95,7 +115,14 @@ def servidor(tmp_path_factory):
     # Sem ADRI_API_TOKEN: a capacidade e injetada pelo Electron, e aqui o
     # navegador e o Playwright. Testar a capacidade e trabalho de
     # test_capacidade.py, que a exercita direto.
+    #
+    # Ate a 1.3.0 bastava remover a variavel: a exigencia caia sozinha. Isso
+    # era o fail-open que a 1.3.1 fechou -- hoje a ausencia da variavel faz o
+    # backend cair no token do perfil e continuar exigindo. Desligar virou
+    # explicito, e este e exatamente o caso de uso do opt-in: um cliente que
+    # nao tem como carregar o cabecalho.
     ambiente.pop('ADRI_API_TOKEN', None)
+    ambiente['ADRI_API_SEM_TOKEN'] = '1'
 
     # A saida vai para ARQUIVO, e nao para um `subprocess.PIPE`.
     #
@@ -129,13 +156,81 @@ def servidor(tmp_path_factory):
             processo.kill()
             pytest.fail(f"o backend nao respondeu em {TIMEOUT_BOOT_S}s")
 
+        try:
+            yield base
+        finally:
+            processo.terminate()
+            try:
+                processo.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                processo.kill()
+
+
+@pytest.fixture(scope="module")
+def servidor(tmp_path_factory):
+    """Backend com sessao Microsoft gravada: o app em uso normal."""
+    banco = tmp_path_factory.mktemp("e2e") / "e2e.db"
+    _semear_sessao(banco)
+    with _backend_no_ar(banco) as base:
         yield base
 
-        processo.terminate()
-        try:
-            processo.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            processo.kill()
+
+@pytest.fixture(scope="module")
+def servidor_licenca_vencida(tmp_path_factory):
+    """
+    Backend com sessao, cadastro e o periodo de teste ja encerrado.
+
+    O defeito que este cenario pega: `checarLoginExistente` chamava o
+    carregamento dos dados direto, e ele roda ANTES de a licenca ser
+    consultada. Com o teste vencido, as quatro requisicoes voltavam 402 e a
+    tela ficava com os zeros escritos no HTML -- e, pior, marcava os dados como
+    "ja carregados", de modo que pagar a licenca liberava a tela sem trazer
+    dado nenhum.
+    """
+    banco = tmp_path_factory.mktemp("e2e-licenca") / "e2e.db"
+    _semear_sessao(banco)
+    _semear_cliente(banco)
+    _vencer_licenca(banco)
+    with _backend_no_ar(banco) as base:
+        yield base
+
+
+def _vencer_licenca(caminho_do_banco) -> None:
+    """Empurra a instalacao para 45 dias atras, nos dois lados do estado."""
+    import datetime
+
+    sys.path.insert(0, BACKEND)
+    os.environ["ADRI_DB_PATH"] = str(caminho_do_banco)
+    import database
+    import licenca
+
+    original = database.DB_PATH
+    database.DB_PATH = str(caminho_do_banco)
+    try:
+        dados = licenca._carregar_e_atualizar_marca()
+        dados["instalado_em"] = licenca._texto(
+            licenca._agora() - datetime.timedelta(days=45)
+        )
+        licenca._persistir(dados)
+    finally:
+        database.DB_PATH = original
+
+
+@pytest.fixture(scope="module")
+def servidor_sem_sessao(tmp_path_factory):
+    """
+    Backend COM cadastro e SEM sessao: o app aberto por quem nunca conectou.
+
+    Ate a 1.3.0 esse estado nao existia -- a leitura respondia sem sessao e a
+    tela carregava como qualquer outra. Fechada a folga, o mesmo app passou a
+    exibir a casca com os zeros escritos no proprio HTML enquanto as chamadas
+    voltavam 401 em silencio. Nao era um erro na tela: era numero errado com
+    ar de numero certo.
+    """
+    banco = tmp_path_factory.mktemp("e2e-sem-sessao") / "e2e.db"
+    _semear_cliente(banco)
+    with _backend_no_ar(banco) as base:
+        yield base
 
 
 @pytest.fixture(scope="module")
@@ -151,6 +246,62 @@ def navegador():
         instancia = p.chromium.launch()
         yield instancia
         instancia.close()
+
+
+def _preparar_contexto(navegador):
+    """Contexto novo, com os CDNs neutralizados."""
+    contexto = navegador.new_context()
+
+    # Leaflet e Chart.js vem de CDN. Numa maquina sem internet -- ou num
+    # runner de CI com saida restrita -- esperar por eles trava o teste em
+    # algo que nao e o objeto do teste.
+    def _script_vazio(rota):
+        rota.fulfill(status=200, content_type="application/javascript", body="")
+
+    contexto.route("**unpkg.com/**", _script_vazio)
+    contexto.route("**cdn.jsdelivr.net/**", _script_vazio)
+    contexto.route("**tile.openstreetmap.org/**", lambda rota: rota.abort())
+    return contexto
+
+
+@pytest.fixture
+def pagina_sem_sessao(navegador, servidor_sem_sessao):
+    """A tela de quem abre o app sem nunca ter conectado a conta."""
+    contexto = _preparar_contexto(navegador)
+    pagina = contexto.new_page()
+
+    erros = []
+    pagina.on("pageerror", lambda erro: erros.append(str(erro)))
+
+    pagina.goto(servidor_sem_sessao, wait_until="load")
+    # `state="attached"`, e nao visivel: as abas continuam no DOM e e o CSS
+    # que as esconde enquanto o painel esta na tela. Esperar por visibilidade
+    # aqui daria timeout justamente quando o comportamento esta CERTO.
+    pagina.wait_for_selector("#aba-dashboard", state="attached", timeout=15000)
+    pagina.wait_for_selector("#painelSemConexao", timeout=15000)
+    pagina.erros_de_javascript = erros
+
+    yield pagina
+
+    contexto.close()
+
+
+@pytest.fixture
+def pagina_licenca_vencida(navegador, servidor_licenca_vencida):
+    contexto = _preparar_contexto(navegador)
+    pagina = contexto.new_page()
+
+    erros = []
+    pagina.on("pageerror", lambda erro: erros.append(str(erro)))
+
+    pagina.goto(servidor_licenca_vencida, wait_until="load")
+    pagina.wait_for_selector("#aba-dashboard", state="attached", timeout=15000)
+    pagina.wait_for_selector("#painelLicenca", timeout=15000)
+    pagina.erros_de_javascript = erros
+
+    yield pagina
+
+    contexto.close()
 
 
 @pytest.fixture
@@ -176,6 +327,29 @@ def pagina(navegador, servidor):
     # a pagina nunca fica "ociosa" pelo criterio do Playwright.
     pagina.goto(servidor, wait_until="load")
     pagina.wait_for_selector("#aba-dashboard", timeout=15000)
+
+    # Esperar o DOM nao basta: o app so pede dados DEPOIS de confirmar sessao
+    # e licenca, e ate a resposta chegar a lista esta em esqueleto. Um teste
+    # que comeca a clicar nesse meio-tempo compete com a carga inicial -- ele
+    # cadastra, busca, e a carga que estava em voo repinta a tabela por cima
+    # do resultado, deixando o esqueleto na tela no instante da leitura.
+    #
+    # A falha aparecia como `'Bruno Lima' not in ' 	 	...'`, que nao
+    # se parece com um problema de tempo e custa caro para diagnosticar. A
+    # janela sempre existiu; ela ficou larga o bastante para doer quando a
+    # abertura passou a fazer duas consultas antes de carregar.
+    # A condicao precisa de um sinal POSITIVO de que a carga terminou. "Sem
+    # esqueleto" nao serve: a tabela comeca VAZIA, sem esqueleto nenhum, e a
+    # espera passaria na janela entre o inicio da carga e o desenho do
+    # esqueleto. `renderizarTabela` sempre escreve algo -- as linhas, ou o
+    # estado vazio -- entao ter filho e nao ter esqueleto e o par que
+    # significa "acabou".
+    pagina.wait_for_function(
+        "() => { const t = document.getElementById('tabelaClientes');"
+        " return t && t.children.length > 0"
+        " && t.querySelectorAll('tr.skeleton-row').length === 0; }",
+        timeout=15000,
+    )
     pagina.erros_de_javascript = erros
 
     yield pagina
@@ -302,7 +476,30 @@ def test_busca_filtra_a_lista(pagina):
         pagina.wait_for_selector(f"#tabelaClientes:has-text('{nome}')", timeout=8000)
 
     pagina.fill("#inputPesquisa", "Bruno")
-    pagina.wait_for_timeout(900)  # a busca e debounced
+
+    # Espera o RESULTADO, e nao o relogio.
+    #
+    # Aqui havia `wait_for_timeout(900)` para cobrir o debounce da busca: passa
+    # na maquina de quem escreveu e falha num runner carregado, lendo o
+    # esqueleto de carregamento -- uma tabela de espacos duros, sem nome
+    # nenhum.
+    #
+    # Os TRES fatos precisam valer AO MESMO TEMPO, numa condicao so. Separa-los
+    # nao funciona, e o motivo e sutil: "tem Bruno" ja era verdade antes da
+    # busca, porque ele acabou de ser cadastrado; e "nao tem Ana" fica
+    # verdadeiro no ESQUELETO, que nao tem nome nenhum. Duas esperas em
+    # sequencia passam nos estados errados e a leitura cai no meio da
+    # repintura.
+    pagina.wait_for_function(
+        """() => {
+            const t = document.getElementById('tabelaClientes');
+            if (!t || t.querySelectorAll('tr.skeleton-row').length) return false;
+            const texto = t.innerText;
+            return texto.includes('Bruno Lima') && !texto.includes('Ana Souza');
+        }""",
+        timeout=8000,
+    )
+
 
     tabela = pagina.locator("#tabelaClientes").inner_text()
     assert "Bruno Lima" in tabela
@@ -363,3 +560,138 @@ def test_o_foco_do_teclado_e_visivel(pagina):
         or contorno["sombra"] not in ("none", "")
     )
     assert tem_indicador, f"elemento focado sem indicacao visual: {contorno}"
+
+
+# =============================================================================
+# O app aberto sem conta conectada
+#
+# A 1.3.1 fechou a leitura da API sem sessao -- correto do lado do servidor, e
+# do lado da tela criou um estado que nunca tinha existido. O que o operador
+# via nao era um erro: era o Dashboard com "0 Total Clientes" e "R$ 0,00 em
+# atraso", numeros que sao os zeros escritos no HTML e nao o cadastro. Quem
+# abrisse o app sem ter conectado leria "nada a receber" e acreditaria.
+#
+# Estes testes fixam as duas metades: a tela nao inventa numero, e a tela nao
+# assusta com erro. Ela explica e oferece o caminho.
+# =============================================================================
+def test_sem_sessao_a_tela_pede_conexao(pagina_sem_sessao):
+    painel = pagina_sem_sessao.locator("#painelSemConexao")
+    assert painel.is_visible()
+    assert "Conecte sua conta Microsoft" in painel.inner_text()
+    assert pagina_sem_sessao.locator("#btnConectarPeloPainel").is_visible()
+
+
+def test_sem_sessao_nenhum_numero_do_dashboard_aparece(pagina_sem_sessao):
+    """
+    O ponto do achado. Nao basta o painel existir: o conteudo atras dele
+    precisa sumir, senao "R$ 0,00 em atraso" continua legivel -- e continua
+    mentindo.
+    """
+    for identificador in ("metricTotalClientes", "metricEntregas", "metricRetiradas"):
+        elemento = pagina_sem_sessao.locator("#" + identificador)
+        if elemento.count():
+            assert not elemento.is_visible(), f"{identificador} visivel sem sessao"
+
+    assert not pagina_sem_sessao.locator("#aba-dashboard").is_visible()
+
+
+def test_sem_sessao_o_cadastro_nao_vaza_para_a_tela(pagina_sem_sessao):
+    """O banco TEM um cliente. Nenhum pedaco dele pode aparecer."""
+    assert "Maria Souza" not in pagina_sem_sessao.content()
+
+
+def test_sem_sessao_nao_aparece_toast_de_erro(pagina_sem_sessao):
+    """
+    "O app nao pode dar erro algum." Com o painel explicando a situacao, um
+    "Erro ao carregar pagamentos." vermelho por cima e o pior dos dois mundos:
+    assusta e nao diz o que fazer.
+    """
+    pagina_sem_sessao.wait_for_timeout(2500)
+    toast = pagina_sem_sessao.locator("#toast")
+    if toast.count() and toast.is_visible():
+        texto = toast.inner_text().lower()
+        assert "erro" not in texto and "falha" not in texto, f"toast de erro: {texto}"
+
+
+def test_sem_sessao_nao_ha_erro_de_javascript(pagina_sem_sessao):
+    pagina_sem_sessao.wait_for_timeout(2000)
+    assert pagina_sem_sessao.erros_de_javascript == []
+
+
+def test_sem_sessao_trocar_de_aba_nao_revela_conteudo(pagina_sem_sessao):
+    """O painel vale para o app inteiro, e nao so para a aba de abertura."""
+    for aba in ("clientes", "pagamentos", "entregas"):
+        pagina_sem_sessao.click(f'[data-comando="trocarAba"][data-arg="{aba}"]')
+        pagina_sem_sessao.wait_for_timeout(300)
+        assert pagina_sem_sessao.locator("#painelSemConexao").is_visible()
+        assert not pagina_sem_sessao.locator(f"#aba-{aba}").is_visible()
+
+
+def test_com_sessao_o_painel_nao_atrapalha(pagina):
+    """A outra direcao: fechar demais seria a mesma regressao ao contrario."""
+    painel = pagina.locator("#painelSemConexao")
+    assert not painel.is_visible()
+    assert pagina.locator("#aba-dashboard").is_visible()
+
+
+# =============================================================================
+# O periodo de teste encerrado
+#
+# Mesma exigencia do estado sem conexao: a tela nao pode inventar numero nem
+# assustar com erro. A diferenca e que aqui existe uma acao que resolve --
+# pagar -- e ela precisa estar a um clique, com o valor a vista.
+# =============================================================================
+def test_licenca_vencida_a_tela_pede_pagamento(pagina_licenca_vencida):
+    painel = pagina_licenca_vencida.locator("#painelLicenca")
+    assert painel.is_visible()
+    assert "Seu periodo de teste terminou" in painel.inner_text()
+    assert "R$ 1.500,00" in painel.inner_text()
+    assert pagina_licenca_vencida.locator("#btnGerarPixLicenca").is_visible()
+
+
+def test_licenca_vencida_nenhum_numero_aparece(pagina_licenca_vencida):
+    """Os zeros do HTML sao tao mentirosos aqui quanto no estado sem conexao."""
+    assert not pagina_licenca_vencida.locator("#aba-dashboard").is_visible()
+    metrica = pagina_licenca_vencida.locator("#metricTotalClientes")
+    if metrica.count():
+        assert not metrica.is_visible()
+
+
+def test_licenca_vencida_o_cadastro_nao_vaza(pagina_licenca_vencida):
+    assert "Maria Souza" not in pagina_licenca_vencida.content()
+
+
+def test_licenca_vencida_nao_carrega_dados_por_tras_do_painel(pagina_licenca_vencida):
+    """
+    O defeito exato. `checarLoginExistente` chamava o carregamento antes da
+    consulta de licenca: as requisicoes voltavam 402 e o app se dava por
+    carregado -- entao pagar liberava a tela sem trazer dado nenhum.
+    """
+    pagina_licenca_vencida.wait_for_timeout(1500)
+    estado = pagina_licenca_vencida.evaluate(
+        "() => ({ carregados: window._dadosJaCarregados,"
+        " vencida: window._licencaVencida,"
+        " verificada: window._licencaVerificada })"
+    )
+    assert estado["vencida"] is True
+    assert estado["verificada"] is True
+    assert estado["carregados"] is False,         "o app pediu dados com a licenca vencida; ao liberar, nao recarregaria"
+
+
+def test_licenca_vencida_nao_aparece_toast_de_erro(pagina_licenca_vencida):
+    pagina_licenca_vencida.wait_for_timeout(2000)
+    toast = pagina_licenca_vencida.locator("#toast")
+    if toast.count() and toast.is_visible():
+        texto = toast.inner_text().lower()
+        assert "erro" not in texto and "falha" not in texto, f"toast de erro: {texto}"
+
+
+def test_licenca_vencida_nao_ha_erro_de_javascript(pagina_licenca_vencida):
+    pagina_licenca_vencida.wait_for_timeout(1500)
+    assert pagina_licenca_vencida.erros_de_javascript == []
+
+
+def test_licenca_vigente_nao_mostra_o_painel(pagina):
+    """A direcao oposta: bloquear quem esta em dia seria a regressao inversa."""
+    assert not pagina.locator("#painelLicenca").is_visible()
+    assert pagina.locator("#aba-dashboard").is_visible()

@@ -39,6 +39,71 @@ async function fetchSeguro(url, options) {
     }
 }
 
+// -----------------------------------------------------------------------------
+// Sessao ausente
+//
+// Ate a 1.3.0 a leitura da API respondia sem sessao, entao "app aberto sem
+// conta conectada" nunca precisou ser um estado: a tela carregava como
+// qualquer outra. Fechada essa folga, o MESMO app passou a mostrar a casca com
+// os zeros escritos no proprio HTML -- "0 Total Clientes", "R$ 0,00 em atraso"
+// -- enquanto o console acumulava 401 que ninguem ve.
+//
+// O sintoma nao era um erro na tela. Era pior: numero errado com ar de numero
+// certo. Quem abrisse o app sem ter conectado leria "nada a receber" e
+// acreditaria.
+//
+// Sao dois mecanismos. O portao em `iniciarAplicacao()` resolve a abertura --
+// nao se pede dado antes de saber se ha sessao. Este gancho resolve o resto:
+// a sessao que expira com o app aberto, e qualquer chamada futura que alguem
+// escreva sem lembrar do assunto.
+// -----------------------------------------------------------------------------
+var _semSessao = false;
+
+// `/api/auth/` e `/api/health` respondem antes de existir sessao por desenho;
+// um 401 vindo delas significaria outra coisa, e nao "precisa conectar".
+function _ehRotaQueExigeSessao(url) {
+    if (typeof url !== 'string' || url.indexOf('/api/') !== 0) return false;
+    return url.indexOf('/api/auth/') !== 0 && url.indexOf('/api/health') !== 0;
+}
+
+function registrarSessaoAusente() {
+    if (_semSessao) return;
+    _semSessao = true;
+    // O que estiver na tela deixou de valer; a proxima abertura precisa
+    // buscar de novo em vez de confiar no que ficou.
+    _dadosJaCarregados = false;
+    mostrarPainelSemConexao();
+}
+
+function registrarSessaoPresente() {
+    if (!_semSessao) return;
+    _semSessao = false;
+    esconderPainelSemConexao();
+}
+
+// O cabecalho da topbar fica por conta da troca de abas, e nao deste painel.
+//
+// A primeira versao daqui o trocava por "Conecte-se para comecar", o que
+// parecia melhor e nao era: trocar de aba com o painel aberto reescreve o
+// titulo, e o valor guardado para restaurar depois envelhecia na hora. Quem
+// conectasse estando em "Pagamentos" veria a tela voltar dizendo "Dashboard".
+//
+// Alem disso as duas informacoes sao diferentes e ambas verdadeiras: o titulo
+// diz onde o operador esta, o painel diz por que nao ha numero ali.
+function mostrarPainelSemConexao() {
+    var painel = document.getElementById('painelSemConexao');
+    var casca = document.getElementById('appShell');
+    if (painel) painel.hidden = false;
+    if (casca) casca.classList.add('sem-conexao');
+}
+
+function esconderPainelSemConexao() {
+    var painel = document.getElementById('painelSemConexao');
+    var casca = document.getElementById('appShell');
+    if (painel) painel.hidden = true;
+    if (casca) casca.classList.remove('sem-conexao');
+}
+
 // Patch do fetch original para injetar CSRF automaticamente
 var _fetchOriginal = window.fetch;
 window.fetch = function(url, options) {
@@ -53,8 +118,222 @@ window.fetch = function(url, options) {
             options.headers['Content-Type'] = 'application/json';
         }
     }
-    return _fetchOriginal.apply(this, arguments);
+    var promessa = _fetchOriginal.apply(this, arguments);
+    if (_ehRotaQueExigeSessao(url)) {
+        // Observa sem consumir: a promessa devolvida a quem chamou e a
+        // original, entao o corpo continua intacto para ele ler.
+        promessa.then(function(resposta) {
+            if (!resposta) return;
+            if (resposta.status === 401) registrarSessaoAusente();
+            // 402 Payment Required: a licenca venceu. Mesmo desenho do 401 --
+            // um gancho central em vez de tratamento em cada chamada, para que
+            // o app nao dependa de alguem lembrar do assunto ao escrever a
+            // proxima rota.
+            if (resposta.status === 402) registrarLicencaVencida();
+        }, function() { /* rede fora: e outro assunto, tratado em tentarBackend */ });
+    }
+    return promessa;
 };
+
+
+// -----------------------------------------------------------------------------
+// Licenca de uso
+//
+// Trinta dias de teste a partir da primeira abertura; depois, licenca paga.
+// O bloqueio de verdade e do backend (`_exigir_licenca`, que responde 402); o
+// que existe aqui e a tela que explica e o caminho para resolver.
+//
+// O pagamento e verificado PERGUNTANDO ao Mercado Pago, e nao esperando
+// webhook: o backend escuta em loopback e um servidor da internet nao alcanca
+// este endereco. Mesma inversao ja usada para o Asaas em reconciliacao.py.
+// -----------------------------------------------------------------------------
+var _licencaVencida = false;
+var _intervaloDaLicenca = null;
+
+// A cada quanto tempo se pergunta ao Mercado Pago enquanto o Pix esta na tela.
+// Cinco segundos e o intervalo em que um Pix pago "cai" na hora do ponto de
+// vista de quem esta olhando para o celular; menos que isso so gasta chamada.
+var INTERVALO_VERIFICACAO_LICENCA_MS = 5000;
+
+function _formatarReais(centavos) {
+    var valor = (Number(centavos) || 0) / 100;
+    var partes = valor.toFixed(2).split('.');
+    var inteiro = partes[0];
+    var agrupado = '';
+    while (inteiro.length > 3) {
+        agrupado = '.' + inteiro.slice(-3) + agrupado;
+        inteiro = inteiro.slice(0, -3);
+    }
+    return 'R$ ' + inteiro + agrupado + ',' + partes[1];
+}
+
+function mostrarPainelLicenca(situacao) {
+    var painel = document.getElementById('painelLicenca');
+    var casca = document.getElementById('appShell');
+    if (painel) painel.hidden = false;
+    if (casca) casca.classList.add('licenca-vencida');
+
+    var valor = document.getElementById('licencaValor');
+    if (valor && situacao && situacao.valor_centavos) {
+        valor.textContent = _formatarReais(situacao.valor_centavos);
+    }
+}
+
+function esconderPainelLicenca() {
+    var painel = document.getElementById('painelLicenca');
+    var casca = document.getElementById('appShell');
+    if (painel) painel.hidden = true;
+    if (casca) casca.classList.remove('licenca-vencida');
+}
+
+function registrarLicencaVencida(situacao) {
+    if (_licencaVencida) return;
+    _licencaVencida = true;
+    _dadosJaCarregados = false;
+    mostrarPainelLicenca(situacao);
+    // Ha cobranca aberta de uma execucao anterior? Entao ja se comeca
+    // perguntando, sem pedir ao operador que refaca algo que ele ja fez.
+    verificarPagamentoDaLicenca(true);
+}
+
+function registrarLicencaLiberada() {
+    if (!_licencaVencida) return;
+    _licencaVencida = false;
+    esconderPainelLicenca();
+    pararVerificacaoDaLicenca();
+    liberarDadosSeOsPortoesAbrirem();
+}
+
+function atualizarAvisoDeTeste(situacao) {
+    var aviso = document.getElementById('avisoTeste');
+    if (!aviso) return;
+    if (!situacao || situacao.estado !== 'teste') { aviso.hidden = true; return; }
+
+    var dias = situacao.dias_restantes;
+    aviso.hidden = false;
+    aviso.textContent = dias === 1
+        ? 'Ultimo dia do periodo de teste.'
+        : 'Periodo de teste: ' + dias + ' dias restantes.';
+    // Urgencia so na ultima semana. Avisar com o mesmo peso durante 30 dias
+    // ensina o operador a nao ver o aviso.
+    aviso.classList.toggle('urgente', dias <= 7);
+}
+
+async function checarLicenca() {
+    try {
+        var resp = await fetch('/api/licenca/status');
+        if (!resp.ok) return null;
+        var situacao = await resp.json();
+
+        _licencaVerificada = true;
+        if (situacao.estado === 'expirada') registrarLicencaVencida(situacao);
+        else registrarLicencaLiberada();
+
+        atualizarAvisoDeTeste(situacao);
+        return situacao;
+    } catch (_) {
+        // Backend fora do ar e outro assunto, ja coberto pelo painel de conexao.
+        return null;
+    }
+}
+
+async function gerarPixDaLicenca() {
+    var botao = document.getElementById('btnGerarPixLicenca');
+    var caixa = document.getElementById('licencaCobranca');
+    if (botao) { botao.disabled = true; botao.textContent = 'Gerando...'; }
+
+    try {
+        var resp = await fetch('/api/licenca/cobranca', {
+            method: 'POST', headers: CABECALHOS_JSON, body: JSON.stringify({})
+        });
+        var dados = await resp.json();
+        if (!resp.ok) {
+            _avisarNaCaixaDaLicenca(dados.erro || 'Nao foi possivel gerar a cobranca.');
+            return;
+        }
+        _desenharCobrancaDaLicenca(dados);
+        iniciarVerificacaoDaLicenca();
+    } catch (_) {
+        _avisarNaCaixaDaLicenca('Sem conexao para gerar a cobranca.');
+    } finally {
+        if (botao) { botao.disabled = false; botao.textContent = 'Pagar com Pix'; }
+    }
+}
+
+function _avisarNaCaixaDaLicenca(mensagem) {
+    var caixa = document.getElementById('licencaCobranca');
+    if (!caixa) return;
+    caixa.hidden = false;
+    caixa.innerHTML = '<p class="licenca-aguardando">' + escaparHtml(mensagem) + '</p>';
+}
+
+function _desenharCobrancaDaLicenca(dados) {
+    var caixa = document.getElementById('licencaCobranca');
+    if (!caixa) return;
+
+    // Mesmo cuidado da cobranca do Asaas: o base64 do QR passa por
+    // `base64Seguro` antes de virar `src`, e o payload por `escaparHtml`.
+    var qr = base64Seguro(dados.pix_qr_code);
+    var payload = dados.pix_payload || '';
+
+    caixa.hidden = false;
+    caixa.innerHTML =
+        (qr ? '<img src="data:image/png;base64,' + qr + '" alt="QR Code do Pix da licenca">' : '') +
+        (payload ? '<div class="licenca-payload" id="licencaPayload">' + escaparHtml(payload) + '</div>' : '') +
+        (payload ? '<button type="button" class="btn btn-secundario" data-comando="copiarPixDaLicenca">Copiar Copia e Cola</button>' : '') +
+        '<p class="licenca-aguardando">Aguardando o pagamento. A tela libera sozinha assim que o Mercado Pago confirmar.</p>';
+}
+
+async function copiarPixDaLicenca() {
+    var el = document.getElementById('licencaPayload');
+    if (el && navigator.clipboard) {
+        try {
+            await navigator.clipboard.writeText(el.textContent);
+            exibirToast('Copia e Cola copiado!');
+        } catch (_) { exibirToast('Falha ao copiar.', 'error'); }
+    }
+}
+
+function iniciarVerificacaoDaLicenca() {
+    if (_intervaloDaLicenca) return;
+    _intervaloDaLicenca = setInterval(function() {
+        verificarPagamentoDaLicenca(false);
+    }, INTERVALO_VERIFICACAO_LICENCA_MS);
+}
+
+function pararVerificacaoDaLicenca() {
+    if (!_intervaloDaLicenca) return;
+    clearInterval(_intervaloDaLicenca);
+    _intervaloDaLicenca = null;
+}
+
+async function verificarPagamentoDaLicenca(primeira) {
+    try {
+        var resp = await fetch('/api/licenca/verificar', {
+            method: 'POST', headers: CABECALHOS_JSON, body: JSON.stringify({})
+        });
+        if (!resp.ok) return;
+        var situacao = await resp.json();
+
+        if (situacao.estado === 'paga') {
+            exibirToast('Licenca ativada. Bom trabalho!');
+            registrarLicencaLiberada();
+            return;
+        }
+        // Cobranca cancelada, recusada ou estornada: perguntar de novo nao muda
+        // a resposta. Parar aqui e o que evita a tela girar para sempre.
+        if (situacao.encerrado) {
+            pararVerificacaoDaLicenca();
+            _avisarNaCaixaDaLicenca('Esta cobranca foi encerrada sem pagamento. Gere uma nova para tentar de novo.');
+            return;
+        }
+        // Ha cobranca em aberto de uma execucao anterior: retoma a espera sem
+        // pedir ao operador que gere outra.
+        if (primeira && situacao.pagamento_id) iniciarVerificacaoDaLicenca();
+    } catch (_) {
+        // Sem rede: a proxima rodada tenta.
+    }
+}
 
 // Atualiza o cookie CSRF a partir do header da resposta inicial
 (function() {
@@ -115,6 +394,18 @@ async function tentarBackend(url, opcoes) {
 
 function exibirToast(mensagem, tipo) {
     tipo = tipo || 'success';
+    // Com o painel de "sem conexao" na tela, todo erro de carregamento tem a
+    // mesma causa e ja esta explicada la. Deixar passar produzia o pior dos
+    // dois mundos: a explicacao calma no meio da tela e, por cima dela, um
+    // "Erro ao carregar pagamentos." vermelho que nao diz o que fazer.
+    //
+    // A ordem funciona porque o gancho do 401 e registrado no momento do
+    // fetch: ele roda antes de quem chamou retomar do `await`, entao
+    // `_semSessao` ja esta ligado quando o catch tenta avisar.
+    if (_semSessao && tipo === 'error') {
+        console.warn('[sessao] erro suprimido (o painel ja explica):', mensagem);
+        return;
+    }
     var toast = document.getElementById('toast');
     if (!toast) return;
     toast.innerText = mensagem;
@@ -345,16 +636,69 @@ function trocarAba(aba) {
 
 var chartInstances = {};
 
-document.addEventListener('DOMContentLoaded', function() {
+var _dadosJaCarregados = false;
+
+// A licenca ja foi consultada nesta execucao? Enquanto for `false`, nao se
+// pede dado nenhum: "ainda nao sei" e diferente de "esta tudo certo", e tratar
+// os dois igual foi exatamente o defeito abaixo.
+var _licencaVerificada = false;
+
+// Os DOIS portoes precisam estar abertos para o app mostrar dado: sessao
+// Microsoft e licenca vigente.
+//
+// Antes, `checarLoginExistente` chamava `carregarDadosDoApp` direto, e ele roda
+// antes de a licenca ser consultada. Numa instalacao com o teste vencido isso
+// disparava quatro requisicoes que voltavam 402 -- deixando na tela os zeros
+// escritos no HTML -- e, pior, marcava `_dadosJaCarregados`. Quando o operador
+// pagava e a tela liberava, o carregamento nao acontecia mais: o app ficava
+// aberto, funcional e mostrando "0 Total Clientes" sobre um banco cheio.
+function liberarDadosSeOsPortoesAbrirem() {
+    if (!_licencaVerificada) return;
+    if (_semSessao || _licencaVencida) return;
+    carregarDadosDoApp();
+}
+
+// Tudo o que fala com /api/ e precisa de sessao e licenca.
+function carregarDadosDoApp() {
+    if (_dadosJaCarregados) return;
+    _dadosJaCarregados = true;
     carregarClientes();
-    checarLoginExistente();
     carregarNotificacoes();
+    carregarDashboardGraficos();
+    iniciarConciliacaoAutomatica();
+}
+
+// O portao. Perguntar PRIMEIRO se ha sessao, e so entao decidir, e o que
+// impede a tela de aparecer preenchida com os zeros do HTML enquanto quatro
+// requisicoes voltam 401 em silencio.
+async function iniciarAplicacao() {
+    var logado = false;
+    try {
+        logado = await checarLoginExistente();
+    } catch (_) {
+        // /api/auth/status e isenta de sessao; falhar aqui significa backend
+        // fora do ar, nao falta de conta. Tratar como desconectado e o lado
+        // seguro: melhor pedir conexao do que mostrar numero que nao veio.
+    }
+    if (!logado) {
+        registrarSessaoAusente();
+        return;
+    }
+
+    // A licenca so e consultada DEPOIS de haver sessao, na mesma ordem dos
+    // guardas do backend: quem nao esta autenticado no app nao precisa saber
+    // em que pe esta a licenca dele.
+    await checarLicenca();
+    liberarDadosSeOsPortoesAbrirem();
+}
+
+document.addEventListener('DOMContentLoaded', function() {
     initTheme();
     initSidebar();
     registrarAtalhosTeclado();
 
     initObservacoesCounter();
-    carregarDashboardGraficos();
+    iniciarAplicacao();
 
     // O modulo comercial vive em comercial.js; a checagem cobre o caso de o
     // arquivo nao ter carregado, para o resto da tela seguir funcionando.
@@ -1081,6 +1425,18 @@ var _clientesCarregados = [];
 var _totalDeClientes = 0;
 var _buscaDaPagina = '';
 
+// Numero da carga em curso.
+//
+// Duas cargas podem estar em voo ao mesmo tempo -- cadastrar um cliente
+// dispara uma, e digitar na busca logo em seguida dispara outra. Sem
+// sequencia, a resposta da PRIMEIRA chega depois e repinta a tabela por cima
+// do resultado da busca: o operador digita "Bruno", ve o resultado certo, e a
+// lista completa volta sozinha meio segundo depois.
+//
+// A janela sempre existiu; ela ficou mais larga quando a abertura passou a
+// consultar sessao e licenca antes de carregar. Foi assim que apareceu.
+var _sequenciaDaCarga = 0;
+
 async function carregarClientes() {
     var busca = (document.getElementById('inputPesquisa') || {}).value || '';
     _buscaDaPagina = busca.trim();
@@ -1090,18 +1446,25 @@ async function carregarClientes() {
     // algo esta em andamento, em vez de encarar a tabela vazia da consulta
     // anterior ate a resposta chegar.
     mostrarEsqueleto('tabelaClientes', 6, 5);
-    return _carregarPaginaDeClientes(true);
+    return _carregarPaginaDeClientes(true, ++_sequenciaDaCarga);
 }
 
 async function carregarMaisClientes() {
-    return _carregarPaginaDeClientes(false);
+    // Continua a MESMA carga: "carregar mais" acrescenta paginas a lista que
+    // ja esta na tela, e nao comeca uma consulta nova.
+    return _carregarPaginaDeClientes(false, _sequenciaDaCarga);
 }
 
-async function _carregarPaginaDeClientes(primeira) {
+async function _carregarPaginaDeClientes(primeira, sequencia) {
+    if (sequencia === undefined) sequencia = _sequenciaDaCarga;
     var url = API_URL + '?busca=' + encodeURIComponent(_buscaDaPagina) +
               '&limite=' + TAMANHO_DA_PAGINA +
               '&deslocamento=' + _clientesCarregados.length;
     var r = await tentarBackend(url);
+    // Chegou tarde: outra carga comecou enquanto esta esperava. Renderizar
+    // agora colocaria na tela o resultado de uma consulta que o operador ja
+    // abandonou.
+    if (sequencia !== _sequenciaDaCarga) return;
     if (r.semBackend) { carregarClientesOffline(true); return; }
     try {
         if (!r.resposta.ok) throw new Error('Falha');
@@ -1830,9 +2193,14 @@ async function checarLoginExistente() {
         if (status.logado) {
             atualizarVisualBotaoConexao(status.conta);
             if (intervaloChecagem) { clearInterval(intervaloChecagem); intervaloChecagem = null; }
+            // A ordem importa: some o painel, e so entao os dados entram numa
+            // tela que ja voltou a mostrar conteudo.
+            registrarSessaoPresente();
+            liberarDadosSeOsPortoesAbrirem();
             return true;
         }
         resetarVisualBotaoConexao();
+        registrarSessaoAusente();
         // O backend so devolve este motivo quando havia uma sessao que nao
         // pode mais ser renovada -- vale avisar, porque a tela acabou de
         // mudar de "Conectado" para "Conectar" sem o operador ter feito nada.
@@ -1880,7 +2248,15 @@ async function conectarMicrosoft() {
 async function desconectarMicrosoft() {
     try {
         var resp = await fetch('/api/auth/logout', { method: 'POST' });
-        if (resp.ok) { resetarVisualBotaoConexao(); exibirToast('Desconectado da Microsoft.'); }
+        if (resp.ok) {
+            resetarVisualBotaoConexao();
+            // Sem isto a tela ficaria com o cadastro do operador anterior
+            // ate a proxima requisicao voltar 401 -- dado visivel depois de
+            // desconectar e exatamente o que a desconexao deveria encerrar.
+            _dadosJaCarregados = false;
+            registrarSessaoAusente();
+            exibirToast('Desconectado da Microsoft.');
+        }
     } catch(_) { exibirToast('Erro ao desconectar.', 'error'); }
 }
 
@@ -2429,6 +2805,69 @@ async function _enviarConfirmacao(pagamentoId, motivo) {
 // -----------------------------------------------------------------------------
 var _conciliacaoEmCurso = false;
 
+// A cada quanto tempo o app pergunta sozinho.
+//
+// O botao existia, a rota existia e a operacao ja era idempotente -- so nao
+// havia nada que a acionasse. Nem agendador no backend, nem temporizador
+// aqui: a unica chamada partia de um clique. Na pratica o cliente pagava o
+// Pix, o dinheiro entrava na conta do Asaas e a cobranca ficava "Pendente"
+// ate alguem lembrar de conciliar. Um relatorio financeiro tirado nesse
+// meio-tempo estava errado, sem nada na tela indicando isso.
+//
+// Vinte minutos e o meio-termo entre o financeiro defasado e gastar cota da
+// API do Asaas a toa. `reconciliar()` so consulta cobrancas EM ABERTO, entao
+// uma rodada numa loja sem pendencia nao custa requisicao nenhuma.
+var INTERVALO_CONCILIACAO_MS = 20 * 60 * 1000;
+
+var CHAVE_ULTIMA_CONCILIACAO = 'adri:ultimaConciliacao';
+
+function registrarConciliacaoBemSucedida() {
+    try { localStorage.setItem(CHAVE_ULTIMA_CONCILIACAO, new Date().toISOString()); } catch(_) {}
+    atualizarSeloDeConciliacao();
+}
+
+// Sem isto o operador le um numero sem saber se ele e de agora ou de ontem --
+// que era exatamente o problema quando a conciliacao dependia de alguem
+// lembrar de clicar. O selo torna a defasagem visivel em vez de silenciosa.
+function atualizarSeloDeConciliacao() {
+    var selo = document.getElementById('ultimaConciliacao');
+    if (!selo) return;
+
+    var marca = null;
+    try { marca = localStorage.getItem(CHAVE_ULTIMA_CONCILIACAO); } catch(_) {}
+    if (!marca) {
+        selo.textContent = 'Nunca conferido';
+        return;
+    }
+
+    var quando = new Date(marca);
+    if (isNaN(quando.getTime())) { selo.textContent = ''; return; }
+
+    // Texto curto de proposito: o selo divide a linha com o filtro, o seletor
+    // de status e dois botoes, e uma frase longa empurrava tudo para fora do
+    // cartao. Precisao de minuto tambem nao serve para nada aqui -- o que o
+    // operador precisa saber e se o numero e de agora ou de outro dia.
+    var minutos = Math.floor((Date.now() - quando.getTime()) / 60000);
+    var horas = String(quando.getHours()).padStart(2, '0') + ':'
+              + String(quando.getMinutes()).padStart(2, '0');
+
+    if (minutos < 1) selo.textContent = 'Conferido agora';
+    else if (minutos < 60) selo.textContent = 'Conferido ha ' + minutos + ' min';
+    else if (quando.toDateString() === new Date().toDateString()) selo.textContent = 'Conferido as ' + horas;
+    else selo.textContent = 'Conferido em ' + quando.toLocaleDateString('pt-BR');
+}
+
+function iniciarConciliacaoAutomatica() {
+    atualizarSeloDeConciliacao();
+    // Silenciosa: na abertura do app o operador nao pediu nada, e um toast
+    // dizendo "nada mudou" a cada inicializacao vira ruido que se aprende a
+    // ignorar -- inclusive quando tiver algo a dizer.
+    conciliarPagamentos(true);
+    setInterval(function() { conciliarPagamentos(true); }, INTERVALO_CONCILIACAO_MS);
+    // O selo envelhece sozinho entre uma rodada e outra.
+    setInterval(atualizarSeloDeConciliacao, 60 * 1000);
+}
+
 async function conciliarPagamentos(silenciosa) {
     if (_conciliacaoEmCurso) return;
     _conciliacaoEmCurso = true;
@@ -2445,6 +2884,8 @@ async function conciliarPagamentos(silenciosa) {
             return;
         }
         if (!resp.ok) throw new Error(dados.erro || 'Erro');
+
+        registrarConciliacaoBemSucedida();
 
         if (dados.atualizadas > 0) {
             exibirToast(dados.atualizadas + ' cobranca(s) atualizada(s) pelo Asaas.');
@@ -2689,6 +3130,7 @@ var COMANDOS_PERMITIDOS = [
     'conectarMicrosoft',
     'confirmarPagamentoLocal',
     'copiarPix',
+    'copiarPixDaLicenca',
     'enviarParaExcel',
     'executarImportacao',
     'exportarRelatorio',
@@ -2698,6 +3140,7 @@ var COMANDOS_PERMITIDOS = [
     'fecharModalNovoRecebimento',
     'fecharNotificacoes',
     'gerarCobranca',
+    'gerarPixDaLicenca',
     'limparFiltros',
     'sugerirBairro',
     'toggleFiltro',

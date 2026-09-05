@@ -21,6 +21,7 @@ if DIRETORIO_BACKEND not in sys.path:
 import database  # noqa: E402
 from erp.core import backup  # noqa: E402
 from erp.core import idempotencia  # noqa: E402
+import capacidade  # noqa: E402
 from app import app  # noqa: E402
 
 log = logging.getLogger("adri.servidor")
@@ -254,6 +255,16 @@ def main() -> int:
         return 1
 
     log.info("Servidor em http://%s:%s/", HOST, PORTA)
+    if capacidade.esta_ativa():
+        # Quem abre o endereco no navegador, e nao pelo Electron, recebe 403 em
+        # todo /api/ -- o cabecalho da capacidade e injetado pela janela, e um
+        # navegador comum nao tem como apresenta-lo. Sem esta linha o sintoma e
+        # uma tela que carrega e fica vazia, sem nada explicando por que.
+        log.info(
+            "Capacidade EXIGIDA. Abrir este endereco num navegador comum "
+            "resulta em 403; para desenvolvimento sem a janela, use %s=1.",
+            capacidade.VARIAVEL_DE_DESLIGAMENTO,
+        )
     # debug/reloader desligados: o reloader duplicaria o processo, e o Electron
     # perderia a referencia do filho que precisa encerrar junto com a janela.
     app.run(host=HOST, port=PORTA, debug=False, use_reloader=False, threaded=True)

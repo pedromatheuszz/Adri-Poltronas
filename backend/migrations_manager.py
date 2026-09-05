@@ -1,4 +1,5 @@
 """Gerenciador de migrações do banco de dados."""
+import contextlib
 import logging
 import os
 import sqlite3
@@ -160,6 +161,46 @@ def ha_migracoes_pendentes() -> bool:
     return alvo is not None and revisao_do_banco() != alvo
 
 
+@contextlib.contextmanager
+def _preservando_o_logging():
+    """
+    Devolve a configuração de logging do aplicativo depois de chamar o Alembic.
+
+    Todo comando do Alembic carrega `migrations/env.py`, que chama `fileConfig`
+    sobre o `alembic.ini`. Esse arquivo declara `[logger_root]` com
+    `level = WARN` e `handlers = console` -- e `fileConfig` não acrescenta:
+    ele SUBSTITUI. O efeito sobre o logger raiz é duplo e permanente pelo
+    resto do processo:
+
+    * o nível sobe de INFO para WARNING, e como os loggers `adri.*` são
+      NOTSET, todo `log.info` do aplicativo passa a ser descartado;
+    * o `RotatingFileHandler` some, e com ele o `app.log` em %APPDATA% --
+      inclusive para WARNING e ERROR. Somem os avisos de `[AUTH]`,
+      `[CAPACIDADE]` e `[SEGURANCA]`, que são a trilha em que a auditoria se
+      apoia, e some o arquivo que o QUICK_REFERENCE manda o operador enviar
+      quando algo dá errado.
+
+    Como `servidor.py` importa `app` (que monta esse logging) antes de chamar
+    `preparar_banco()`, e a preparação roda `upgrade` em todo boot, isso valia
+    para TODA execução do aplicativo, não só para a que tinha migração
+    pendente. Falha silenciosa: o arquivo continuava lá, apenas vazio.
+
+    Restaurar aqui, e não mexer no `alembic.ini`, é de propósito: o `.ini` é o
+    que faz o `alembic` na linha de comando ser legível, e quem invade a
+    configuração alheia é a chamada embutida -- então é ela que limpa o que
+    sujou. `disable_existing_loggers=False` no `env.py` cobre a outra metade
+    do estrago, que é o desligamento dos loggers já criados.
+    """
+    raiz = logging.getLogger()
+    nivel_original = raiz.level
+    handlers_originais = list(raiz.handlers)
+    try:
+        yield
+    finally:
+        raiz.setLevel(nivel_original)
+        raiz.handlers[:] = handlers_originais
+
+
 def carimbar(revisao: str = "head") -> None:
     """
     Grava `alembic_version` sem executar nenhuma migration.
@@ -174,14 +215,16 @@ def carimbar(revisao: str = "head") -> None:
     Carimbar declara o que é verdade: o schema já está na altura desta
     revisão. É o que torna o banco migrável dali em diante.
     """
-    command.stamp(_config(), revisao)
+    with _preservando_o_logging():
+        command.stamp(_config(), revisao)
     log.info("Banco carimbado na revisão %s.", revisao)
 
 
 def aplicar_migrações():
     """Aplica todas as migrações pendentes."""
     try:
-        command.upgrade(_config(), "head")
+        with _preservando_o_logging():
+            command.upgrade(_config(), "head")
         log.info("Migrações aplicadas com sucesso.")
     except Exception as e:
         log.error("Erro ao aplicar migrações: %s", e)
@@ -191,7 +234,8 @@ def aplicar_migrações():
 def verificar_migrações():
     """Verifica se há migrações pendentes."""
     try:
-        return command.current(_config())
+        with _preservando_o_logging():
+            return command.current(_config())
     except Exception as e:
         log.error("Erro ao verificar migrações: %s", e)
         return None

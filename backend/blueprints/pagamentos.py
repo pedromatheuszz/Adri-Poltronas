@@ -8,6 +8,7 @@ import database
 import validators
 import asaas
 from erp.financeiro import emissao, reconciliacao
+from limites import LIMITE_CONCILIACAO, LIMITE_EMISSAO_DE_COBRANCA, limiter
 
 log = logging.getLogger("adri.pagamentos")
 
@@ -241,6 +242,8 @@ def confirmar_pagamento(pagamento_id):
 
 
 @pagamentos_bp.route('/reconciliar', methods=['POST'])
+# Roda sozinha a cada 20 min; consulta N cobrancas por rodada.
+@limiter.limit(LIMITE_CONCILIACAO)
 def reconciliar_pagamentos():
     """
     Pergunta ao Asaas o estado atual das cobrancas em aberto.
@@ -274,6 +277,8 @@ def _dados_da_cobranca_existente(pagamento: dict) -> dict:
 
 
 @pagamentos_bp.route('/gerar-cobranca', methods=['POST'])
+# Cada chamada pode criar uma cobranca real no Asaas.
+@limiter.limit(LIMITE_EMISSAO_DE_COBRANCA)
 def gerar_cobranca():
     """
     Gera cobranca Pix ou Boleto no Asaas.

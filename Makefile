@@ -83,8 +83,14 @@ run:
 	@echo "Executando aplicacao (janela Electron)..."
 	$(NPM) start
 
+# Este alvo existe para abrir o backend num navegador comum, e navegador nao
+# tem como apresentar o token de capacidade que o Electron injeta na sessao da
+# janela: sem a variavel, a pagina carrega e todo /api/ responde 403. Vale so
+# aqui -- nenhum caminho de empacotamento passa por este alvo.
+dev: export ADRI_API_SEM_TOKEN := 1
 dev:
 	@echo "Somente o backend, sem janela (http://127.0.0.1:5000/)..."
+	@echo "ATENCAO: capacidade DESLIGADA (ADRI_API_SEM_TOKEN=1) para o navegador funcionar."
 	$(PYTHON) backend/servidor.py
 
 .DEFAULT_GOAL := help
