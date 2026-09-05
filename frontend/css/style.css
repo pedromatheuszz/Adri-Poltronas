@@ -137,6 +137,18 @@ body {
     min-height: 40px;
 }
 
+/* Nome e selo de versao empilhados. `min-width: 0` e o que permite ao nome
+   encolher com reticencias quando precisar, em vez de empurrar o botao de
+   recolher para fora do cabecalho. */
+.sidebar-marca {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1px;
+    flex: 1 1 0;
+    min-width: 0;
+}
+
 .sidebar-logo {
     /* Quadrada por construcao: sem aspect-ratio a logo segue a proporcao do
        arquivo e vira um retangulo vertical. */
@@ -251,6 +263,7 @@ body {
 /* --- Sidebar recolhida: trilho de icones ---------------------------------- */
 .sidebar.recolhida { width: var(--sidebar-largura-recolhida); }
 .sidebar.recolhida .sidebar-titulo,
+.sidebar.recolhida .selo-beta,
 .sidebar.recolhida .nav-tab-rotulo,
 .sidebar.recolhida .online-rotulo { display: none; }
 
@@ -2320,6 +2333,7 @@ td .empty-state { padding: var(--esp-10) var(--esp-4); }
 @media (max-width: 1100px) {
     .sidebar:not(.expandida-manual) { width: var(--sidebar-largura-recolhida); }
     .sidebar:not(.expandida-manual) .sidebar-titulo,
+    .sidebar:not(.expandida-manual) .selo-beta,
     .sidebar:not(.expandida-manual) .nav-tab-rotulo,
     .sidebar:not(.expandida-manual) .online-rotulo { display: none; }
     .sidebar:not(.expandida-manual) .nav-grupo {
@@ -2508,3 +2522,31 @@ button, [role="tab"], summary { touch-action: manipulation; }
 }
 .aviso-teste[hidden] { display: none; }
 .aviso-teste.urgente { color: var(--cor-alerta-texto); font-weight: 600; }
+
+
+/* Selo de versao beta, ao lado da marca na sidebar.
+
+   Discreto por decisao: quem abre o sistema todo dia nao precisa de um alerta
+   permanente, e um selo chamativo vira ruido que se aprende a ignorar -- o
+   mesmo motivo pelo qual a contagem do periodo de teste so ganha destaque na
+   ultima semana. O que ele precisa fazer e responder "que versao e essa?"
+   quando alguem for perguntar. */
+.selo-beta {
+    /* Pequeno para caber: o cabecalho da barra tem 223px e passou a ter
+       quatro elementos. Ver tambem o `gap` de `.sidebar-head`, reduzido pelo
+       mesmo motivo. */
+    font-size: 0.56rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    padding: 0.02rem 0.26rem;
+    border-radius: 3px;
+    background: var(--cor-alerta-suave);
+    color: var(--cor-alerta-texto);
+    border: 1px solid var(--cor-alerta-contorno);
+    cursor: default;
+}
+
+/* Quando o selo some junto com a marca, ver as duas listas de
+   `.sidebar-titulo`: o trilho de icones e a media query de 1100px. Estar nas
+   MESMAS listas e o que mantem os dois em sincronia -- uma regra separada
+   sairia do lugar assim que o ponto de quebra mudasse. */

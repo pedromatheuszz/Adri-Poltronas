@@ -42,7 +42,22 @@
                 <img src="/Design-sem-nome-8-1024x1024.png" alt="" class="sidebar-logo" width="34" height="34">
                 <!-- Marca, nao titulo da pagina: o <h1> agora vive no cabecalho
                      e nomeia o modulo aberto, que e o que muda. -->
-                <p class="sidebar-titulo">Adri Poltronas</p>
+                <!-- Nome e selo empilhados, e nao lado a lado.
+                     Lado a lado eles disputavam os 223px do cabecalho e
+                     truncavam "Adri Poltronas" em "Adri Poltr...", que parece
+                     defeito. Empilhados, cada um tem a largura inteira e o
+                     layout nao depende de um pixel de folga.
+
+                     O selo e discreto de proposito: quem usa o sistema todo
+                     dia nao precisa ser lembrado a cada olhada, mas precisa
+                     poder responder "que versao e essa?" sem procurar. O
+                     `title` carrega a versao exata, preenchida por
+                     `marcarVersaoBeta()` a partir de /api/health -- assim o
+                     numero sai de um lugar so, o package.json. -->
+                <span class="sidebar-marca">
+                    <span class="sidebar-titulo">Adri Poltronas</span>
+                    <span class="selo-beta" id="seloBeta" title="Versao beta">BETA</span>
+                </span>
                 <button type="button" class="sidebar-toggle" id="btnSidebarToggle"
                         data-comando="alternarSidebar" title="Recolher menu"
                         aria-controls="sidebar" aria-expanded="true">

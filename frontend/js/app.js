@@ -219,6 +219,26 @@ function atualizarAvisoDeTeste(situacao) {
     aviso.classList.toggle('urgente', dias <= 7);
 }
 
+// A versao exata vai no `title` do selo, e nao no texto: o selo precisa caber
+// ao lado da marca, e "BETA" cabe. Quem quiser o numero passa o mouse.
+//
+// O valor vem de /api/health, que o le do package.json -- entao existe UM
+// lugar onde a versao e escrita, e o selo nao pode discordar dele.
+async function marcarVersaoBeta() {
+    var selo = document.getElementById('seloBeta');
+    if (!selo) return;
+    try {
+        var resp = await fetch('/api/health');
+        if (!resp.ok) return;
+        var versao = (await resp.json()).versao || '';
+        if (versao) selo.title = 'Versao ' + versao;
+    } catch (_) {
+        // Sem backend o selo fica com o texto padrao. Nao vale um aviso: a
+        // ausencia de backend ja tem tratamento proprio e mais visivel.
+    }
+}
+
+
 async function checarLicenca() {
     try {
         var resp = await fetch('/api/licenca/status');
@@ -698,6 +718,7 @@ document.addEventListener('DOMContentLoaded', function() {
     registrarAtalhosTeclado();
 
     initObservacoesCounter();
+    marcarVersaoBeta();
     iniciarAplicacao();
 
     // O modulo comercial vive em comercial.js; a checagem cobre o caso de o

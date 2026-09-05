@@ -5,6 +5,39 @@ Versionamento [semântico](https://semver.org/lang/pt-BR/).
 
 ---
 
+## [1.4.1-beta] — 2026-09-05
+
+O aplicativo não se identificava como beta em lugar nenhum. O README, a
+descrição do repositório e a página de releases já avisavam — e quem usa o app
+instalado nunca vê nenhum dos três.
+
+### Adicionado
+
+- **Selo `BETA` na barra lateral**, sob o nome do aplicativo. Discreto de
+  propósito: quem abre o sistema todo dia não precisa de um alerta permanente,
+  e um selo chamativo vira ruído que se aprende a ignorar — o mesmo raciocínio
+  da contagem do período de teste, que só ganha destaque na última semana. O
+  que ele precisa fazer é responder "que versão é essa?" quando alguém
+  perguntar; a versão exata está no `title`, lida de `/api/health`, que por sua
+  vez a lê do `package.json`. Um lugar só onde a versão é escrita.
+
+### Alterado
+
+- **A versão passou a carregar o sufixo de pré-lançamento.** É o que faz o
+  instalador sair como `AdriPoltronasSetup-1.4.1-beta.exe` e a sonda
+  `/api/health` reportar beta. Sem isso, o aviso viveria só na documentação e o
+  artefato entregue diria que é uma versão final.
+
+  `1.4.1-beta`, e não `1.4.0-beta`: em versionamento semântico o sufixo de
+  pré-lançamento vale **menos** que a versão sem ele, então `1.4.0-beta`
+  apareceria como anterior à `1.4.0` já registrada aqui — um retrocesso.
+
+- Nome e selo ficam **empilhados** no cabeçalho da barra lateral. Lado a lado
+  disputavam os 223px disponíveis e truncavam "Adri Poltronas" em
+  "Adri Poltr...", que parece defeito.
+
+---
+
 ## [1.4.0] — 2026-09-05
 
 Licenca de uso: 30 dias de teste a partir da primeira abertura, depois compra
