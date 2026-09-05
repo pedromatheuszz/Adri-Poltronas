@@ -95,7 +95,14 @@ def servidor(tmp_path_factory):
     # Sem ADRI_API_TOKEN: a capacidade e injetada pelo Electron, e aqui o
     # navegador e o Playwright. Testar a capacidade e trabalho de
     # test_capacidade.py, que a exercita direto.
+    #
+    # Ate a 1.3.0 bastava remover a variavel: a exigencia caia sozinha. Isso
+    # era o fail-open que a 1.3.1 fechou -- hoje a ausencia da variavel faz o
+    # backend cair no token do perfil e continuar exigindo. Desligar virou
+    # explicito, e este e exatamente o caso de uso do opt-in: um cliente que
+    # nao tem como carregar o cabecalho.
     ambiente.pop('ADRI_API_TOKEN', None)
+    ambiente['ADRI_API_SEM_TOKEN'] = '1'
 
     # A saida vai para ARQUIVO, e nao para um `subprocess.PIPE`.
     #

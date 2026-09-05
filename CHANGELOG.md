@@ -5,6 +5,102 @@ Versionamento [semântico](https://semver.org/lang/pt-BR/).
 
 ---
 
+## [1.3.1] — 2026-09-05
+
+Correção dos achados da auditoria de segurança e funcionamento do commit
+`261ee44`. Dois bloqueios altos, quatro médios e um baixo — mais um bug de
+observabilidade encontrado enquanto se testava outra coisa.
+
+### Corrigido — os dois bloqueios altos
+
+- **A leitura da API respondia sem sessão, incluindo o download do banco.** O
+  guarda só barrava métodos que alteram estado, e todas as rotas que entregam
+  dados pessoais em bloco são GET: `/api/clientes`, `/api/clientes/mapa`,
+  `/api/pagamentos`, `/api/relatorios/exportar` e, no pior caso,
+  `/api/backup/sqlite`, que devolve uma cópia integral do arquivo SQLite.
+  Fechar a leitura não tira nada do operador — sem sessão ele já não cadastrava
+  nem editava. `/api/health` entrou nas isenções porque a sonda de identidade
+  roda antes de existir login.
+
+- **A capacidade falhava em aberto.** `esta_ativa()` era
+  `bool(token_esperado())`, então a ausência de `ADRI_API_TOKEN` no ambiente
+  virava "pode entrar sem token": bastava o Electron falhar em repassar a
+  variável ao processo filho para o servidor subir com a API inteira aberta,
+  sem nada na interface indicando isso. Agora a exigência é sempre ligada e,
+  quando a variável não vem pronta, o backend cai no mesmo `.capacidade` do
+  perfil que o Electron já lê. Desligar virou opt-in por `ADRI_API_SEM_TOKEN=1`.
+
+- **O guarda de autenticação não tinha teste.** `_verificar_autenticacao`
+  começa com `if TESTING: return None` e a suíte inteira roda com o modo
+  ligado — 599 testes verdes não provavam a regra mais básica do backend, e foi
+  por isso que a folga acima sobreviveu. `test_autenticacao.py` desliga o modo
+  e exercita os guardas na ordem real.
+
+### Corrigido — privacidade e observabilidade
+
+- **O log gravava o cadastro do cliente.** Os três tratadores de `HTTPError`
+  em `asaas.py` registravam o corpo bruto da resposta, que numa recusa repete
+  nome, CPF/CNPJ, e-mail e telefone — em `%APPDATA%`, sem cifragem. Agora vai
+  só o código de erro do Asaas.
+
+- **A migração levava embora o log do aplicativo.** Todo comando do Alembic
+  carrega `migrations/env.py`, que chama `fileConfig` sobre o `alembic.ini` —
+  e esse arquivo declara `[logger_root]` com `level = WARN` e
+  `handlers = console`. `fileConfig` não acrescenta: substitui. O estrago era
+  triplo e permanente pelo resto do processo: os loggers `adri.*` já criados
+  eram desligados (`disable_existing_loggers` é `True` por padrão), o nível da
+  raiz caía para WARNING (derrubando todo `log.info` do app) e o
+  `RotatingFileHandler` sumia — com ele, o `app.log` em `%APPDATA%` parava de
+  receber **qualquer coisa**, inclusive WARNING e ERROR.
+
+  Como `servidor.py` importa `app` antes de preparar o banco, e a preparação
+  roda `upgrade` em todo boot, isso valia para toda execução do aplicativo, não
+  só para a que tinha migração pendente. Sumiam os avisos de `[AUTH]`,
+  `[CAPACIDADE]` e `[SEGURANCA]` — a trilha em que a auditoria se apoia — e o
+  log que o `QUICK_REFERENCE.md` manda o operador enviar. Falha silenciosa: o
+  arquivo continuava lá, apenas vazio.
+
+  A correção restaura a configuração do aplicativo em volta de cada chamada ao
+  Alembic, em vez de mexer no `alembic.ini`: o `.ini` é o que faz o `alembic`
+  na linha de comando ser legível, e quem invade configuração alheia é a
+  chamada embutida.
+
+### Adicionado
+
+- **Conciliação automática com o Asaas.** O módulo estava correto, era
+  idempotente e tinha rota pronta — e nada o acionava: a única chamada partia
+  de um clique. O cliente pagava o Pix, o dinheiro entrava na conta do Asaas e
+  a cobrança seguia "Pendente" até alguém lembrar. Agora roda na abertura e a
+  cada 20 minutos, em silêncio, e a tela mostra quando foi a última conferência
+  bem-sucedida.
+
+### Alterado
+
+- **A allowlist de nome, rua, bairro e cidade aceita `&`, `#`, `+` e `%`.**
+  Barrava razão social comum ("Movéis & Cia", "Loja #2", "50% Decor") numa loja
+  cuja clientela é em boa parte pessoa jurídica, sem ganho de segurança — os
+  mesmos caracteres sempre passaram em `observacoes`. A mensagem de erro passou
+  a dizer qual caractere foi recusado.
+
+- **O teto de requisições subiu de 200/min para 2000/min.** O limite não
+  defendia de ninguém: o guarda de host já recusa o que não vem de loopback,
+  então quem apanhava era o próprio app — numa rajada de 250 GET, 124 voltavam
+  429. O aperto foi para onde cada chamada gasta cota de terceiro: Gemini,
+  emissão de cobrança, conciliação e upload ao OneDrive.
+
+- **`servidor.py` avisa no boot quando a capacidade está exigida**, dizendo que
+  abrir o endereço num navegador comum resulta em 403 e nomeando a variável que
+  desliga a exigência. Sem isso o sintoma era uma tela que carrega e fica
+  vazia, sem nada explicando por quê. `make dev` passou a definir a variável
+  sozinho, porque é justamente o alvo que serve o backend a um navegador.
+
+- **O webhook do Asaas deixou de ser recusado pelo guarda de host.** Ele já era
+  isento da checagem de origem e da capacidade, mas levava 400 antes de o
+  próprio token ser lido. Inofensivo hoje, porque nada chega de fora; armadilha
+  no dia do relay público.
+
+---
+
 ## [1.2.1] — 2026-09-02
 
 Correção do job de instalador introduzido na 1.2.0, que reprovou na primeira

@@ -13,6 +13,7 @@ from flask import Blueprint, request, jsonify
 import database
 import microsoft
 import planilha
+from limites import LIMITE_ONEDRIVE, limiter
 
 log = logging.getLogger("adri.excel")
 
@@ -55,6 +56,8 @@ CAMPOS = ['nome', 'cep', 'rua', 'bairro', 'cidade', 'entrega_retirada', 'observa
 
 
 @excel_bp.route('/enviar', methods=['POST'])
+# Cota do Microsoft Graph, e o arquivo enviado e grande.
+@limiter.limit(LIMITE_ONEDRIVE)
 def enviar_excel_onedrive():
     # `obter_token_valido` renova em silencio quando o access_token venceu.
     # Antes daqui a exportacao usava o token gravado tal como estava: passada

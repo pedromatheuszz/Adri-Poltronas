@@ -21,6 +21,7 @@ e a cobranca seguia "Pendente" no ERP.
 """
 import json
 import os
+import re
 import sys
 import tempfile
 
@@ -440,3 +441,66 @@ def test_pagamento_sem_cobranca_no_gateway_pode_ser_confirmado_direto(client, ga
 
     assert resposta.status_code == 200
     assert database.obter_pagamento_por_id(pagamento_id)['status'] == 'Recebido'
+
+
+# =============================================================================
+# O gatilho da conciliacao
+#
+# A conciliacao estava correta, era idempotente e tinha rota pronta -- e nada
+# a acionava. Nem agendador no backend, nem temporizador no front: a unica
+# chamada partia de um clique em "Conciliar com o Asaas". O resultado no caixa
+# e concreto: o cliente paga o Pix, o dinheiro entra na conta do Asaas e a
+# cobranca fica "Pendente" ate alguem lembrar. Um relatorio financeiro tirado
+# nesse meio-tempo esta errado.
+#
+# Testes de texto, e nao de comportamento, porque o agendamento vive no
+# JavaScript. O que roda de verdade e coberto por test_e2e_interface.py, que
+# abre a interface num Chromium e falha em qualquer erro de console.
+# =============================================================================
+FRONTEND = os.path.join(os.path.dirname(__file__), '..', 'frontend')
+TEMPLATES = os.path.join(os.path.dirname(__file__), '..', 'backend', 'templates')
+
+
+def _ler(caminho):
+    with open(caminho, encoding='utf-8') as arquivo:
+        return arquivo.read()
+
+
+def test_a_conciliacao_e_agendada_na_abertura_do_app():
+    """Sem esta chamada no DOMContentLoaded, o financeiro so se atualiza
+    quando alguem lembra de clicar."""
+    fonte = _ler(os.path.join(FRONTEND, 'js', 'app.js'))
+    assert 'iniciarConciliacaoAutomatica();' in fonte
+    assert 'function iniciarConciliacaoAutomatica()' in fonte
+
+
+def test_a_primeira_rodada_e_silenciosa():
+    """Um toast dizendo 'nada mudou' a cada abertura vira ruido que se aprende
+    a ignorar -- inclusive quando tiver algo a dizer."""
+    fonte = _ler(os.path.join(FRONTEND, 'js', 'app.js'))
+    corpo = fonte.split('function iniciarConciliacaoAutomatica()')[1].split('\n}')[0]
+    assert re.search(r'conciliarPagamentos\(\s*true\s*\)', corpo)
+
+
+def test_o_intervalo_fica_entre_quinze_e_trinta_minutos():
+    """Menos que isso gasta cota da API do Asaas a toa; mais que isso deixa o
+    caixa defasado tempo demais para uma loja que fecha o dia."""
+    fonte = _ler(os.path.join(FRONTEND, 'js', 'app.js'))
+    declaracao = re.search(
+        r'INTERVALO_CONCILIACAO_MS\s*=\s*(\d+)\s*\*\s*(\d+)\s*\*\s*(\d+)', fonte
+    )
+    assert declaracao, "a constante do intervalo sumiu ou mudou de forma"
+
+    minutos = int(declaracao.group(1)) * int(declaracao.group(2)) * int(declaracao.group(3)) / 60000
+    assert 15 <= minutos <= 30, f"intervalo de {minutos} min fora da faixa"
+
+
+def test_a_tela_diz_quando_foi_a_ultima_conferencia():
+    """Sem o selo o operador le um numero sem saber se ele e de agora ou de
+    ontem -- que e o problema original com outra roupa."""
+    marcacao = _ler(os.path.join(TEMPLATES, 'index.html'))
+    fonte = _ler(os.path.join(FRONTEND, 'js', 'app.js'))
+
+    assert 'id="ultimaConciliacao"' in marcacao
+    assert 'function atualizarSeloDeConciliacao()' in fonte
+    assert 'registrarConciliacaoBemSucedida();' in fonte

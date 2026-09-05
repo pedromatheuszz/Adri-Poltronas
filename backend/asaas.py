@@ -53,6 +53,41 @@ def _headers(content_type=True):
     return h
 
 
+def _codigos_do_erro(corpo: str) -> list:
+    """
+    Os codigos de erro do Asaas, sem o resto do corpo.
+
+    O corpo bruto de uma recusa REPETE o que foi enviado. Numa recusa de
+    criacao de cliente isso e nome, CPF/CNPJ, e-mail e telefone em texto claro
+    -- e o `app.log` fica em %APPDATA% sem cifragem, rodando por 5 arquivos de
+    2 MB. Destoava do resto do projeto, onde os tokens da Microsoft e as
+    chaves de integracao sao cifrados via DPAPI, e contrariava o PRIVACIDADE.md.
+
+    Os codigos ("invalid_cpfCnpj", "invalid_value") identificam a causa sem
+    repetir o cadastro, que e para o que o log serve.
+    """
+    try:
+        detalhe = json.loads(corpo)
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(detalhe, dict):
+        return []
+    erros = detalhe.get("errors")
+    if not isinstance(erros, list):
+        return []
+    return [erro.get("code", "") for erro in erros if isinstance(erro, dict)]
+
+
+def _diagnostico(corpo: str) -> str:
+    """O que vai para o log quando o Asaas recusa. Nunca o corpo."""
+    codigos = [c for c in _codigos_do_erro(corpo) if c]
+    if codigos:
+        return ", ".join(codigos)
+    # Sem codigos nao ha o que citar sem arriscar dado pessoal. O tamanho ao
+    # menos separa "respondeu vazio" de "respondeu algo que nao entendemos".
+    return f"<sem codigo; {len(corpo)} bytes no corpo>"
+
+
 def _request(method, path, body=None):
     """Executa uma requisição HTTP à API Asaas e retorna o dict JSON."""
     url = _base_url() + path
@@ -64,7 +99,7 @@ def _request(method, path, body=None):
             return json.loads(raw) if raw else {}
     except urllib.error.HTTPError as e:
         corpo = e.read().decode("utf-8", errors="replace")
-        _log.error("Asaas %s %s → %s: %s", method, path, e.code, corpo)
+        _log.error("Asaas %s %s → %s: %s", method, path, e.code, _diagnostico(corpo))
         try:
             return {"_erro": True, "_status": e.code, **json.loads(corpo)}
         except Exception:
@@ -84,7 +119,7 @@ def _request_get(path):
             return json.loads(raw) if raw else {}
     except urllib.error.HTTPError as e:
         corpo = e.read().decode("utf-8", errors="replace")
-        _log.error("Asaas GET %s → %s: %s", path, e.code, corpo)
+        _log.error("Asaas GET %s → %s: %s", path, e.code, _diagnostico(corpo))
         try:
             return {"_erro": True, "_status": e.code, **json.loads(corpo)}
         except Exception:
@@ -104,7 +139,7 @@ def _request_delete(path):
             return json.loads(raw) if raw else {}
     except urllib.error.HTTPError as e:
         corpo = e.read().decode("utf-8", errors="replace")
-        _log.error("Asaas DELETE %s → %s: %s", path, e.code, corpo)
+        _log.error("Asaas DELETE %s → %s: %s", path, e.code, _diagnostico(corpo))
         try:
             return {"_erro": True, "_status": e.code, **json.loads(corpo)}
         except Exception:

@@ -10,9 +10,22 @@ from alembic import context
 config = context.config
 
 # Interpret the config file for Python logging.
-# This line sets up loggers basically.
+#
+# `disable_existing_loggers=False` nao e detalhe: o padrao do `fileConfig` e
+# True, e True aqui significa DESLIGAR todo logger ja criado que nao esteja
+# declarado em alembic.ini. Como `servidor.py` importa `app` (que cria
+# `adri.app`, `adri.asaas`, `adri.security`, `adri.db`, `adri.capacidade`)
+# ANTES de chamar `preparar_banco()`, e a preparacao roda `command.upgrade`
+# em todo boot, o efeito era este: a partir da primeira migracao de cada
+# execucao, o aplicativo parava de escrever no proprio `app.log`.
+#
+# Some com os avisos que sustentam a auditoria -- "[AUTH] Requisicao sem
+# sessao bloqueada", "[CAPACIDADE] Requisicao sem token", "[SEGURANCA] Host
+# recusado" -- e com o log que o QUICK_REFERENCE manda o operador enviar
+# quando algo da errado. Falha silenciosa: nada quebra, o arquivo existe, e
+# so nao tem dentro o que deveria ter.
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # add your model's MetaData object here
 # for 'autogenerate' support
