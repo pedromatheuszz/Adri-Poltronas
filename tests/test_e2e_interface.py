@@ -736,3 +736,55 @@ def test_a_versao_do_pacote_declara_pre_lancamento():
     with open(caminho, encoding="utf-8") as arquivo:
         versao = json.load(arquivo)["version"]
     assert "-beta" in versao, f"package.json declara {versao}, sem marca de pre-lancamento"
+
+
+# =============================================================================
+# A conexao com a Microsoft na topbar
+#
+# Ela vivia no rodape da aba Clientes, longe do indicador de rede -- duas
+# informacoes da mesma natureza ("como este app esta ligado ao mundo") em
+# lugares distantes, e a da conta so era encontrada por quem ja sabia que
+# existia.
+# =============================================================================
+def test_o_botao_de_conexao_fica_na_topbar(pagina):
+    botao = pagina.locator("#btnConectarMicrosoft")
+    assert botao.is_visible()
+    assert botao.evaluate("el => !!el.closest('.topbar-acoes')"),         "o botao saiu da topbar"
+
+
+def test_o_botao_de_conexao_fica_ao_lado_do_estado_da_rede(pagina):
+    """Lado a lado, e na mesma altura: alturas diferentes os fariam parecer
+    dois controles sem relacao."""
+    medidas = pagina.evaluate("""() => {
+        const b = document.getElementById('btnConectarMicrosoft').getBoundingClientRect();
+        const o = document.getElementById('onlineStatus').getBoundingClientRect();
+        return { desalinhamento: Math.abs(b.top - o.top),
+                 diferencaDeAltura: Math.abs(b.height - o.height) };
+    }""")
+    assert medidas["desalinhamento"] < 2
+    assert medidas["diferencaDeAltura"] < 2
+
+
+def test_conectado_o_botao_mostra_a_conta_e_o_title_traz_o_endereco(pagina):
+    """
+    O espaco na topbar e curto: o rotulo leva o essencial e o `title` leva o
+    resto. A fixture semeia `operador@exemplo.local`.
+    """
+    pagina.wait_for_function(
+        "() => document.getElementById('btnConectarMicrosoft')"
+        ".classList.contains('conectado')",
+        timeout=10000,
+    )
+    botao = pagina.locator("#btnConectarMicrosoft")
+    assert botao.inner_text().strip() == "operador"
+    assert "operador@exemplo.local" in botao.get_attribute("title")
+
+
+def test_o_rodape_de_clientes_mantem_as_acoes_que_sao_dele(pagina):
+    """Mover a conexao nao podia levar junto o que opera sobre a lista: o
+    envio ao Excel usa a selecao de clientes, e backup e restauracao sao
+    acoes da tela, nao do estado da conexao."""
+    pagina.click('[data-comando="trocarAba"][data-arg="clientes"]')
+    pagina.wait_for_selector("#aba-clientes.active")
+    for identificador in ("btnEnviarExcel", "btnBackupBanco", "btnRestaurarBanco"):
+        assert pagina.locator("#" + identificador).count() == 1, identificador
