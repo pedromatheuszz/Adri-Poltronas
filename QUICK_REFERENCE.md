@@ -31,8 +31,11 @@ python build.py qt            # Compila e testa a janela Qt (alternativa)
 python build.py dotnet        # Compila e testa a solution .NET/Avalonia
 make run-dotnet               # Executa o aplicativo Avalonia
 npm run typecheck             # Checagem de tipos do processo principal
-python backend/servidor.py    # Só o backend, sem janela
+ADRI_API_SEM_TOKEN=1 python backend/servidor.py   # Só o backend, sem janela
 make dev                      # Alternative
+
+# Sem o Electron nao ha quem injete o token de capacidade, e a API responde
+# 403. ADRI_API_SEM_TOKEN=1 desliga a exigencia -- so para desenvolvimento.
 
 # Cleaning
 python build.py clean         # Remove generated files

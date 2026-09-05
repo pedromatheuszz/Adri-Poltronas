@@ -5,6 +5,82 @@ Versionamento [semântico](https://semver.org/lang/pt-BR/).
 
 ---
 
+## [1.3.1] — 2026-09-05
+
+Correção dos achados da auditoria de segurança e funcionamento do commit
+`261ee44`. Dois bloqueios altos, quatro médios e um baixo — mais um bug de
+observabilidade encontrado enquanto se testava outra coisa.
+
+### Corrigido — os dois bloqueios altos
+
+- **A leitura da API respondia sem sessão, incluindo o download do banco.** O
+  guarda só barrava métodos que alteram estado, e todas as rotas que entregam
+  dados pessoais em bloco são GET: `/api/clientes`, `/api/clientes/mapa`,
+  `/api/pagamentos`, `/api/relatorios/exportar` e, no pior caso,
+  `/api/backup/sqlite`, que devolve uma cópia integral do arquivo SQLite.
+  Fechar a leitura não tira nada do operador — sem sessão ele já não cadastrava
+  nem editava. `/api/health` entrou nas isenções porque a sonda de identidade
+  roda antes de existir login.
+
+- **A capacidade falhava em aberto.** `esta_ativa()` era
+  `bool(token_esperado())`, então a ausência de `ADRI_API_TOKEN` no ambiente
+  virava "pode entrar sem token": bastava o Electron falhar em repassar a
+  variável ao processo filho para o servidor subir com a API inteira aberta,
+  sem nada na interface indicando isso. Agora a exigência é sempre ligada e,
+  quando a variável não vem pronta, o backend cai no mesmo `.capacidade` do
+  perfil que o Electron já lê. Desligar virou opt-in por `ADRI_API_SEM_TOKEN=1`.
+
+- **O guarda de autenticação não tinha teste.** `_verificar_autenticacao`
+  começa com `if TESTING: return None` e a suíte inteira roda com o modo
+  ligado — 599 testes verdes não provavam a regra mais básica do backend, e foi
+  por isso que a folga acima sobreviveu. `test_autenticacao.py` desliga o modo
+  e exercita os guardas na ordem real.
+
+### Corrigido — privacidade e observabilidade
+
+- **O log gravava o cadastro do cliente.** Os três tratadores de `HTTPError`
+  em `asaas.py` registravam o corpo bruto da resposta, que numa recusa repete
+  nome, CPF/CNPJ, e-mail e telefone — em `%APPDATA%`, sem cifragem. Agora vai
+  só o código de erro do Asaas.
+
+- **A migração emudecia o log do aplicativo.** O `env.py` do Alembic chamava
+  `fileConfig` sem `disable_existing_loggers=False`, e o padrão é `True`: todo
+  logger criado antes era desligado. Como `servidor.py` importa `app` antes de
+  preparar o banco, e a preparação roda `upgrade` em todo boot, o app parava de
+  escrever no próprio `app.log` a partir da primeira migração de cada execução
+  — sumindo com os avisos de AUTH, CAPACIDADE e SEGURANÇA e com o log que o
+  `QUICK_REFERENCE.md` manda o operador enviar.
+
+### Adicionado
+
+- **Conciliação automática com o Asaas.** O módulo estava correto, era
+  idempotente e tinha rota pronta — e nada o acionava: a única chamada partia
+  de um clique. O cliente pagava o Pix, o dinheiro entrava na conta do Asaas e
+  a cobrança seguia "Pendente" até alguém lembrar. Agora roda na abertura e a
+  cada 20 minutos, em silêncio, e a tela mostra quando foi a última conferência
+  bem-sucedida.
+
+### Alterado
+
+- **A allowlist de nome, rua, bairro e cidade aceita `&`, `#`, `+` e `%`.**
+  Barrava razão social comum ("Movéis & Cia", "Loja #2", "50% Decor") numa loja
+  cuja clientela é em boa parte pessoa jurídica, sem ganho de segurança — os
+  mesmos caracteres sempre passaram em `observacoes`. A mensagem de erro passou
+  a dizer qual caractere foi recusado.
+
+- **O teto de requisições subiu de 200/min para 2000/min.** O limite não
+  defendia de ninguém: o guarda de host já recusa o que não vem de loopback,
+  então quem apanhava era o próprio app — numa rajada de 250 GET, 124 voltavam
+  429. O aperto foi para onde cada chamada gasta cota de terceiro: Gemini,
+  emissão de cobrança, conciliação e upload ao OneDrive.
+
+- **O webhook do Asaas deixou de ser recusado pelo guarda de host.** Ele já era
+  isento da checagem de origem e da capacidade, mas levava 400 antes de o
+  próprio token ser lido. Inofensivo hoje, porque nada chega de fora; armadilha
+  no dia do relay público.
+
+---
+
 ## [1.2.1] — 2026-09-02
 
 Correção do job de instalador introduzido na 1.2.0, que reprovou na primeira

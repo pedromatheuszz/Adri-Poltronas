@@ -77,7 +77,8 @@ npm start
 make run
 
 # Só o backend, sem janela, em http://127.0.0.1:5000/
-python backend/servidor.py
+# Ver a nota abaixo: sem o Electron é preciso desligar o token de capacidade.
+ADRI_API_SEM_TOKEN=1 python backend/servidor.py
 # ou
 make dev
 
@@ -97,6 +98,19 @@ make dotnet
 # Executar o aplicativo Avalonia
 make run-dotnet
 ```
+
+> **Sem a janela, a API responde 403.** O token de capacidade e injetado pelo
+> Electron na sessao da janela; um navegador comum nao tem como apresenta-lo.
+> Para rodar o backend solto, desligue a exigencia por escrito:
+>
+> ```bash
+> ADRI_API_SEM_TOKEN=1 python backend/servidor.py          # bash
+> $env:ADRI_API_SEM_TOKEN=1; python backend/servidor.py    # PowerShell
+> ```
+>
+> A variavel abre a API para qualquer processo da maquina. Ela existe para o
+> desenvolvimento e nao deve aparecer em atalho de instalacao nem em script de
+> empacotamento. Ver `backend/capacidade.py` para o desenho da protecao.
 
 ### Limpeza
 ```bash
