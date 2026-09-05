@@ -43,13 +43,27 @@ observabilidade encontrado enquanto se testava outra coisa.
   nome, CPF/CNPJ, e-mail e telefone — em `%APPDATA%`, sem cifragem. Agora vai
   só o código de erro do Asaas.
 
-- **A migração emudecia o log do aplicativo.** O `env.py` do Alembic chamava
-  `fileConfig` sem `disable_existing_loggers=False`, e o padrão é `True`: todo
-  logger criado antes era desligado. Como `servidor.py` importa `app` antes de
-  preparar o banco, e a preparação roda `upgrade` em todo boot, o app parava de
-  escrever no próprio `app.log` a partir da primeira migração de cada execução
-  — sumindo com os avisos de AUTH, CAPACIDADE e SEGURANÇA e com o log que o
-  `QUICK_REFERENCE.md` manda o operador enviar.
+- **A migração levava embora o log do aplicativo.** Todo comando do Alembic
+  carrega `migrations/env.py`, que chama `fileConfig` sobre o `alembic.ini` —
+  e esse arquivo declara `[logger_root]` com `level = WARN` e
+  `handlers = console`. `fileConfig` não acrescenta: substitui. O estrago era
+  triplo e permanente pelo resto do processo: os loggers `adri.*` já criados
+  eram desligados (`disable_existing_loggers` é `True` por padrão), o nível da
+  raiz caía para WARNING (derrubando todo `log.info` do app) e o
+  `RotatingFileHandler` sumia — com ele, o `app.log` em `%APPDATA%` parava de
+  receber **qualquer coisa**, inclusive WARNING e ERROR.
+
+  Como `servidor.py` importa `app` antes de preparar o banco, e a preparação
+  roda `upgrade` em todo boot, isso valia para toda execução do aplicativo, não
+  só para a que tinha migração pendente. Sumiam os avisos de `[AUTH]`,
+  `[CAPACIDADE]` e `[SEGURANCA]` — a trilha em que a auditoria se apoia — e o
+  log que o `QUICK_REFERENCE.md` manda o operador enviar. Falha silenciosa: o
+  arquivo continuava lá, apenas vazio.
+
+  A correção restaura a configuração do aplicativo em volta de cada chamada ao
+  Alembic, em vez de mexer no `alembic.ini`: o `.ini` é o que faz o `alembic`
+  na linha de comando ser legível, e quem invade configuração alheia é a
+  chamada embutida.
 
 ### Adicionado
 
@@ -73,6 +87,12 @@ observabilidade encontrado enquanto se testava outra coisa.
   então quem apanhava era o próprio app — numa rajada de 250 GET, 124 voltavam
   429. O aperto foi para onde cada chamada gasta cota de terceiro: Gemini,
   emissão de cobrança, conciliação e upload ao OneDrive.
+
+- **`servidor.py` avisa no boot quando a capacidade está exigida**, dizendo que
+  abrir o endereço num navegador comum resulta em 403 e nomeando a variável que
+  desliga a exigência. Sem isso o sintoma era uma tela que carrega e fica
+  vazia, sem nada explicando por quê. `make dev` passou a definir a variável
+  sozinho, porque é justamente o alvo que serve o backend a um navegador.
 
 - **O webhook do Asaas deixou de ser recusado pelo guarda de host.** Ele já era
   isento da checagem de origem e da capacidade, mas levava 400 antes de o

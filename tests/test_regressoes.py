@@ -776,22 +776,68 @@ def test_erro_do_dashboard_nao_vaza_detalhe_interno(client, monkeypatch):
 # SEGURANCA, nem o log que o QUICK_REFERENCE manda o operador enviar quando
 # algo da errado.
 # =============================================================================
-def test_a_migracao_nao_desliga_os_loggers_do_aplicativo(tmp_path, monkeypatch):
-    import logging
+NOMES_DE_LOGGER = ['adri.app', 'adri.asaas', 'adri.security', 'adri.db',
+                   'adri.capacidade']
 
+
+def _migrar_em_banco_novo(tmp_path, monkeypatch):
     import migrations_manager
-
-    nomes = ['adri.app', 'adri.asaas', 'adri.security', 'adri.db', 'adri.capacidade']
-    loggers = [logging.getLogger(nome) for nome in nomes]
-    for logger in loggers:
-        logger.disabled = False
 
     monkeypatch.setenv('ADRI_DB_PATH', str(tmp_path / 'migrar.db'))
     monkeypatch.setattr(database, 'DB_PATH', str(tmp_path / 'migrar.db'))
     migrations_manager.aplicar_migrações()
 
+
+def test_a_migracao_nao_desliga_os_loggers_do_aplicativo(tmp_path, monkeypatch):
+    """Metade do estrago: `disable_existing_loggers`, que e True por padrao."""
+    import logging
+
+    loggers = [logging.getLogger(nome) for nome in NOMES_DE_LOGGER]
+    for logger in loggers:
+        logger.disabled = False
+
+    _migrar_em_banco_novo(tmp_path, monkeypatch)
+
     desligados = [logger.name for logger in loggers if logger.disabled]
     assert not desligados, f"a migracao emudeceu {desligados}"
+
+
+def test_a_migracao_nao_leva_embora_o_arquivo_de_log(tmp_path, monkeypatch):
+    """
+    A outra metade, e a mais grave.
+
+    `[logger_root]` do alembic.ini declara `handlers = console`, e `fileConfig`
+    SUBSTITUI os handlers da raiz em vez de acrescentar. O RotatingFileHandler
+    que escreve o `app.log` em %APPDATA% ia embora junto -- entao nem WARNING
+    nem ERROR chegavam mais ao arquivo. Some a trilha de [AUTH], [CAPACIDADE]
+    e [SEGURANCA], e some o log que o QUICK_REFERENCE manda o operador enviar.
+    """
+    import logging
+
+    raiz = logging.getLogger()
+    marcador = logging.NullHandler()
+    raiz.addHandler(marcador)
+    try:
+        _migrar_em_banco_novo(tmp_path, monkeypatch)
+        assert marcador in raiz.handlers,             "a migracao trocou os handlers da raiz pelos do alembic.ini"
+    finally:
+        if marcador in raiz.handlers:
+            raiz.removeHandler(marcador)
+
+
+def test_a_migracao_nao_rebaixa_o_nivel_da_raiz(tmp_path, monkeypatch):
+    """`level = WARN` no alembic.ini derrubava todo `log.info` do aplicativo:
+    os loggers `adri.*` sao NOTSET e herdam o nivel da raiz."""
+    import logging
+
+    raiz = logging.getLogger()
+    nivel_antes = raiz.level
+    raiz.setLevel(logging.INFO)
+    try:
+        _migrar_em_banco_novo(tmp_path, monkeypatch)
+        assert raiz.level == logging.INFO,             f"a raiz foi rebaixada para {logging.getLevelName(raiz.level)}"
+    finally:
+        raiz.setLevel(nivel_antes)
 
 
 def test_o_env_do_alembic_declara_a_intencao():
