@@ -2462,3 +2462,49 @@ button, [role="tab"], summary { touch-action: manipulation; }
 .painel-sem-conexao__nota { font-size: 0.9rem; color: var(--cor-texto-3); }
 
 .painel-sem-conexao__caixa .btn { margin-top: var(--esp-2); }
+
+
+/* -----------------------------------------------------------------------------
+   Licenca de uso
+   ----------------------------------------------------------------------------- */
+.app-shell.licenca-vencida main > .tab-content { display: none !important; }
+
+.licenca-valor {
+    font-size: 1.6rem;
+    font-weight: 600;
+    color: var(--cor-texto);
+    margin: 0 0 var(--esp-3);
+}
+
+.licenca-cobranca { margin-top: var(--esp-4); }
+.licenca-cobranca[hidden] { display: none; }
+.licenca-cobranca img { max-width: 220px; margin: 0 auto var(--esp-3); display: block; }
+
+.licenca-payload {
+    font-family: var(--fonte-mono, monospace);
+    font-size: 0.72rem;
+    word-break: break-all;
+    background: var(--cor-superficie-2);
+    border: 1px solid var(--cor-borda);
+    border-radius: 6px;
+    padding: var(--esp-2);
+    margin-bottom: var(--esp-3);
+    max-height: 6rem;
+    overflow-y: auto;
+}
+
+.licenca-aguardando {
+    font-size: 0.9rem;
+    color: var(--cor-texto-2);
+    margin-top: var(--esp-3);
+}
+
+/* A faixa do periodo de teste. Peso baixo enquanto sobra tempo -- avisar com
+   urgencia durante 30 dias ensina o operador a nao ver o aviso. */
+.aviso-teste {
+    margin: var(--esp-1) 0 0;
+    font-size: 0.8rem;
+    color: var(--cor-texto-3);
+}
+.aviso-teste[hidden] { display: none; }
+.aviso-teste.urgente { color: var(--cor-alerta-texto); font-weight: 600; }

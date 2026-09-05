@@ -160,7 +160,7 @@ def test_migrations_reconstroem_schema_integral_em_banco_novo(tmp_path, monkeypa
     # Cabeca da cadeia de migrations. Atualizar junto ao acrescentar uma
     # revisao nova -- e o que garante que ela entrou na cadeia, e nao ficou
     # pendurada fora dela.
-    assert revisao == "c4d81a5f9e37"
+    assert revisao == "d8f31b06a4e5"
     # O modulo comercial: sem estas tres, pagamento e entrega continuam
     # pendurados no cliente, sem saber a que venda pertencem.
     assert {"produtos", "pedidos", "pedido_itens"} <= tabelas
@@ -172,6 +172,10 @@ def test_migrations_reconstroem_schema_integral_em_banco_novo(tmp_path, monkeypa
     # Sem ela a fila offline nao consegue reenviar com seguranca: um POST
     # cuja resposta se perdeu vira um segundo cliente identico no banco.
     assert "operacoes_idempotentes" in tabelas
+    # Estado da licenca de uso. Sem ela `licenca.py` perde o lado do banco e
+    # passa a depender so do arquivo do perfil -- que e o lado que se apaga com
+    # um clique.
+    assert "licenca" in tabelas
     assert any(fk[2] == "clientes" and fk[6] == "RESTRICT" for fk in fks_pagamentos)
     assert {
         "trg_auditoria_eventos_immutable_update",

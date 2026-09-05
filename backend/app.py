@@ -24,6 +24,7 @@ import security
 import asaas
 import microsoft
 import capacidade
+import licenca
 from limites import limiter
 from erp.core.contexto import (
     ContextoOperacao,
@@ -555,6 +556,43 @@ def _aplicar_seguranca_requisicao():
     return None
 
 
+# ---------------------------------------------------------------------------
+# LICENCA DE USO
+# ---------------------------------------------------------------------------
+# Trinta dias de teste a partir da primeira abertura; depois, licenca paga.
+# Ver `licenca.py` para onde o estado mora e por que em dois lugares, e para o
+# limite honesto do que um controle local alcanca.
+#
+# Este guarda roda DEPOIS do de sessao, de proposito: quem nao esta autenticado
+# no app nao precisa saber em que pe esta a licenca dele. E responde 402
+# (Payment Required), e nao 403, porque o codigo aqui carrega informacao util
+# -- a interface distingue "pague" de "conecte-se" so pelo status.
+ROTAS_SEM_LICENCA = frozenset({
+    '/api/health', '/api/auth/login', '/api/auth/status', '/api/auth/logout',
+    '/callback', '/api/pagamentos/webhook',
+}) | licenca.ROTAS_ISENTAS
+
+
+@app.before_request
+def _exigir_licenca():
+    if app.config.get('TESTING'):
+        return None
+    if not request.path.startswith('/api/'):
+        return None
+    if request.path in ROTAS_SEM_LICENCA:
+        return None
+    if licenca.esta_liberado():
+        return None
+
+    situacao = licenca.situacao()
+    log.warning("[LICENCA] Requisicao bloqueada, licenca %s: %s %s",
+                situacao['estado'], request.method, request.path)
+    return jsonify({
+        "erro": "Periodo de teste encerrado.",
+        "licenca": situacao,
+    }), 402
+
+
 @app.before_request
 def _iniciar_contexto_operacao():
     """Propaga identidade tecnica e correlacao para servicos de dominio."""
@@ -708,7 +746,7 @@ def service_worker():
 from blueprints import (  # noqa: E402
     auth_bp, clientes_bp, pagamentos_bp, webhook_bp, relatorios_bp,
     ia_bp, entregas_bp, dashboard_bp, notificacoes_bp, excel_bp,
-    produtos_bp, pedidos_bp, backup_bp
+    produtos_bp, pedidos_bp, backup_bp, licenca_bp
 )
 
 app.register_blueprint(auth_bp)
@@ -724,6 +762,7 @@ app.register_blueprint(excel_bp)
 app.register_blueprint(produtos_bp)
 app.register_blueprint(pedidos_bp)
 app.register_blueprint(backup_bp)
+app.register_blueprint(licenca_bp)
 
 
 if __name__ == '__main__':

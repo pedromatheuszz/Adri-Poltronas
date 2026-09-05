@@ -69,6 +69,9 @@ function _ehRotaQueExigeSessao(url) {
 function registrarSessaoAusente() {
     if (_semSessao) return;
     _semSessao = true;
+    // O que estiver na tela deixou de valer; a proxima abertura precisa
+    // buscar de novo em vez de confiar no que ficou.
+    _dadosJaCarregados = false;
     mostrarPainelSemConexao();
 }
 
@@ -120,11 +123,217 @@ window.fetch = function(url, options) {
         // Observa sem consumir: a promessa devolvida a quem chamou e a
         // original, entao o corpo continua intacto para ele ler.
         promessa.then(function(resposta) {
-            if (resposta && resposta.status === 401) registrarSessaoAusente();
+            if (!resposta) return;
+            if (resposta.status === 401) registrarSessaoAusente();
+            // 402 Payment Required: a licenca venceu. Mesmo desenho do 401 --
+            // um gancho central em vez de tratamento em cada chamada, para que
+            // o app nao dependa de alguem lembrar do assunto ao escrever a
+            // proxima rota.
+            if (resposta.status === 402) registrarLicencaVencida();
         }, function() { /* rede fora: e outro assunto, tratado em tentarBackend */ });
     }
     return promessa;
 };
+
+
+// -----------------------------------------------------------------------------
+// Licenca de uso
+//
+// Trinta dias de teste a partir da primeira abertura; depois, licenca paga.
+// O bloqueio de verdade e do backend (`_exigir_licenca`, que responde 402); o
+// que existe aqui e a tela que explica e o caminho para resolver.
+//
+// O pagamento e verificado PERGUNTANDO ao Mercado Pago, e nao esperando
+// webhook: o backend escuta em loopback e um servidor da internet nao alcanca
+// este endereco. Mesma inversao ja usada para o Asaas em reconciliacao.py.
+// -----------------------------------------------------------------------------
+var _licencaVencida = false;
+var _intervaloDaLicenca = null;
+
+// A cada quanto tempo se pergunta ao Mercado Pago enquanto o Pix esta na tela.
+// Cinco segundos e o intervalo em que um Pix pago "cai" na hora do ponto de
+// vista de quem esta olhando para o celular; menos que isso so gasta chamada.
+var INTERVALO_VERIFICACAO_LICENCA_MS = 5000;
+
+function _formatarReais(centavos) {
+    var valor = (Number(centavos) || 0) / 100;
+    var partes = valor.toFixed(2).split('.');
+    var inteiro = partes[0];
+    var agrupado = '';
+    while (inteiro.length > 3) {
+        agrupado = '.' + inteiro.slice(-3) + agrupado;
+        inteiro = inteiro.slice(0, -3);
+    }
+    return 'R$ ' + inteiro + agrupado + ',' + partes[1];
+}
+
+function mostrarPainelLicenca(situacao) {
+    var painel = document.getElementById('painelLicenca');
+    var casca = document.getElementById('appShell');
+    if (painel) painel.hidden = false;
+    if (casca) casca.classList.add('licenca-vencida');
+
+    var valor = document.getElementById('licencaValor');
+    if (valor && situacao && situacao.valor_centavos) {
+        valor.textContent = _formatarReais(situacao.valor_centavos);
+    }
+}
+
+function esconderPainelLicenca() {
+    var painel = document.getElementById('painelLicenca');
+    var casca = document.getElementById('appShell');
+    if (painel) painel.hidden = true;
+    if (casca) casca.classList.remove('licenca-vencida');
+}
+
+function registrarLicencaVencida(situacao) {
+    if (_licencaVencida) return;
+    _licencaVencida = true;
+    _dadosJaCarregados = false;
+    mostrarPainelLicenca(situacao);
+    // Ha cobranca aberta de uma execucao anterior? Entao ja se comeca
+    // perguntando, sem pedir ao operador que refaca algo que ele ja fez.
+    verificarPagamentoDaLicenca(true);
+}
+
+function registrarLicencaLiberada() {
+    if (!_licencaVencida) return;
+    _licencaVencida = false;
+    esconderPainelLicenca();
+    pararVerificacaoDaLicenca();
+    liberarDadosSeOsPortoesAbrirem();
+}
+
+function atualizarAvisoDeTeste(situacao) {
+    var aviso = document.getElementById('avisoTeste');
+    if (!aviso) return;
+    if (!situacao || situacao.estado !== 'teste') { aviso.hidden = true; return; }
+
+    var dias = situacao.dias_restantes;
+    aviso.hidden = false;
+    aviso.textContent = dias === 1
+        ? 'Ultimo dia do periodo de teste.'
+        : 'Periodo de teste: ' + dias + ' dias restantes.';
+    // Urgencia so na ultima semana. Avisar com o mesmo peso durante 30 dias
+    // ensina o operador a nao ver o aviso.
+    aviso.classList.toggle('urgente', dias <= 7);
+}
+
+async function checarLicenca() {
+    try {
+        var resp = await fetch('/api/licenca/status');
+        if (!resp.ok) return null;
+        var situacao = await resp.json();
+
+        _licencaVerificada = true;
+        if (situacao.estado === 'expirada') registrarLicencaVencida(situacao);
+        else registrarLicencaLiberada();
+
+        atualizarAvisoDeTeste(situacao);
+        return situacao;
+    } catch (_) {
+        // Backend fora do ar e outro assunto, ja coberto pelo painel de conexao.
+        return null;
+    }
+}
+
+async function gerarPixDaLicenca() {
+    var botao = document.getElementById('btnGerarPixLicenca');
+    var caixa = document.getElementById('licencaCobranca');
+    if (botao) { botao.disabled = true; botao.textContent = 'Gerando...'; }
+
+    try {
+        var resp = await fetch('/api/licenca/cobranca', {
+            method: 'POST', headers: CABECALHOS_JSON, body: JSON.stringify({})
+        });
+        var dados = await resp.json();
+        if (!resp.ok) {
+            _avisarNaCaixaDaLicenca(dados.erro || 'Nao foi possivel gerar a cobranca.');
+            return;
+        }
+        _desenharCobrancaDaLicenca(dados);
+        iniciarVerificacaoDaLicenca();
+    } catch (_) {
+        _avisarNaCaixaDaLicenca('Sem conexao para gerar a cobranca.');
+    } finally {
+        if (botao) { botao.disabled = false; botao.textContent = 'Pagar com Pix'; }
+    }
+}
+
+function _avisarNaCaixaDaLicenca(mensagem) {
+    var caixa = document.getElementById('licencaCobranca');
+    if (!caixa) return;
+    caixa.hidden = false;
+    caixa.innerHTML = '<p class="licenca-aguardando">' + escaparHtml(mensagem) + '</p>';
+}
+
+function _desenharCobrancaDaLicenca(dados) {
+    var caixa = document.getElementById('licencaCobranca');
+    if (!caixa) return;
+
+    // Mesmo cuidado da cobranca do Asaas: o base64 do QR passa por
+    // `base64Seguro` antes de virar `src`, e o payload por `escaparHtml`.
+    var qr = base64Seguro(dados.pix_qr_code);
+    var payload = dados.pix_payload || '';
+
+    caixa.hidden = false;
+    caixa.innerHTML =
+        (qr ? '<img src="data:image/png;base64,' + qr + '" alt="QR Code do Pix da licenca">' : '') +
+        (payload ? '<div class="licenca-payload" id="licencaPayload">' + escaparHtml(payload) + '</div>' : '') +
+        (payload ? '<button type="button" class="btn btn-secundario" data-comando="copiarPixDaLicenca">Copiar Copia e Cola</button>' : '') +
+        '<p class="licenca-aguardando">Aguardando o pagamento. A tela libera sozinha assim que o Mercado Pago confirmar.</p>';
+}
+
+async function copiarPixDaLicenca() {
+    var el = document.getElementById('licencaPayload');
+    if (el && navigator.clipboard) {
+        try {
+            await navigator.clipboard.writeText(el.textContent);
+            exibirToast('Copia e Cola copiado!');
+        } catch (_) { exibirToast('Falha ao copiar.', 'error'); }
+    }
+}
+
+function iniciarVerificacaoDaLicenca() {
+    if (_intervaloDaLicenca) return;
+    _intervaloDaLicenca = setInterval(function() {
+        verificarPagamentoDaLicenca(false);
+    }, INTERVALO_VERIFICACAO_LICENCA_MS);
+}
+
+function pararVerificacaoDaLicenca() {
+    if (!_intervaloDaLicenca) return;
+    clearInterval(_intervaloDaLicenca);
+    _intervaloDaLicenca = null;
+}
+
+async function verificarPagamentoDaLicenca(primeira) {
+    try {
+        var resp = await fetch('/api/licenca/verificar', {
+            method: 'POST', headers: CABECALHOS_JSON, body: JSON.stringify({})
+        });
+        if (!resp.ok) return;
+        var situacao = await resp.json();
+
+        if (situacao.estado === 'paga') {
+            exibirToast('Licenca ativada. Bom trabalho!');
+            registrarLicencaLiberada();
+            return;
+        }
+        // Cobranca cancelada, recusada ou estornada: perguntar de novo nao muda
+        // a resposta. Parar aqui e o que evita a tela girar para sempre.
+        if (situacao.encerrado) {
+            pararVerificacaoDaLicenca();
+            _avisarNaCaixaDaLicenca('Esta cobranca foi encerrada sem pagamento. Gere uma nova para tentar de novo.');
+            return;
+        }
+        // Ha cobranca em aberto de uma execucao anterior: retoma a espera sem
+        // pedir ao operador que gere outra.
+        if (primeira && situacao.pagamento_id) iniciarVerificacaoDaLicenca();
+    } catch (_) {
+        // Sem rede: a proxima rodada tenta.
+    }
+}
 
 // Atualiza o cookie CSRF a partir do header da resposta inicial
 (function() {
@@ -429,8 +638,27 @@ var chartInstances = {};
 
 var _dadosJaCarregados = false;
 
-// Tudo o que fala com /api/ e precisa de sessao. Chamado depois do portao, e
-// de novo quando o operador termina de conectar.
+// A licenca ja foi consultada nesta execucao? Enquanto for `false`, nao se
+// pede dado nenhum: "ainda nao sei" e diferente de "esta tudo certo", e tratar
+// os dois igual foi exatamente o defeito abaixo.
+var _licencaVerificada = false;
+
+// Os DOIS portoes precisam estar abertos para o app mostrar dado: sessao
+// Microsoft e licenca vigente.
+//
+// Antes, `checarLoginExistente` chamava `carregarDadosDoApp` direto, e ele roda
+// antes de a licenca ser consultada. Numa instalacao com o teste vencido isso
+// disparava quatro requisicoes que voltavam 402 -- deixando na tela os zeros
+// escritos no HTML -- e, pior, marcava `_dadosJaCarregados`. Quando o operador
+// pagava e a tela liberava, o carregamento nao acontecia mais: o app ficava
+// aberto, funcional e mostrando "0 Total Clientes" sobre um banco cheio.
+function liberarDadosSeOsPortoesAbrirem() {
+    if (!_licencaVerificada) return;
+    if (_semSessao || _licencaVencida) return;
+    carregarDadosDoApp();
+}
+
+// Tudo o que fala com /api/ e precisa de sessao e licenca.
 function carregarDadosDoApp() {
     if (_dadosJaCarregados) return;
     _dadosJaCarregados = true;
@@ -452,8 +680,16 @@ async function iniciarAplicacao() {
         // fora do ar, nao falta de conta. Tratar como desconectado e o lado
         // seguro: melhor pedir conexao do que mostrar numero que nao veio.
     }
-    if (logado) carregarDadosDoApp();
-    else registrarSessaoAusente();
+    if (!logado) {
+        registrarSessaoAusente();
+        return;
+    }
+
+    // A licenca so e consultada DEPOIS de haver sessao, na mesma ordem dos
+    // guardas do backend: quem nao esta autenticado no app nao precisa saber
+    // em que pe esta a licenca dele.
+    await checarLicenca();
+    liberarDadosSeOsPortoesAbrirem();
 }
 
 document.addEventListener('DOMContentLoaded', function() {
@@ -1941,7 +2177,7 @@ async function checarLoginExistente() {
             // A ordem importa: some o painel, e so entao os dados entram numa
             // tela que ja voltou a mostrar conteudo.
             registrarSessaoPresente();
-            carregarDadosDoApp();
+            liberarDadosSeOsPortoesAbrirem();
             return true;
         }
         resetarVisualBotaoConexao();
@@ -2875,6 +3111,7 @@ var COMANDOS_PERMITIDOS = [
     'conectarMicrosoft',
     'confirmarPagamentoLocal',
     'copiarPix',
+    'copiarPixDaLicenca',
     'enviarParaExcel',
     'executarImportacao',
     'exportarRelatorio',
@@ -2884,6 +3121,7 @@ var COMANDOS_PERMITIDOS = [
     'fecharModalNovoRecebimento',
     'fecharNotificacoes',
     'gerarCobranca',
+    'gerarPixDaLicenca',
     'limparFiltros',
     'sugerirBairro',
     'toggleFiltro',

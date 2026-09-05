@@ -176,6 +176,47 @@ def servidor(tmp_path_factory):
 
 
 @pytest.fixture(scope="module")
+def servidor_licenca_vencida(tmp_path_factory):
+    """
+    Backend com sessao, cadastro e o periodo de teste ja encerrado.
+
+    O defeito que este cenario pega: `checarLoginExistente` chamava o
+    carregamento dos dados direto, e ele roda ANTES de a licenca ser
+    consultada. Com o teste vencido, as quatro requisicoes voltavam 402 e a
+    tela ficava com os zeros escritos no HTML -- e, pior, marcava os dados como
+    "ja carregados", de modo que pagar a licenca liberava a tela sem trazer
+    dado nenhum.
+    """
+    banco = tmp_path_factory.mktemp("e2e-licenca") / "e2e.db"
+    _semear_sessao(banco)
+    _semear_cliente(banco)
+    _vencer_licenca(banco)
+    with _backend_no_ar(banco) as base:
+        yield base
+
+
+def _vencer_licenca(caminho_do_banco) -> None:
+    """Empurra a instalacao para 45 dias atras, nos dois lados do estado."""
+    import datetime
+
+    sys.path.insert(0, BACKEND)
+    os.environ["ADRI_DB_PATH"] = str(caminho_do_banco)
+    import database
+    import licenca
+
+    original = database.DB_PATH
+    database.DB_PATH = str(caminho_do_banco)
+    try:
+        dados = licenca._carregar_e_atualizar_marca()
+        dados["instalado_em"] = licenca._texto(
+            licenca._agora() - datetime.timedelta(days=45)
+        )
+        licenca._persistir(dados)
+    finally:
+        database.DB_PATH = original
+
+
+@pytest.fixture(scope="module")
 def servidor_sem_sessao(tmp_path_factory):
     """
     Backend COM cadastro e SEM sessao: o app aberto por quem nunca conectou.
@@ -238,6 +279,24 @@ def pagina_sem_sessao(navegador, servidor_sem_sessao):
     # aqui daria timeout justamente quando o comportamento esta CERTO.
     pagina.wait_for_selector("#aba-dashboard", state="attached", timeout=15000)
     pagina.wait_for_selector("#painelSemConexao", timeout=15000)
+    pagina.erros_de_javascript = erros
+
+    yield pagina
+
+    contexto.close()
+
+
+@pytest.fixture
+def pagina_licenca_vencida(navegador, servidor_licenca_vencida):
+    contexto = _preparar_contexto(navegador)
+    pagina = contexto.new_page()
+
+    erros = []
+    pagina.on("pageerror", lambda erro: erros.append(str(erro)))
+
+    pagina.goto(servidor_licenca_vencida, wait_until="load")
+    pagina.wait_for_selector("#aba-dashboard", state="attached", timeout=15000)
+    pagina.wait_for_selector("#painelLicenca", timeout=15000)
     pagina.erros_de_javascript = erros
 
     yield pagina
@@ -526,4 +585,67 @@ def test_com_sessao_o_painel_nao_atrapalha(pagina):
     """A outra direcao: fechar demais seria a mesma regressao ao contrario."""
     painel = pagina.locator("#painelSemConexao")
     assert not painel.is_visible()
+    assert pagina.locator("#aba-dashboard").is_visible()
+
+
+# =============================================================================
+# O periodo de teste encerrado
+#
+# Mesma exigencia do estado sem conexao: a tela nao pode inventar numero nem
+# assustar com erro. A diferenca e que aqui existe uma acao que resolve --
+# pagar -- e ela precisa estar a um clique, com o valor a vista.
+# =============================================================================
+def test_licenca_vencida_a_tela_pede_pagamento(pagina_licenca_vencida):
+    painel = pagina_licenca_vencida.locator("#painelLicenca")
+    assert painel.is_visible()
+    assert "Seu periodo de teste terminou" in painel.inner_text()
+    assert "R$ 1.500,00" in painel.inner_text()
+    assert pagina_licenca_vencida.locator("#btnGerarPixLicenca").is_visible()
+
+
+def test_licenca_vencida_nenhum_numero_aparece(pagina_licenca_vencida):
+    """Os zeros do HTML sao tao mentirosos aqui quanto no estado sem conexao."""
+    assert not pagina_licenca_vencida.locator("#aba-dashboard").is_visible()
+    metrica = pagina_licenca_vencida.locator("#metricTotalClientes")
+    if metrica.count():
+        assert not metrica.is_visible()
+
+
+def test_licenca_vencida_o_cadastro_nao_vaza(pagina_licenca_vencida):
+    assert "Maria Souza" not in pagina_licenca_vencida.content()
+
+
+def test_licenca_vencida_nao_carrega_dados_por_tras_do_painel(pagina_licenca_vencida):
+    """
+    O defeito exato. `checarLoginExistente` chamava o carregamento antes da
+    consulta de licenca: as requisicoes voltavam 402 e o app se dava por
+    carregado -- entao pagar liberava a tela sem trazer dado nenhum.
+    """
+    pagina_licenca_vencida.wait_for_timeout(1500)
+    estado = pagina_licenca_vencida.evaluate(
+        "() => ({ carregados: window._dadosJaCarregados,"
+        " vencida: window._licencaVencida,"
+        " verificada: window._licencaVerificada })"
+    )
+    assert estado["vencida"] is True
+    assert estado["verificada"] is True
+    assert estado["carregados"] is False,         "o app pediu dados com a licenca vencida; ao liberar, nao recarregaria"
+
+
+def test_licenca_vencida_nao_aparece_toast_de_erro(pagina_licenca_vencida):
+    pagina_licenca_vencida.wait_for_timeout(2000)
+    toast = pagina_licenca_vencida.locator("#toast")
+    if toast.count() and toast.is_visible():
+        texto = toast.inner_text().lower()
+        assert "erro" not in texto and "falha" not in texto, f"toast de erro: {texto}"
+
+
+def test_licenca_vencida_nao_ha_erro_de_javascript(pagina_licenca_vencida):
+    pagina_licenca_vencida.wait_for_timeout(1500)
+    assert pagina_licenca_vencida.erros_de_javascript == []
+
+
+def test_licenca_vigente_nao_mostra_o_painel(pagina):
+    """A direcao oposta: bloquear quem esta em dia seria a regressao inversa."""
+    assert not pagina.locator("#painelLicenca").is_visible()
     assert pagina.locator("#aba-dashboard").is_visible()
