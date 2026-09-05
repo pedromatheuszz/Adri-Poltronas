@@ -131,6 +131,11 @@
                      cabecalho responde a pergunta "onde eu estou". -->
                 <h1 class="topbar-titulo" id="tituloPagina">Dashboard</h1>
                 <p class="topbar-descricao" id="descricaoPagina">Visao geral do cadastro e das financas</p>
+                <!-- Contagem do teste. Discreta de proposito: e informacao de
+                     fundo durante quase todo o periodo, e so vira urgencia nos
+                     ultimos dias -- quando ganha a classe `.urgente`. Avisar
+                     o tempo todo com o mesmo peso ensina a ignorar. -->
+                <p class="aviso-teste" id="avisoTeste" hidden></p>
             </div>
 
             <div class="topbar-acoes">
@@ -164,6 +169,77 @@
         <div class="container">
 
         <main>
+            <!-- ============================================================
+                 SEM CONTA CONECTADA
+                 A autenticacao deste ERP e a sessao Microsoft. Sem ela o
+                 backend recusa toda leitura de /api/ -- e a casca sozinha
+                 exibia os zeros escritos neste proprio HTML ("0 Total
+                 Clientes", "R$ 0,00 em atraso") como se fossem o cadastro
+                 real, enquanto o console acumulava 401. Nao dava erro: dizia
+                 numero errado, que e pior.
+
+                 Por isso este painel SUBSTITUI o conteudo em vez de flutuar
+                 sobre ele. Enquanto estiver visivel, nao ha numero na tela
+                 para ser lido errado.
+                 ============================================================ -->
+            <!-- ============================================================
+                 LICENCA VENCIDA
+                 Mesmo desenho do painel de conexao, e pelo mesmo motivo:
+                 substituir o conteudo em vez de flutuar sobre ele. A diferenca
+                 e que aqui existe uma acao que resolve -- pagar -- e ela
+                 precisa estar a um clique, com o valor a vista.
+                 ============================================================ -->
+            <div id="painelLicenca" class="painel-sem-conexao" hidden>
+                <div class="painel-sem-conexao__caixa" role="status" aria-live="polite">
+                    <svg class="painel-sem-conexao__icone" width="40" height="40" viewBox="0 0 24 24"
+                         fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                        <circle cx="12" cy="12" r="9"/>
+                        <path d="M12 7v5l3 2"/>
+                    </svg>
+                    <h2>Seu periodo de teste terminou</h2>
+                    <p>
+                        Os 30 dias de uso gratuito do Adri Poltronas chegaram ao
+                        fim. Para continuar usando o sistema, ative a licenca
+                        definitiva.
+                    </p>
+                    <p class="licenca-valor" id="licencaValor">R$ 1.500,00</p>
+                    <p class="painel-sem-conexao__nota">
+                        Seus dados continuam salvos nesta maquina. Nada foi
+                        apagado e nada sera perdido.
+                    </p>
+                    <div id="licencaAcao">
+                        <button type="button" class="btn btn-primary"
+                                id="btnGerarPixLicenca" data-comando="gerarPixDaLicenca">
+                            Pagar com Pix
+                        </button>
+                    </div>
+                    <div id="licencaCobranca" class="licenca-cobranca" hidden></div>
+                </div>
+            </div>
+
+            <div id="painelSemConexao" class="painel-sem-conexao" hidden>
+                <div class="painel-sem-conexao__caixa" role="status" aria-live="polite">
+                    <svg class="painel-sem-conexao__icone" width="40" height="40" viewBox="0 0 24 24"
+                         fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                        <rect x="3" y="11" width="18" height="11" rx="2"/>
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                    </svg>
+                    <h2>Conecte sua conta Microsoft</h2>
+                    <p>
+                        O sistema usa a sua conta Microsoft para saber quem esta
+                        usando o computador. Enquanto ela nao estiver conectada,
+                        os dados dos clientes ficam guardados e nao aparecem na
+                        tela.
+                    </p>
+                    <p class="painel-sem-conexao__nota">
+                        Nada foi perdido: o cadastro continua salvo nesta maquina.
+                    </p>
+                    <button type="button" class="btn btn-primary"
+                            id="btnConectarPeloPainel" data-comando="conectarMicrosoft">
+                        Conectar agora
+                    </button>
+                </div>
+            </div>
             <!-- ============================================================
                  DASHBOARD
                  Cada cartao virou `article`: e conteudo independente, que faz

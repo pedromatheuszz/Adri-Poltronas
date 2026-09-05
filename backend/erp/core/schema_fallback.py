@@ -261,6 +261,20 @@ def garantir_schema_fallback(conexao: sqlite3.Connection) -> None:
             correlation_id TEXT,
             criado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
         );
+
+        -- Estado da licenca de uso do aplicativo. Precisa existir tambem
+        -- aqui: um banco montado pelo caminho de emergencia que nao tivesse
+        -- esta tabela faria `licenca.py` perder o lado do banco e passar a
+        -- depender so do arquivo do perfil -- que e justamente o lado que se
+        -- apaga com um clique.
+        CREATE TABLE IF NOT EXISTS licenca (
+            instalado_em TEXT NOT NULL DEFAULT '',
+            visto_em TEXT NOT NULL DEFAULT '',
+            estado TEXT NOT NULL DEFAULT 'teste',
+            pagamento_id TEXT NOT NULL DEFAULT '',
+            pago_em TEXT NOT NULL DEFAULT '',
+            referencia TEXT NOT NULL DEFAULT ''
+        );
         """
     )
 

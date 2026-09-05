@@ -28,6 +28,7 @@ a = Analysis(
     hiddenimports=[
         'database', 'notificacoes_db', 'security', 'asaas', 'config', 'validators',
         'blueprints', 'migrations_manager', 'capacidade', 'microsoft', 'planilha',
+        'limites', 'licenca', 'mercadopago',
         'openpyxl', 'openpyxl.utils', 'et_xmlfile',
         'alembic', 'alembic.config', 'alembic.command',
         # `alembic/env.py` chama `logging.config.fileConfig`. O PyInstaller nao

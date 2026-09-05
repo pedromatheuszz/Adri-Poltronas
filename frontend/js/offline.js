@@ -743,8 +743,15 @@ var OfflineManager = (function() {
           registration.addEventListener('updatefound', function() {
             var newWorker = registration.installing;
             if (newWorker) {
+              // `controller` nulo significa que NAO havia service worker
+              // controlando esta pagina -- ou seja, primeira instalacao. O
+              // `updatefound` dispara igual nos dois casos, entao sem esta
+              // checagem a primeira abertura do app anunciava "App
+              // atualizado! Recarregue" sem nada ter sido atualizado, e
+              // pedindo ao operador uma acao que nao servia para nada.
+              var eraAtualizacao = !!navigator.serviceWorker.controller;
               newWorker.addEventListener('statechange', function() {
-                if (newWorker.state === 'activated') {
+                if (newWorker.state === 'activated' && eraAtualizacao) {
                   showSyncIndicator('App atualizado! Recarregue para ver as mudancas.');
                 }
               });
