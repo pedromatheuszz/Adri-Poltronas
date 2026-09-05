@@ -55,6 +55,25 @@ de outra coisa e só usava o financeiro como cenário: as notificações passara
 se apoiar em entregas atrasadas, e a censura de segredos na auditoria passou a
 ser exercitada pelo mecanismo (`registrar_evento` com campo sensível) em vez de
 por colunas específicas de cobrança.
+## [1.4.2-beta] — 2026-09-05
+
+### Alterado
+
+- **A conexão com a Microsoft mudou para a barra superior**, ao lado do
+  indicador de rede. As duas dizem a mesma coisa — "como este app está ligado
+  ao mundo" — e ficavam em lugares distantes: o estado da rede no topo, a conta
+  no rodapé da aba Clientes, onde só era encontrada por quem já sabia que
+  existia. Quem precisa exportar planilha agora vê de onde ela depende sem
+  procurar.
+
+  O botão espelha as medidas do indicador de rede de propósito: alturas ou
+  raios diferentes fariam dois controles vizinhos parecerem sem relação.
+  Conectado, mostra o nome da conta e leva o endereço completo no `title`, que
+  é o que permite caber num espaço curto sem esconder informação.
+
+  O envio ao Excel, o backup e a restauração **continuam no rodapé da lista**:
+  operam sobre a seleção de clientes e sobre a tela, não sobre o estado da
+  conexão.
 
 ---
 

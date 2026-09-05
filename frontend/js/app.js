@@ -2140,12 +2140,19 @@ async function checarLoginExistente() {
     return false;
 }
 
+// O botao de conexao mora na topbar, ao lado do estado da rede, e ali o espaco
+// e curto. O rotulo carrega o essencial -- quem esta conectado -- e o `title`
+// carrega o resto: a conta inteira, que num e-mail longo nao caberia.
 function atualizarVisualBotaoConexao(conta) {
     var btnConectar = document.getElementById('btnConectarMicrosoft');
     var btnEnviar = document.getElementById('btnEnviarExcel');
     var txtConectar = document.getElementById('txtBtnConectar');
-    if (btnConectar) { btnConectar.classList.add('conectado'); btnConectar.classList.remove('carregando'); }
-    if (txtConectar) txtConectar.innerText = 'Conectado (' + conta.split('@')[0] + ')';
+    if (btnConectar) {
+        btnConectar.classList.add('conectado');
+        btnConectar.classList.remove('carregando');
+        btnConectar.title = 'Conectado como ' + conta + '. Clique para desconectar.';
+    }
+    if (txtConectar) txtConectar.innerText = conta.split('@')[0];
     if (btnEnviar) btnEnviar.disabled = false;
 }
 
@@ -2153,8 +2160,11 @@ function resetarVisualBotaoConexao() {
     var btnConectar = document.getElementById('btnConectarMicrosoft');
     var btnEnviar = document.getElementById('btnEnviarExcel');
     var txtConectar = document.getElementById('txtBtnConectar');
-    if (btnConectar) btnConectar.classList.remove('conectado');
-    if (txtConectar) txtConectar.innerText = 'Conectar Microsoft';
+    if (btnConectar) {
+        btnConectar.classList.remove('conectado');
+        btnConectar.title = 'Conectar conta Microsoft';
+    }
+    if (txtConectar) txtConectar.innerText = 'Conectar';
     if (btnEnviar) btnEnviar.disabled = true;
 }
 
@@ -2223,7 +2233,7 @@ async function enviarExcelComNome(ids, nomeArquivo) {
         if (resp.status === 401) {
             sessaoCaiu = true;
             resetarVisualBotaoConexao();
-            exibirToast('Sessao Microsoft encerrada. Clique em "Conectar Microsoft" para reconectar.', 'error');
+            exibirToast('Sessao Microsoft encerrada. Clique em "Conectar", no topo da tela, para reconectar.', 'error');
             return;
         }
         if (!resp.ok) throw new Error(dados.erro || 'Falha');

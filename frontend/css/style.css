@@ -2550,3 +2550,55 @@ button, [role="tab"], summary { touch-action: manipulation; }
    `.sidebar-titulo`: o trilho de icones e a media query de 1100px. Estar nas
    MESMAS listas e o que mantem os dois em sincronia -- uma regra separada
    sairia do lugar assim que o ponto de quebra mudasse. */
+
+
+/* Botao de conexao com a Microsoft, na topbar.
+
+   Espelha as medidas de `.online-status` de proposito: os dois dizem "como
+   este app esta ligado ao mundo" e ficam lado a lado, entao alturas ou raios
+   diferentes os fariam parecer dois controles sem relacao. */
+.btn-conexao {
+    display: flex;
+    align-items: center;
+    gap: var(--esp-2);
+    min-height: var(--altura-controle-sm);
+    padding: 0 var(--esp-3);
+    border: 1px solid var(--cor-borda);
+    border-radius: var(--raio-md);
+    background: var(--cor-superficie);
+    color: var(--cor-texto-2);
+    font-size: var(--texto-md);
+    font-weight: var(--peso-medio);
+    font-family: inherit;
+    cursor: pointer;
+    flex-shrink: 0;
+    max-width: 12rem;
+    transition: background var(--tempo-rapido) var(--curva),
+                border-color var(--tempo-rapido) var(--curva);
+}
+
+.btn-conexao:hover { background: var(--cor-hover); color: var(--cor-texto); }
+
+.btn-conexao img { flex: 0 0 auto; }
+
+/* O nome da conta pode ser longo; o `title` carrega o valor inteiro. */
+.btn-conexao span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Conectado: a mesma linguagem visual do `.online-status.online`, para os dois
+   estados "ligado" se parecerem entre si. */
+.btn-conexao.conectado {
+    background: var(--cor-sucesso-suave);
+    border-color: var(--cor-sucesso-contorno);
+    color: var(--cor-sucesso-texto);
+}
+
+/* Em tela estreita a topbar disputa espaco com o titulo do modulo; sobra o
+   icone, e o `title` continua dizendo o resto. */
+@media (max-width: 900px) {
+    .btn-conexao { padding: 0 var(--esp-2); }
+    .btn-conexao #txtBtnConectar { display: none; }
+}
