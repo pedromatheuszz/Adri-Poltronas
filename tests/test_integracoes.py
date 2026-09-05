@@ -1,15 +1,16 @@
 """
-Testes das integracoes externas: Asaas, Gemini/ViaCEP, Microsoft Graph e a
-exportacao de relatorios.
+Integracoes externas: ViaCEP, Gemini e Microsoft Graph.
 
-Nenhum teste toca a rede -- `urllib.request.urlopen` e substituido por um duplo
-que devolve respostas controladas. Antes destes testes estes eram os modulos
-menos cobertos do projeto (asaas 31%, ia 27%, excel 45%), justamente os que
-lidam com dinheiro e com o token do OneDrive.
+Ate a 1.4.2 este arquivo cobria tambem o cliente do Asaas -- a maior parte
+dele, alias. A integracao de cobranca foi removida, e com ela os testes do
+cliente HTTP, da criacao de cliente no gateway e da traducao de erro.
+
+O que ficou sao as tres integracoes que sobreviveram, e o duplo de `urlopen`
+que as sustenta: nenhuma requisicao sai da maquina, e o que se exercita e a
+traducao entre o formato de fora e o que o app espera.
 """
 import io
 import json
-import logging
 import os
 import sys
 import tempfile
@@ -19,7 +20,6 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'backend'))
 
-import asaas  # noqa: E402
 import config  # noqa: E402
 import database  # noqa: E402
 import app as app_module  # noqa: E402
@@ -84,102 +84,35 @@ def urlopen_falso(monkeypatch):
 # =============================================================================
 # Asaas - configuracao
 # =============================================================================
-def test_sem_chave_reporta_nao_configurado(monkeypatch):
-    monkeypatch.setattr(config, 'ASAAS_API_KEY', '')
-    assert not asaas.esta_configurado()
 
 
-def test_com_chave_reporta_configurado(monkeypatch):
-    monkeypatch.setattr(config, 'ASAAS_API_KEY', '$aact_hmlg_abc')
-    assert asaas.esta_configurado()
 
 
-def test_ambiente_acompanha_a_flag_de_sandbox(monkeypatch):
-    monkeypatch.setattr(config, 'ASAAS_SANDBOX', True)
-    assert asaas.ambiente() == 'sandbox'
-    monkeypatch.setattr(config, 'ASAAS_SANDBOX', False)
-    assert asaas.ambiente() == 'producao'
 
 
-def test_url_base_acompanha_o_ambiente(monkeypatch):
-    monkeypatch.setattr(config, 'ASAAS_SANDBOX', True)
-    assert 'sandbox' in asaas._base_url()
-    monkeypatch.setattr(config, 'ASAAS_SANDBOX', False)
-    assert 'sandbox' not in asaas._base_url()
 
 
-@pytest.mark.parametrize("chave,sandbox,incompativel", [
-    ('$aact_prod_xxx', True, True),
-    ('$aact_hmlg_xxx', True, False),
-    ('$aact_hmlg_xxx', False, True),
-    ('$aact_prod_xxx', False, False),
-    ('', True, False),
-])
-def test_deteccao_de_chave_incompativel(monkeypatch, chave, sandbox, incompativel):
-    monkeypatch.setattr(config, 'ASAAS_API_KEY', chave)
-    monkeypatch.setattr(config, 'ASAAS_SANDBOX', sandbox)
-    assert asaas.chave_incompativel_com_ambiente() is incompativel
 
 
-def test_headers_levam_a_chave_e_o_user_agent(monkeypatch):
-    monkeypatch.setattr(config, 'ASAAS_API_KEY', 'chave-x')
-    headers = asaas._headers()
-    assert headers['access_token'] == 'chave-x'
-    assert 'AdriPoltronas' in headers['User-Agent']
-    assert headers['Content-Type'] == 'application/json'
-    assert 'Content-Type' not in asaas._headers(content_type=False)
 
 
 # =============================================================================
 # Asaas - camada HTTP
 # =============================================================================
-def test_request_devolve_json_decodificado(urlopen_falso):
-    urlopen_falso['resposta'] = _RespostaFalsa({"id": "pay_1"})
-    assert asaas._request('POST', '/payments', {"value": 10}) == {"id": "pay_1"}
 
 
-def test_request_com_corpo_vazio_devolve_dict_vazio(urlopen_falso):
-    urlopen_falso['resposta'] = _RespostaFalsa(b'')
-    assert asaas._request('POST', '/payments', {"v": 1}) == {}
 
 
-def test_request_traduz_erro_http_em_dicionario(urlopen_falso):
-    urlopen_falso['resposta'] = _erro_http(401, {"errors": [{"description": "chave invalida"}]})
-    resultado = asaas._request('POST', '/payments', {"v": 1})
-    assert resultado['_erro'] is True
-    assert resultado['_status'] == 401
-    assert 'errors' in resultado
 
 
-def test_request_com_erro_http_nao_json(urlopen_falso):
-    urlopen_falso['resposta'] = _erro_http(500, b'<html>erro</html>')
-    resultado = asaas._request('POST', '/payments', {"v": 1})
-    assert resultado['_erro'] is True
-    assert '_detalhe' in resultado
 
 
-def test_request_traduz_falha_de_conexao(urlopen_falso):
-    urlopen_falso['resposta'] = urllib.error.URLError('sem rota')
-    resultado = asaas._request('POST', '/payments', {"v": 1})
-    assert resultado['_erro'] is True
 
 
-def test_request_get_e_delete(urlopen_falso):
-    urlopen_falso['resposta'] = _RespostaFalsa({"ok": 1})
-    assert asaas._request_get('/payments/1') == {"ok": 1}
-    assert asaas._request_delete('/payments/1') == {"ok": 1}
 
 
-def test_get_e_delete_traduzem_erro_http(urlopen_falso):
-    urlopen_falso['resposta'] = _erro_http(404, {"erro": "nao encontrado"})
-    assert asaas._request_get('/payments/1')['_erro'] is True
-    assert asaas._request_delete('/payments/1')['_erro'] is True
 
 
-def test_get_e_delete_traduzem_falha_de_conexao(urlopen_falso):
-    urlopen_falso['resposta'] = urllib.error.URLError('sem rota')
-    assert asaas._request_get('/x')['_erro'] is True
-    assert asaas._request_delete('/x')['_erro'] is True
 
 
 # -----------------------------------------------------------------------------
@@ -195,34 +128,6 @@ def test_get_e_delete_traduzem_falha_de_conexao(urlopen_falso):
 # como sensivel, e o roadmap ja exigia "webhook sem payload sensivel nos logs".
 # A mesma regra vale para o cliente HTTP de saida.
 # -----------------------------------------------------------------------------
-@pytest.fixture
-def log_do_asaas():
-    """
-    Captura o que `adri.asaas` registra, com handler proprio.
-
-    O `caplog` do pytest depende de o registro propagar ate a raiz, e isso nao
-    se sustenta na suite completa: estes mesmos testes passavam sozinhos e
-    capturavam zero registro quando rodavam depois dos outros arquivos, porque
-    a configuracao global de logging que `app.py` monta no import nem sempre
-    chega no mesmo estado. Um handler pendurado direto no logger do modulo nao
-    depende de estado que o teste nao controla.
-    """
-    registros = []
-
-    class _Coletor(logging.Handler):
-        def emit(self, registro):
-            registros.append(registro.getMessage())
-
-    logger = logging.getLogger('adri.asaas')
-    handler = _Coletor()
-    nivel_original = logger.level
-    logger.addHandler(handler)
-    logger.setLevel(logging.ERROR)
-    try:
-        yield registros
-    finally:
-        logger.removeHandler(handler)
-        logger.setLevel(nivel_original)
 
 
 CORPO_COM_CADASTRO = {
@@ -240,114 +145,29 @@ DADOS_PESSOAIS = ["Maria Souza", "52998224725", "529.982.247-25",
                   "maria@exemplo.com", "47999998888"]
 
 
-@pytest.mark.parametrize("chamada", [
-    lambda: asaas._request('POST', '/customers', {"name": "Maria Souza"}),
-    lambda: asaas._request_get('/customers/cus_1'),
-    lambda: asaas._request_delete('/customers/cus_1'),
-])
-def test_recusa_do_asaas_nao_leva_dado_pessoal_para_o_log(urlopen_falso, log_do_asaas, chamada):
-    urlopen_falso['resposta'] = _erro_http(400, CORPO_COM_CADASTRO)
-
-    chamada()
-
-    registrado = " | ".join(log_do_asaas)
-    assert registrado, "a recusa precisa continuar aparecendo no log"
-    for pessoal in DADOS_PESSOAIS:
-        assert pessoal not in registrado, f"{pessoal!r} vazou para o log"
 
 
-def test_o_log_ainda_diz_qual_foi_a_causa(urlopen_falso, log_do_asaas):
-    """Tirar o corpo do log nao pode transformar a recusa num evento mudo: o
-    codigo do Asaas e o que permite diagnosticar sem repetir o cadastro."""
-    urlopen_falso['resposta'] = _erro_http(400, CORPO_COM_CADASTRO)
-
-    asaas._request('POST', '/customers', {"name": "Maria Souza"})
-
-    registrado = " | ".join(log_do_asaas)
-    assert 'invalid_cpfCnpj' in registrado
-    assert '400' in registrado
 
 
-def test_corpo_sem_codigo_de_erro_vira_diagnostico_generico(urlopen_falso, log_do_asaas):
-    """Um 502 do proxy devolve HTML, nao o JSON do Asaas. Sem codigo nao ha o
-    que citar sem arriscar conteudo -- entao nao se cita nada."""
-    urlopen_falso['resposta'] = _erro_http(502, b'<html>Bad Gateway maria@exemplo.com</html>')
-
-    asaas._request_get('/payments/1')
-
-    registrado = " | ".join(log_do_asaas)
-    assert 'maria@exemplo.com' not in registrado
-    assert 'sem codigo' in registrado
 
 
-def test_a_resposta_devolvida_a_quem_chamou_nao_muda(urlopen_falso):
-    """A limpeza e do LOG. O dicionario de retorno segue igual -- e dele que
-    saem as mensagens que o operador ve na tela."""
-    urlopen_falso['resposta'] = _erro_http(400, CORPO_COM_CADASTRO)
-
-    resultado = asaas._request('POST', '/customers', {"name": "Maria Souza"})
-
-    assert resultado['_erro'] is True
-    assert resultado['_status'] == 400
-    assert resultado['errors'][0]['code'] == 'invalid_cpfCnpj'
 
 
 # =============================================================================
 # Asaas - operacoes
 # =============================================================================
-def test_criar_cliente_devolve_id(urlopen_falso):
-    urlopen_falso['resposta'] = _RespostaFalsa({"id": "cus_1", "name": "Maria"})
-    assert asaas.criar_cliente("Maria") == {"id": "cus_1", "nome": "Maria"}
 
 
-def test_criar_cliente_normaliza_documento_e_telefone(urlopen_falso):
-    urlopen_falso['resposta'] = _RespostaFalsa({"id": "cus_1", "name": "Maria"})
-    asaas.criar_cliente("Maria", cpf_cnpj="123.456.789-00", telefone="(11) 99999-8888",
-                        email="m@x.com", cidade="SP", uf="SP", bairro="Centro",
-                        rua="Rua A", cep="01001-000")
-    corpo = json.loads(urlopen_falso['requisicoes'][0].data)
-    assert corpo['cpfCnpj'] == "12345678900"
-    assert corpo['mobilePhone'] == "11999998888"
-    assert corpo['zipCode'] == "01001000"
-    assert corpo['email'] == "m@x.com"
 
 
-def test_criar_cliente_propaga_erro(urlopen_falso):
-    urlopen_falso['resposta'] = _erro_http(400, {"errors": []})
-    assert asaas.criar_cliente("Maria")['_erro'] is True
 
 
-def test_criar_cobranca_pix_monta_o_corpo(urlopen_falso):
-    urlopen_falso['resposta'] = _RespostaFalsa({"id": "pay_1"})
-    asaas.criar_cobranca_pix("cus_1", 150.456, "2026-09-01", "Poltrona")
-    corpo = json.loads(urlopen_falso['requisicoes'][0].data)
-    assert corpo['billingType'] == 'PIX'
-    assert corpo['value'] == 150.46
-    assert corpo['dueDate'] == '2026-09-01'
-    assert corpo['description'] == 'Poltrona'
 
 
-def test_cobranca_sem_descricao_omite_o_campo(urlopen_falso):
-    urlopen_falso['resposta'] = _RespostaFalsa({"id": "pay_1"})
-    asaas.criar_cobranca_pix("cus_1", 10.0, "2026-09-01")
-    assert 'description' not in json.loads(urlopen_falso['requisicoes'][0].data)
 
 
-def test_criar_cobranca_boleto_monta_o_corpo(urlopen_falso):
-    urlopen_falso['resposta'] = _RespostaFalsa({"id": "pay_2"})
-    asaas.criar_cobranca_boleto("cus_1", 99.9, "2026-09-01", "Sofa")
-    corpo = json.loads(urlopen_falso['requisicoes'][0].data)
-    assert corpo['billingType'] == 'BOLETO'
-    assert corpo['postalService'] is False
 
 
-def test_consultas_e_cancelamento(urlopen_falso):
-    urlopen_falso['resposta'] = _RespostaFalsa({"status": "RECEIVED"})
-    assert asaas.obter_pagamento("pay_1")['status'] == 'RECEIVED'
-    assert asaas.obter_status_pagamento("pay_1")['status'] == 'RECEIVED'
-    assert asaas.obter_cliente("cus_1")['status'] == 'RECEIVED'
-    assert asaas.obter_qr_code_pix("pay_1")['status'] == 'RECEIVED'
-    assert asaas.cancelar_pagamento("pay_1")['status'] == 'RECEIVED'
 
 
 # =============================================================================
@@ -496,33 +316,12 @@ def test_falha_de_conexao_com_o_graph(client, urlopen_falso):
 # =============================================================================
 # Relatorios
 # =============================================================================
-def test_relatorio_filtrado_devolve_clientes_e_regioes(client):
-    _criar_cliente(client)
-    dados = json.loads(client.get('/api/relatorios').data)
-    assert dados['total'] == 1
-    assert dados['regioes'][0]['cidade'] == 'Sao Paulo'
 
 
-def test_relatorio_filtra_por_tipo_e_cidade(client):
-    _criar_cliente(client)
-    assert json.loads(client.get('/api/relatorios?tipo=Retirada').data)['total'] == 0
-    assert json.loads(client.get('/api/relatorios?tipo=Entrega').data)['total'] == 1
-    assert json.loads(client.get('/api/relatorios?cidade=Rio').data)['total'] == 0
 
 
-def test_exportacao_csv(client):
-    _criar_cliente(client)
-    resposta = client.get('/api/relatorios/exportar?formato=csv')
-    assert resposta.status_code == 200
-    assert 'text/csv' in resposta.headers['Content-Type']
-    assert b'Maria Souza' in resposta.data
 
 
-def test_exportacao_xlsx(client):
-    _criar_cliente(client)
-    resposta = client.get('/api/relatorios/exportar?formato=xlsx')
-    assert resposta.status_code == 200
-    assert resposta.data[:2] == b'PK'  # assinatura de arquivo zip/xlsx
 
 
 # =============================================================================

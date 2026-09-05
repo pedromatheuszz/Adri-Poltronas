@@ -36,14 +36,6 @@ LIMITE_PADRAO = "2000 per minute"
 # digitacao no formulario.
 LIMITE_IA = "20 per minute"
 
-# Cada chamada pode criar uma cobranca real no Asaas. A idempotencia ja impede
-# cobranca duplicada; isto impede a rajada que a exercitaria.
-LIMITE_EMISSAO_DE_COBRANCA = "20 per minute"
-
-# Roda sozinha a cada 20 minutos desde a 1.3.1, e uma rodada consulta N
-# cobrancas em aberto. Clique manual acima disso e dedo nervoso, nao trabalho.
-LIMITE_CONCILIACAO = "10 per minute"
-
 # Upload ao OneDrive: cota do Microsoft Graph, e o arquivo e grande.
 LIMITE_ONEDRIVE = "10 per minute"
 

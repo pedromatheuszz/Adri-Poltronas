@@ -21,7 +21,6 @@ from flask_limiter.util import get_remote_address
 import database
 import config
 import security
-import asaas
 import microsoft
 import capacidade
 import licenca
@@ -76,19 +75,13 @@ def _avisar_configuracao_pendente() -> None:
         log.warning("GEMINI_API_KEY nao definida. Sugestao de bairro via IA desabilitada. "
                     "Defina em %s", _ENV_DO_USUARIO)
 
-    # Checagem contra o proprio modulo asaas (e nao contra config) para que o
-    # aviso reflita o que a integracao realmente enxerga em tempo de execucao.
-    if not asaas.esta_configurado():
-        log.warning("ASAAS_API_KEY nao definida. Pagamentos online desabilitados. "
-                    "Defina em %s", _ENV_DO_USUARIO)
-    elif asaas.chave_incompativel_com_ambiente():
-        log.warning("ASAAS_API_KEY nao corresponde ao ambiente '%s'. "
-                    "Toda cobranca vai falhar com 401. Revise ASAAS_SANDBOX em %s",
-                    asaas.ambiente(), _ENV_DO_USUARIO)
-
-    if not config.ASAAS_WEBHOOK_TOKEN:
-        log.warning("ASAAS_WEBHOOK_TOKEN nao definido. Webhook de pagamentos recusara "
-                    "requisicoes. Defina em %s", _ENV_DO_USUARIO)
+    # A licenca so consegue cobrar se souber falar com o Mercado Pago. Sem o
+    # token, o bloqueio dos 30 dias continua valendo e nao ha como pagar por
+    # dentro do aplicativo -- que e um estado pior do que nao ter licenca.
+    import mercadopago
+    if not mercadopago.esta_configurado():
+        log.warning("MP_ACCESS_TOKEN nao definido. A licenca nao podera ser paga "
+                    "pelo aplicativo. Ver LICENCA_E_PAGAMENTO.md")
 
 
 _avisar_configuracao_pendente()
@@ -252,18 +245,17 @@ def _csp_header() -> str:
 _METODOS_QUE_ALTERAM_ESTADO = frozenset({'POST', 'PUT', 'PATCH', 'DELETE'})
 
 # Rotas que chegam DE FORA por desenho, e que por isso nao podem ser medidas
-# pelas regras do trafego local. Hoje ha uma so: o webhook do Asaas, que tem
-# autenticacao propria (ASAAS_WEBHOOK_TOKEN, fail-closed) -- o controle correto
-# para quem vem da internet.
+# pelas regras do trafego local.
 #
-# O nome antigo, ROTAS_SEM_CHECAGEM_DE_ORIGEM, descrevia um guarda so. A lista
-# isenta tres: origem, capacidade (em capacidade.ROTAS_ISENTAS) e host de
-# loopback. O de host ficou de fora ate a 1.3.0 e recusava o webhook com 400
-# antes de o token do Asaas ser lido -- inofensivo hoje, porque nada chega de
-# fora mesmo, e uma armadilha no dia em que existir o relay publico que
-# `reconciliacao.py` menciona: o Asaas receberia 400 e a causa pareceria erro
-# de configuracao dele.
-ROTAS_QUE_CHEGAM_DE_FORA = frozenset({'/api/pagamentos/webhook'})
+# Hoje esta VAZIA. Ate a 1.4.2 continha o webhook do Asaas, que era o unico
+# caminho pelo qual algo da internet falava com este backend. Removida a
+# integracao, todo o trafego e local -- e as tres isencoes que existiam para
+# ele (origem, capacidade e host de loopback) sairam junto.
+#
+# O conjunto fica no lugar, e nao o `if` some: a proxima integracao que
+# receber chamada de fora precisa deste mesmo tratamento, e encontra aqui o
+# motivo escrito.
+ROTAS_QUE_CHEGAM_DE_FORA = frozenset()
 
 ALIASES_LOOPBACK = config.ALIASES_LOOPBACK
 
@@ -447,7 +439,7 @@ ROTAS_SEM_AUTH = frozenset({
     '/api/auth/login', '/api/auth/status', '/api/auth/logout',
     '/api/health',
     '/', '/manifest.json', '/sw.js',
-    '/callback', '/api/pagamentos/webhook',
+    '/callback',
 })
 
 
@@ -569,7 +561,7 @@ def _aplicar_seguranca_requisicao():
 # -- a interface distingue "pague" de "conecte-se" so pelo status.
 ROTAS_SEM_LICENCA = frozenset({
     '/api/health', '/api/auth/login', '/api/auth/status', '/api/auth/logout',
-    '/callback', '/api/pagamentos/webhook',
+    '/callback',
 }) | licenca.ROTAS_ISENTAS
 
 
@@ -607,7 +599,7 @@ def _iniciar_contexto_operacao():
     ):
         correlation_recebido = uuid.uuid4().hex
 
-    origem = 'asaas_webhook' if request.path == '/api/pagamentos/webhook' else 'api_local'
+    origem = 'api_local'
     contexto = ContextoOperacao(
         origem=origem,
         correlation_id=correlation_recebido,
@@ -744,16 +736,13 @@ def service_worker():
 # Import blueprints no fim do modulo
 # ---------------------------------------------------------------------------
 from blueprints import (  # noqa: E402
-    auth_bp, clientes_bp, pagamentos_bp, webhook_bp, relatorios_bp,
+    auth_bp, clientes_bp,
     ia_bp, entregas_bp, dashboard_bp, notificacoes_bp, excel_bp,
     produtos_bp, pedidos_bp, backup_bp, licenca_bp
 )
 
 app.register_blueprint(auth_bp)
 app.register_blueprint(clientes_bp)
-app.register_blueprint(pagamentos_bp)
-app.register_blueprint(webhook_bp)
-app.register_blueprint(relatorios_bp)
 app.register_blueprint(ia_bp)
 app.register_blueprint(entregas_bp)
 app.register_blueprint(dashboard_bp)

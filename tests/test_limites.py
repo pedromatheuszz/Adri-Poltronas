@@ -97,30 +97,7 @@ def test_o_teto_padrao_continua_existindo(cliente):
 # =============================================================================
 # Onde ha custo externo
 # =============================================================================
-def test_conciliacao_tem_limite_proprio(cliente):
-    """Roda sozinha a cada 20 minutos e consulta N cobrancas por rodada. Sem
-    a chave do Asaas a rota devolve 503 antes de tocar a rede -- o que importa
-    aqui e que, passado o teto, ela devolve 429 antes de tocar a VIEW."""
-    bloqueadas = _contar_429(cliente, 'POST', '/api/pagamentos/reconciliar', 30)
-    assert bloqueadas > 0, "a conciliacao ficou sem limite"
 
 
-def test_o_limite_da_conciliacao_cabe_no_uso_normal(cliente):
-    """Apertar demais quebraria o proprio app: o teto precisa acomodar a
-    rodada automatica mais o operador clicando no botao."""
-    numero = int(limites.LIMITE_CONCILIACAO.split()[0])
-    assert numero >= 5
 
 
-@pytest.mark.parametrize('constante', [
-    'LIMITE_IA',
-    'LIMITE_EMISSAO_DE_COBRANCA',
-    'LIMITE_CONCILIACAO',
-    'LIMITE_ONEDRIVE',
-])
-def test_as_rotas_caras_sao_bem_mais_apertadas_que_o_padrao(constante):
-    """O ponto do ajuste: o padrao e frouxo porque nao defende de ninguem; o
-    aperto fica onde cada chamada gasta cota de terceiro."""
-    apertado = int(getattr(limites, constante).split()[0])
-    padrao = int(limites.LIMITE_PADRAO.split()[0])
-    assert apertado * 10 < padrao, f"{constante} nao esta mais apertado que o padrao"

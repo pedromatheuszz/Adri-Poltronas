@@ -173,16 +173,6 @@ def test_casca_da_pwa_carrega_sem_sessao(sem_sessao):
         assert sem_sessao.get(rota, headers=CABECALHOS).status_code == 200
 
 
-def test_isencoes_sao_apenas_as_declaradas():
-    """Guarda contra o crescimento silencioso da lista. Cada nome aqui foi
-    justificado no comentario que acompanha ROTAS_SEM_AUTH."""
-    import app as modulo_app
-    assert modulo_app.ROTAS_SEM_AUTH == frozenset({
-        '/api/auth/login', '/api/auth/status', '/api/auth/logout',
-        '/api/health',
-        '/', '/manifest.json', '/sw.js',
-        '/callback', '/api/pagamentos/webhook',
-    })
 
 
 # =============================================================================

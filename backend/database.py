@@ -3,12 +3,10 @@ import os
 import logging
 
 import security
-import asaas
 import notificacoes_db
 from erp.core import dinheiro
 from erp.core.auditoria import registrar_evento
 from erp.core.schema_fallback import garantir_schema_fallback
-from erp.financeiro.servico_pagamentos import aplicar_evento_asaas
 from notificacoes_db import MAX_NOTIFICACOES_POR_TIPO  # noqa: F401
 
 log_db = logging.getLogger("adri.db")
@@ -473,10 +471,9 @@ def salvar_pagamento(cliente_id, cliente_nome, valor, descricao, data_vencimento
 def atualizar_pagamento(pagamento_id, **kwargs):
     """Atualiza campos de um pagamento existente."""
     campos_permitidos = {
-        'status', 'data_pagamento', 'asaas_payment_id', 'pix_payload',
-        'pix_qr_code', 'boleto_url', 'nosso_numero', 'descricao',
+        'status', 'data_pagamento', 'descricao',
         'valor', 'valor_centavos', 'data_vencimento', 'tipo_pagamento',
-        'cliente_nome', 'asaas_external_reference', 'asaas_emissao_estado',
+        'cliente_nome',
     }
     campos = {k: v for k, v in kwargs.items() if k in campos_permitidos and v is not None}
     if not campos:
@@ -606,56 +603,11 @@ def excluir_pagamento(pagamento_id) -> int:
         return cursor.rowcount
 
 
-def atualizar_pagamento_por_asaas(
-    asaas_payment_id: str,
-    novo_status: str,
-    *,
-    preencher_data_pagamento: bool = False,
-    status_anterior: str | None = None,
-) -> int:
-    return aplicar_evento_asaas(
-        conectar,
-        asaas_payment_id,
-        novo_status,
-        preencher_data_pagamento=preencher_data_pagamento,
-        status_anterior=status_anterior,
-    )
-
-
 def obter_pagamento_por_id(pagamento_id):
     """Retorna um pagamento pelo ID."""
     with conectar() as conexao:
         linha = conexao.execute('SELECT * FROM pagamentos WHERE id=?', (pagamento_id,)).fetchone()
         return dict(linha) if linha else None
-
-
-def obter_ou_criar_cliente_asaas(cliente_id, nome, cpf_cnpj=None, email=None, cidade=None, uf=None, bairro=None, rua=None, cep=None):
-    """Retorna o asaas_customer_id existente ou cria um novo."""
-    with conectar() as conexao:
-        linha = conexao.execute('SELECT asaas_customer_id FROM clientes_asaas WHERE cliente_id=?', (cliente_id,)).fetchone()
-        if linha and linha['asaas_customer_id']:
-            return linha['asaas_customer_id']
-        resultado = asaas.criar_cliente(nome, cpf_cnpj, email=email, cidade=cidade, uf=uf, bairro=bairro, rua=rua, cep=cep)
-        if resultado.get('_erro'):
-            return None
-        asaas_id = resultado.get('id', '')
-        if asaas_id:
-            conexao.execute(
-                'INSERT OR REPLACE INTO clientes_asaas (cliente_id, asaas_customer_id) VALUES (?, ?)',
-                (cliente_id, asaas_id),
-            )
-            registrar_evento(
-                conexao,
-                acao="crm.cliente.integracao_asaas_vinculada",
-                entidade="cliente_asaas",
-                entidade_id=cliente_id,
-                valores_novos={
-                    "cliente_id": cliente_id,
-                    "asaas_customer_id": asaas_id,
-                },
-            )
-        return asaas_id
-
 
 # Cobrancas que ainda representam dinheiro a entrar. 'Atrasado' continua
 # sendo um valor a receber: vencer nao quita nem cancela a cobranca. Os

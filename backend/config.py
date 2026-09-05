@@ -22,16 +22,10 @@ ADRI_FLASK_SECRET=
 # IA - Gemini (fallback de sugestao de bairro quando o ViaCEP falha).
 GEMINI_API_KEY=
 
-# Pagamentos - Asaas.
-# ASAAS_SANDBOX=true  -> api-sandbox.asaas.com, exige chave $aact_hmlg_*
-# ASAAS_SANDBOX=false -> api.asaas.com, exige chave $aact_prod_*
-ASAAS_API_KEY=
-ASAAS_SANDBOX=true
-
-# Token do webhook Asaas, enviado por ele no header `asaas-access-token`.
-# Precisa ser forte e DIFERENTE da ASAAS_API_KEY.
-# Gere com: python -c "import secrets; print(secrets.token_urlsafe(32))"
-ASAAS_WEBHOOK_TOKEN=
+# Licenca de uso - Mercado Pago.
+# Access Token da SUA aplicacao (nao a Public Key). Ver
+# LICENCA_E_PAGAMENTO.md para como grava-lo sem passar por arquivo de texto.
+MP_ACCESS_TOKEN=
 """
 
 
@@ -42,8 +36,8 @@ def caminho_env_do_usuario() -> str:
     Mesma pasta que ja abriga o banco e os logs. `load_dotenv()` sozinho
     resolve a partir do CWD, que no app instalado e Program Files -- pasta sem
     escrita para o usuario e sem .env nenhum. O executavel era entregue sem
-    nenhuma forma suportada de configurar ASAAS_API_KEY, ASAAS_WEBHOOK_TOKEN
-    ou GEMINI_API_KEY, e as integracoes nasciam desligadas.
+    nenhuma forma suportada de configurar MP_ACCESS_TOKEN ou GEMINI_API_KEY, e as
+    integracoes nasciam desligadas.
     """
     appdata = os.environ.get('APPDATA')
     if not appdata:
@@ -117,11 +111,7 @@ URL_AUTORIZACAO_MICROSOFT = "https://login.microsoftonline.com/common/oauth2/v2.
 # ambiente ou do .env quando nao. Ver `segredos.py` para a precedencia e para
 # o limite honesto do que o DPAPI protege.
 GEMINI_API_KEY = segredos.obter('GEMINI_API_KEY')
-ASAAS_API_KEY = segredos.obter('ASAAS_API_KEY')
-ASAAS_SANDBOX = os.environ.get('ASAAS_SANDBOX', 'true').strip().lower() == 'true'
 # Token que o Asaas envia no header `asaas-access-token` dos webhooks.
-# Deve ser diferente da ASAAS_API_KEY (recomendacao explicita do Asaas).
-ASAAS_WEBHOOK_TOKEN = segredos.obter('ASAAS_WEBHOOK_TOKEN')
 
 # Versao do aplicativo. Lida do package.json para nao existirem duas verdades:
 # o instalador, o titulo da janela e a sonda de identidade precisam concordar,

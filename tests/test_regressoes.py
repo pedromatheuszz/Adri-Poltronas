@@ -7,17 +7,12 @@ na versão anterior do código.
 import os
 import sys
 import json
-import sqlite3
 import tempfile
-from contextlib import closing
-from datetime import timedelta
 
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'backend'))
 
-import asaas  # noqa: E402
-import config  # noqa: E402
 import database  # noqa: E402
 import planilha  # noqa: E402
 import app as app_module  # noqa: E402
@@ -44,86 +39,40 @@ def client():
     os.unlink(db_path)
 
 
-def _criar_cliente_com_pagamento(client, data_vencimento):
-    """Cria um cliente e uma cobrança pendente com o vencimento informado."""
+def _criar_cliente_com_entrega(client, data_entrega):
+    """
+    Cria um cliente e uma entrega agendada na data informada.
+
+    Ate a 1.5.0 este ajudante criava uma COBRANCA, e os testes de notificacao
+    se apoiavam nela. Removido o modulo financeiro, pagamento deixou de gerar
+    notificacao -- entrega gera, e e o que sustenta a mesma cobertura sem
+    depender do que saiu.
+    """
     client.post('/api/clientes', headers={'Origin': ORIGEM_LOCAL},
         data=json.dumps({
             "nome": "Cliente Teste", "cep": "12345-678", "rua": "Rua Teste",
             "bairro": "Centro", "cidade": "São Paulo", "entrega_retirada": "Entrega",
         }), content_type='application/json')
     cliente_id = json.loads(client.get('/api/clientes').data)[0]['id']
-    database.salvar_pagamento(cliente_id, "Cliente Teste", 250.00, "Poltrona", data_vencimento)
+    database.agendar_entrega(cliente_id, "Cliente Teste", data_entrega,
+                             descricao="Poltrona")
     return cliente_id
 
 
 # -----------------------------------------------------------------------------
 # A5 - sqlite3.Row nao tem .get(), o que derrubava TODAS as notificacoes
 # -----------------------------------------------------------------------------
-def test_notificacoes_com_pagamento_atrasado_nao_quebra(client):
-    _criar_cliente_com_pagamento(client, '2020-01-01')
-
-    resposta = client.get('/api/notificacoes')
-
-    assert resposta.status_code == 200
-    dados = json.loads(resposta.data)
-    assert 'erro' not in dados, f"Notificacoes falharam: {dados.get('erro')}"
-    tipos = [n['tipo'] for n in dados['notificacoes']]
-    assert 'pagamento_atrasado' in tipos
 
 
-def test_notificacao_de_atraso_usa_nome_do_cliente(client):
-    _criar_cliente_com_pagamento(client, '2020-01-01')
-
-    notificacoes = json.loads(client.get('/api/notificacoes').data)['notificacoes']
-
-    atrasado = next(n for n in notificacoes if n['tipo'] == 'pagamento_atrasado')
-    assert 'Cliente Teste' in atrasado['msg']
 
 
-def test_notificacoes_sobrevivem_a_pagamento_sem_cliente_correspondente(client):
-    """Dados orfaos legados continuam legiveis, embora novos sejam bloqueados."""
-    # A API agora aplica foreign keys; o INSERT direto com a verificacao
-    # desligada reproduz somente o estado que pode existir em bancos antigos.
-    with closing(sqlite3.connect(database.DB_PATH)) as conexao, conexao:
-        conexao.execute("PRAGMA foreign_keys = OFF")
-        conexao.execute(
-            "INSERT INTO pagamentos (cliente_id, cliente_nome, valor, descricao, "
-            "data_vencimento) VALUES (?, ?, ?, ?, ?)",
-            (9999, "Cliente Removido", 100.00, "Orfao", '2020-01-01'),
-        )
-
-    resposta = client.get('/api/notificacoes')
-
-    assert resposta.status_code == 200
-    dados = json.loads(resposta.data)
-    assert 'erro' not in dados
-    atrasado = next(n for n in dados['notificacoes'] if n['tipo'] == 'pagamento_atrasado')
-    assert 'Cliente Removido' in atrasado['msg']
 
 
 # -----------------------------------------------------------------------------
 # M1 - CSRF: POST cross-site em endpoints que nao leem corpo
 # -----------------------------------------------------------------------------
-def test_confirmar_pagamento_recusa_origem_externa(client):
-    cliente_id = _criar_cliente_com_pagamento(client, '2030-01-01')
-    pagamento_id = database.listar_pagamentos(cliente_id=cliente_id)[0]['id']
-
-    resposta = client.post(f'/api/pagamentos/{pagamento_id}/confirmar',
-                           headers={'Origin': 'https://site-malicioso.example'})
-
-    assert resposta.status_code == 403
-    assert database.obter_pagamento_por_id(pagamento_id)['status'] == 'Pendente'
 
 
-def test_confirmar_pagamento_aceita_origem_local(client):
-    cliente_id = _criar_cliente_com_pagamento(client, '2030-01-01')
-    pagamento_id = database.listar_pagamentos(cliente_id=cliente_id)[0]['id']
-
-    resposta = client.post(f'/api/pagamentos/{pagamento_id}/confirmar',
-                           headers={'Origin': ORIGEM_LOCAL})
-
-    assert resposta.status_code == 200
-    assert database.obter_pagamento_por_id(pagamento_id)['status'] == 'Recebido'
 
 
 def test_referer_externo_tambem_e_recusado(client):
@@ -165,75 +114,18 @@ def test_sem_origin_e_sem_referer_e_permitido(client):
 # -----------------------------------------------------------------------------
 # A2 - webhook Asaas: token estatico `asaas-access-token`, nao HMAC
 # -----------------------------------------------------------------------------
-def _post_webhook(client, headers=None):
-    return client.post('/api/pagamentos/webhook',
-                       data=json.dumps({"event": "PAYMENT_RECEIVED", "payment": {"id": "pay_1"}}),
-                       content_type='application/json', headers=headers or {})
 
 
-def test_webhook_recusa_quando_token_nao_configurado(client, monkeypatch):
-    monkeypatch.setattr(config, 'ASAAS_WEBHOOK_TOKEN', '')
-    assert _post_webhook(client, {'asaas-access-token': 'qualquer'}).status_code == 503
 
 
-def test_webhook_recusa_token_invalido(client, monkeypatch):
-    monkeypatch.setattr(config, 'ASAAS_WEBHOOK_TOKEN', 'token_correto')
-    assert _post_webhook(client, {'asaas-access-token': 'token_errado'}).status_code == 401
 
 
-def test_webhook_recusa_requisicao_sem_header(client, monkeypatch):
-    monkeypatch.setattr(config, 'ASAAS_WEBHOOK_TOKEN', 'token_correto')
-    assert _post_webhook(client).status_code == 401
 
 
-def test_webhook_aceita_token_valido_e_confirma_pagamento(client, monkeypatch):
-    monkeypatch.setattr(config, 'ASAAS_WEBHOOK_TOKEN', 'token_correto')
-    cliente_id = _criar_cliente_com_pagamento(client, '2030-01-01')
-    pagamento_id = database.listar_pagamentos(cliente_id=cliente_id)[0]['id']
-    database.atualizar_pagamento(pagamento_id, asaas_payment_id='pay_1')
-
-    resposta = _post_webhook(client, {'asaas-access-token': 'token_correto'})
-
-    assert resposta.status_code == 200
-    assert database.obter_pagamento_por_id(pagamento_id)['status'] == 'Recebido'
 
 
-def test_webhook_valido_nao_depende_de_sessao_microsoft(client, monkeypatch):
-    """O token proprio do Asaas autentica o webhook tambem fora de TESTING."""
-    monkeypatch.setattr(config, 'ASAAS_WEBHOOK_TOKEN', 'token_correto')
-    app_module.app.config['TESTING'] = False
-    try:
-        resposta = _post_webhook(client, {'asaas-access-token': 'token_correto'})
-    finally:
-        app_module.app.config['TESTING'] = True
-
-    assert resposta.status_code == 200
 
 
-def test_webhook_com_host_externo_chega_ao_proprio_token(client, monkeypatch):
-    """
-    O webhook estava isento do guarda de origem e do de capacidade, e nao do
-    de host de loopback -- que roda antes dos dois. Qualquer Host diferente de
-    127.0.0.1 levava 400 ANTES de o token do Asaas ser sequer lido.
-
-    Hoje isso nao causa dano, porque nada chega de fora mesmo. Vira problema no
-    dia do relay publico que `reconciliacao.py` menciona: o Asaas receberia
-    400 e a causa pareceria erro de configuracao dele, nao uma checagem local.
-    """
-    monkeypatch.setattr(config, 'ASAAS_WEBHOOK_TOKEN', 'token_correto')
-    app_module.app.config['TESTING'] = False
-    try:
-        recusado = _post_webhook(client, {'asaas-access-token': 'errado',
-                                          'Host': 'minhaloja.com.br'})
-        aceito = _post_webhook(client, {'asaas-access-token': 'token_correto',
-                                        'Host': 'minhaloja.com.br'})
-    finally:
-        app_module.app.config['TESTING'] = True
-
-    # Quem decide e o token do Asaas, que e o controle correto para quem vem
-    # de fora -- e nao o Host, que o proprio chamador escolhe.
-    assert recusado.status_code == 401
-    assert aceito.status_code == 200
 
 
 def test_host_externo_continua_recusado_no_resto_da_api(client):
@@ -251,31 +143,12 @@ def test_host_externo_continua_recusado_no_resto_da_api(client):
 # -----------------------------------------------------------------------------
 # A1 - asaas lia os.environ no import, antes do load_dotenv
 # -----------------------------------------------------------------------------
-def test_asaas_le_configuracao_em_tempo_de_chamada(monkeypatch):
-    monkeypatch.setattr(config, 'ASAAS_API_KEY', '$aact_prod_exemplo')
-    monkeypatch.setattr(config, 'ASAAS_SANDBOX', False)
-
-    assert asaas.esta_configurado() is True
-    assert asaas.ambiente() == 'producao'
-    assert asaas._base_url() == 'https://api.asaas.com/v3'
-    assert asaas._headers()['access_token'] == '$aact_prod_exemplo'
 
 
-def test_asaas_sem_chave_reporta_nao_configurado(monkeypatch):
-    monkeypatch.setattr(config, 'ASAAS_API_KEY', '')
-    assert asaas.esta_configurado() is False
 
 
-def test_asaas_detecta_chave_de_producao_apontada_para_sandbox(monkeypatch):
-    monkeypatch.setattr(config, 'ASAAS_API_KEY', '$aact_prod_exemplo')
-    monkeypatch.setattr(config, 'ASAAS_SANDBOX', True)
-    assert asaas.chave_incompativel_com_ambiente() is True
 
 
-def test_asaas_nao_acusa_incompatibilidade_quando_chave_bate(monkeypatch):
-    monkeypatch.setattr(config, 'ASAAS_API_KEY', '$aact_hmlg_exemplo')
-    monkeypatch.setattr(config, 'ASAAS_SANDBOX', True)
-    assert asaas.chave_incompativel_com_ambiente() is False
 
 
 # -----------------------------------------------------------------------------
@@ -329,29 +202,6 @@ def test_planilha_tolera_registro_sem_o_campo():
 # -----------------------------------------------------------------------------
 # M2 - Alembic resolvia alembic.ini pelo CWD e nunca rodava de fato
 # -----------------------------------------------------------------------------
-def test_migracoes_aplicam_a_partir_de_qualquer_diretorio(tmp_path, monkeypatch):
-    """
-    Roda com o CWD fora de backend/, que era exatamente o caso em que
-    `Config("alembic.ini")` falhava e a aplicacao caia no fallback silencioso.
-    """
-    import sqlite3
-    import migrations_manager
-
-    monkeypatch.chdir(tmp_path)
-    banco = tmp_path / 'migracao.db'
-    monkeypatch.setattr(database, 'DB_PATH', str(banco))
-
-    migrations_manager.aplicar_migrações()
-
-    conexao = sqlite3.connect(banco)
-    try:
-        tabelas = {r[0] for r in conexao.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'")}
-        assert {'clientes', 'pagamentos', 'sessao', 'historico',
-                'clientes_asaas', 'entregas_agendadas'} <= tabelas
-        assert conexao.execute('SELECT version_num FROM alembic_version').fetchone()
-    finally:
-        conexao.close()
 
 
 def test_migracao_inicial_usa_tipos_validos_do_sqlalchemy():
@@ -480,18 +330,10 @@ def test_callback_usa_a_paleta_do_app(client):
 # -----------------------------------------------------------------------------
 # Notificacoes lidas
 # -----------------------------------------------------------------------------
-def test_notificacao_tem_chave_estavel_e_flag_de_leitura(client):
-    _criar_cliente_com_pagamento(client, '2020-01-01')
-
-    notifs = json.loads(client.get('/api/notificacoes').data)['notificacoes']
-
-    atrasado = next(n for n in notifs if n['tipo'] == 'pagamento_atrasado')
-    assert atrasado['chave'].startswith('pagamento_atrasado:')
-    assert atrasado['lida'] is False
 
 
 def test_marcar_e_desmarcar_notificacao_como_lida(client):
-    _criar_cliente_com_pagamento(client, '2020-01-01')
+    _criar_cliente_com_entrega(client, '2020-01-01')
     chave = json.loads(client.get('/api/notificacoes').data)['notificacoes'][0]['chave']
 
     marcar = client.post('/api/notificacoes/lidas', headers={'Origin': ORIGEM_LOCAL},
@@ -507,7 +349,7 @@ def test_marcar_e_desmarcar_notificacao_como_lida(client):
 
 
 def test_marcar_como_lida_e_idempotente(client):
-    _criar_cliente_com_pagamento(client, '2020-01-01')
+    _criar_cliente_com_entrega(client, '2020-01-01')
     chave = json.loads(client.get('/api/notificacoes').data)['notificacoes'][0]['chave']
     corpo = json.dumps({'chaves': [chave]})
 
@@ -519,7 +361,7 @@ def test_marcar_como_lida_e_idempotente(client):
 
 
 def test_marcar_todas_como_lidas(client):
-    _criar_cliente_com_pagamento(client, '2020-01-01')
+    _criar_cliente_com_entrega(client, '2020-01-01')
     database.agendar_entrega(1, 'Cliente Teste', '2020-01-01', '', 'Atrasada')
     assert json.loads(client.get('/api/notificacoes').data)['nao_lidas'] >= 2
 
@@ -530,7 +372,7 @@ def test_marcar_todas_como_lidas(client):
 
 
 def test_nao_lidas_aparecem_antes_das_lidas(client):
-    _criar_cliente_com_pagamento(client, '2020-01-01')
+    _criar_cliente_com_entrega(client, '2020-01-01')
     database.agendar_entrega(1, 'Cliente Teste', '2020-01-01', '', 'Atrasada')
     notifs = json.loads(client.get('/api/notificacoes').data)['notificacoes']
     client.post('/api/notificacoes/lidas', headers={'Origin': ORIGEM_LOCAL},
@@ -560,72 +402,16 @@ def _receber(cliente_id, valor, data_pagamento, vencimento=None):
     return pagamento_id
 
 
-def test_faturamento_soma_os_dois_formatos_de_data_pagamento(client):
-    """Confirmacao manual grava 'AAAA-MM-DD'; o webhook grava com hora."""
-    from datetime import date
-    hoje = date.today()
-    cliente_id = _criar_cliente_com_pagamento(client, '2030-01-01')
-    _receber(cliente_id, 100.00, hoje.strftime('%Y-%m-%d'))
-    _receber(cliente_id, 250.00, hoje.strftime('%Y-%m-%d 14:22:10'))
-
-    fin = database.obter_metricas_financeiras()
-
-    assert fin['faturamento_mes'] == 350.00
-    assert fin['qtd_recebimentos_mes'] == 2
-    assert fin['ticket_medio_mes'] == 175.00
 
 
-def test_variacao_percentual_compara_com_mes_anterior(client):
-    from datetime import date
-    hoje = date.today()
-    mes_passado = (hoje.replace(day=1) - timedelta(days=1))
-    cliente_id = _criar_cliente_com_pagamento(client, '2030-01-01')
-    _receber(cliente_id, 200.00, mes_passado.strftime('%Y-%m-%d'))
-    _receber(cliente_id, 300.00, hoje.strftime('%Y-%m-%d'))
-
-    fin = database.obter_metricas_financeiras()
-
-    assert fin['faturamento_mes_anterior'] == 200.00
-    assert fin['variacao_percentual'] == 50.0
 
 
-def test_variacao_e_nula_sem_base_de_comparacao(client):
-    """Sem receita no mes anterior nao existe variacao: `None`, nao zero."""
-    fin = database.obter_metricas_financeiras()
-    assert fin['faturamento_mes'] == 0
-    assert fin['variacao_percentual'] is None
 
 
-def test_serie_mensal_preenche_meses_sem_receita(client):
-    fin = database.obter_metricas_financeiras(meses_historico=6)
-
-    serie = fin['serie_mensal']
-    assert len(serie) == 6, "A serie deve ter um ponto por mes, mesmo sem receita"
-    assert all('mes' in p and 'total' in p for p in serie)
-    meses = [p['mes'] for p in serie]
-    assert meses == sorted(meses), "A serie deve estar em ordem cronologica"
 
 
-def test_em_atraso_conta_apenas_vencidos_nao_pagos(client):
-    cliente_id = _criar_cliente_com_pagamento(client, '2020-01-01')   # vencido
-    database.salvar_pagamento(cliente_id, 'Cliente Teste', 999.00, 'Futuro', '2030-01-01')
-
-    fin = database.obter_metricas_financeiras()
-
-    assert fin['qtd_em_atraso'] == 1
-    assert fin['em_atraso'] == 250.00      # so o vencido
-    assert fin['a_receber'] == 1249.00     # ambos os pendentes
 
 
-def test_endpoint_de_dashboard_expoe_o_financeiro(client):
-    resposta = client.get('/api/dashboard/dados')
-
-    assert resposta.status_code == 200
-    dados = json.loads(resposta.data)
-    assert 'financeiro' in dados
-    for campo in ('faturamento_mes', 'faturamento_mes_anterior', 'variacao_percentual',
-                  'a_receber', 'em_atraso', 'ticket_medio_mes', 'serie_mensal'):
-        assert campo in dados['financeiro'], f"Falta {campo} no bloco financeiro"
 
 
 def test_dashboard_nao_exibe_mais_o_texto_atualizado():
@@ -635,92 +421,24 @@ def test_dashboard_nao_exibe_mais_o_texto_atualizado():
 
     assert 'metricAtualizado' not in html
     assert 'Atualizado:' not in html
-    # os canvases precisam existir, senao o codigo dos graficos nunca roda
-    for canvas in ('chartReceitaMensal', 'chartEntregaRetirada', 'chartCidades', 'chartTimeline'):
+    # Os canvases precisam existir, senao o codigo dos graficos nunca roda.
+    # `chartReceitaMensal` saiu na 1.5.0 com o modulo financeiro.
+    for canvas in ('chartEntregaRetirada', 'chartCidades', 'chartTimeline'):
         assert f'id="{canvas}"' in html, f"Canvas ausente: {canvas}"
+    assert 'chartReceitaMensal' not in html
 
 
-def test_relatorio_xlsx_e_gerado_pelo_endpoint(client):
-    _criar_cliente_com_pagamento(client, '2030-01-01')
-
-    resposta = client.get('/api/relatorios/exportar?formato=xlsx')
-
-    assert resposta.status_code == 200
-    assert resposta.data[:2] == b'PK'  # xlsx e um zip
 
 
 # -----------------------------------------------------------------------------
 # Varredura profunda - incoerencias de logica entre camadas
 # -----------------------------------------------------------------------------
-def test_cobranca_sem_vencimento_nao_conta_como_atrasada(client):
-    """
-    'atrasado' tinha duas definicoes no mesmo dashboard.
-
-    O schema usa DEFAULT '' para data_vencimento, e no SQLite '' e menor que
-    qualquer data: obter_metricas_pagamentos() nao filtrava a string vazia e
-    somava essa cobranca como atrasada, enquanto obter_metricas_financeiras()
-    filtrava. Os dois cards do painel mostravam numeros diferentes.
-    """
-    cliente_id = _criar_cliente_com_pagamento(client, '2020-01-01')   # vencido: 250,00
-    database.salvar_pagamento(cliente_id, 'Cliente Teste', 100.00, 'Sem vencimento', '')
-
-    pagamentos = database.obter_metricas_pagamentos()
-    financeiras = database.obter_metricas_financeiras()
-
-    assert pagamentos['total_atrasado'] == 250.00
-    assert pagamentos['total_atrasado'] == financeiras['em_atraso']
 
 
-def test_cobranca_atrasada_continua_sendo_valor_a_receber(client):
-    """
-    Vencer nao quita nem cancela: o valor segue devido.
-
-    O webhook do Asaas grava status 'Atrasado' em PAYMENT_OVERDUE, e tanto
-    total_pendente quanto a_receber olhavam so para 'Pendente'. A cobranca
-    vencia e sumia do que o painel reportava como a receber.
-    """
-    cliente_id = _criar_cliente_com_pagamento(client, '2020-01-01')
-    antes = database.obter_metricas_financeiras()['a_receber']
-
-    with database.conectar() as conexao:
-        conexao.execute("UPDATE pagamentos SET status='Atrasado' WHERE cliente_id=?", (cliente_id,))
-
-    depois = database.obter_metricas_financeiras()
-    assert depois['a_receber'] == antes
-    assert database.obter_metricas_pagamentos()['total_pendente'] == antes
 
 
-def test_pagamento_para_cliente_inexistente_responde_404(client):
-    """
-    Antes subia IntegrityError da foreign key e virava 500 generico.
-
-    O mesmo caso em /api/entregas ja respondia 404, e o API_STANDARD.md
-    documenta 404 para "Cliente, pagamento ou entrega inexistente".
-    """
-    resposta = client.post('/api/pagamentos', headers={'Origin': ORIGEM_LOCAL},
-        data=json.dumps({
-            "cliente_id": 999999, "cliente_nome": "Fantasma", "valor": 10.0,
-            "descricao": "x", "data_vencimento": "2030-01-01", "tipo_pagamento": "Pix",
-        }), content_type='application/json')
-
-    assert resposta.status_code == 404
-    assert json.loads(resposta.data)['erro'] == "Cliente nao encontrado."
 
 
-def test_cliente_id_gigante_nao_vira_erro_interno(client):
-    """
-    validar_entrega ja usava inteiro_positivo(), que barra acima do INTEGER de
-    64 bits do SQLite; validar_pagamento fazia a checagem na mao e deixava
-    passar, e o sqlite3 levantava OverflowError -> 500.
-    """
-    resposta = client.post('/api/pagamentos', headers={'Origin': ORIGEM_LOCAL},
-        data=json.dumps({
-            "cliente_id": 10 ** 25, "cliente_nome": "X", "valor": 10.0,
-            "descricao": "x", "data_vencimento": "2030-01-01", "tipo_pagamento": "Pix",
-        }), content_type='application/json')
-
-    assert resposta.status_code == 400
-    assert "Cliente invalido." in json.loads(resposta.data)['detalhes']
 
 
 def test_entrega_cancelada_nao_gera_alerta(client):
@@ -729,7 +447,7 @@ def test_entrega_cancelada_nao_gera_alerta(client):
     status valido em blueprints/entregas.py: a entrega cancelada continuava
     aparecendo como agendada e, passada a data, como ENTREGA ATRASADA.
     """
-    cliente_id = _criar_cliente_com_pagamento(client, '2030-01-01')
+    cliente_id = _criar_cliente_com_entrega(client, '2030-01-01')
     entrega_id = database.agendar_entrega(cliente_id, 'Cliente Teste', '2020-01-01', '', 'Poltrona')
 
     assert any(n['tipo'] == 'entrega_atrasada' for n in database.obter_notificacoes())
@@ -776,8 +494,6 @@ def test_erro_do_dashboard_nao_vaza_detalhe_interno(client, monkeypatch):
 # SEGURANCA, nem o log que o QUICK_REFERENCE manda o operador enviar quando
 # algo da errado.
 # =============================================================================
-NOMES_DE_LOGGER = ['adri.app', 'adri.asaas', 'adri.security', 'adri.db',
-                   'adri.capacidade']
 
 
 def _migrar_em_banco_novo(tmp_path, monkeypatch):
@@ -786,6 +502,12 @@ def _migrar_em_banco_novo(tmp_path, monkeypatch):
     monkeypatch.setenv('ADRI_DB_PATH', str(tmp_path / 'migrar.db'))
     monkeypatch.setattr(database, 'DB_PATH', str(tmp_path / 'migrar.db'))
     migrations_manager.aplicar_migrações()
+
+
+# Loggers que o aplicativo cria e que a migracao nao pode emudecer.
+# `adri.asaas` saiu da lista junto com a integracao.
+NOMES_DE_LOGGER = ['adri.app', 'adri.security', 'adri.db', 'adri.capacidade',
+                   'adri.licenca']
 
 
 def test_a_migracao_nao_desliga_os_loggers_do_aplicativo(tmp_path, monkeypatch):

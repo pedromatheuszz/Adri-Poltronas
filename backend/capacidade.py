@@ -79,8 +79,6 @@ BYTES_DO_TOKEN = 32
 
 # Rotas que precisam responder sem o token, e por que cada uma:
 #
-#   /api/pagamentos/webhook -- chamado pelo Asaas, de fora. Tem autenticacao
-#       propria (ASAAS_WEBHOOK_TOKEN), que e o controle correto para ele.
 #   /callback -- o redirect do OAuth Microsoft chega pelo navegador do
 #       sistema, que nao tem como carregar o cabecalho. Nao expoe dado: so
 #       troca o `code` por token.
@@ -88,7 +86,6 @@ BYTES_DO_TOKEN = 32
 #       Electron consiga descobrir SE o servidor na porta e este aplicativo e
 #       se aceita a capacidade apresentada. Nao devolve dado de negocio.
 ROTAS_ISENTAS = frozenset({
-    "/api/pagamentos/webhook",
     "/callback",
     "/api/health",
 })
