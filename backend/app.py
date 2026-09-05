@@ -332,8 +332,14 @@ def _semear_cookie_de_capacidade(resposta):
 
     HttpOnly para script nenhum conseguir ler; SameSite=Strict para nenhuma
     outra origem conseguir provocar o envio.
+
+    Em TESTING nao semeia, pelo mesmo motivo que `_exigir_capacidade` nao
+    exige: a suite nao carrega token. Antes isto era implicito -- sem a
+    variavel de ambiente, `esta_ativa()` devolvia False e a funcao caia fora
+    sozinha. Agora que a exigencia e sempre ligada, a isencao precisa estar
+    escrita.
     """
-    if not capacidade.esta_ativa():
+    if app.config.get('TESTING') or not capacidade.esta_ativa():
         return resposta
     if not capacidade.confere(request.headers.get(capacidade.NOME_DO_HEADER)):
         return resposta
@@ -395,10 +401,23 @@ def _erro_http(e):
 
 
 # ---------------------------------------------------------------------------
-# AUTH MIDDLEWARE - Verifica sessao em rotas que alteram estado
+# AUTH MIDDLEWARE - Verifica sessao em TODA a API
 # ---------------------------------------------------------------------------
+# Cada rota desta lista responde antes de existir sessao, e por um motivo:
+#
+#   /api/auth/login, /api/auth/status, /api/auth/logout, /callback
+#       -- sao o proprio fluxo de login. Exigir sessao neles seria pedir a
+#          chave para entregar a chave.
+#   /api/health -- e a sonda de identidade. O Electron e o app Qt perguntam a
+#          ela QUEM esta na porta antes de adotar o backend, e isso acontece
+#          muito antes de qualquer login. Nao devolve dado de negocio.
+#   /api/pagamentos/webhook -- chega do Asaas, de fora, e tem autenticacao
+#          propria (ASAAS_WEBHOOK_TOKEN).
+#   /, /manifest.json, /sw.js -- e a casca da PWA, que precisa carregar para
+#          o operador ter onde clicar em "Conectar".
 ROTAS_SEM_AUTH = frozenset({
     '/api/auth/login', '/api/auth/status', '/api/auth/logout',
+    '/api/health',
     '/', '/manifest.json', '/sw.js',
     '/callback', '/api/pagamentos/webhook',
 })
@@ -406,8 +425,24 @@ ROTAS_SEM_AUTH = frozenset({
 
 def _verificar_autenticacao():
     """
-    Verifica se o usuario esta autenticado antes de operacoes que alteram estado.
-    Em modo TESTING, permite todas as requisicoes para manter compatibilidade com testes.
+    Exige sessao em todo o /api/, leitura inclusive.
+
+    Ate a 1.3.0 o bloqueio valia so para metodos que alteram estado, e QUALQUER
+    GET em /api/ respondia sem sessao. Isso nao era uma folga pequena: as rotas
+    que entregam dados pessoais em bloco sao todas GET -- /api/clientes,
+    /api/clientes/mapa, /api/pagamentos, /api/relatorios/exportar e, o pior
+    caso, /api/backup/sqlite, que devolve uma copia integral do banco com
+    nome, CEP e endereco de todos os clientes.
+
+    Fechar a leitura nao muda o que o operador consegue fazer: sem sessao ele
+    ja nao conseguia cadastrar, editar nem apagar nada, porque a autenticacao
+    deste ERP e a sessao Microsoft (limitacao conhecida, registrada em
+    CONTRIBUTING.md). O que muda e que a conta de quem le passa a ser a mesma
+    de quem escreve.
+
+    Em modo TESTING, permite todas as requisicoes para manter compatibilidade
+    com testes -- ver test_autenticacao.py, que desliga o modo justamente para
+    exercitar este guarda.
     """
     if app.config.get('TESTING'):
         return None
@@ -423,7 +458,10 @@ def _verificar_autenticacao():
         g.erp_usuario_identificador = sessao.get('conta', '')
         return None
 
-    if request.path.startswith('/api/') and request.method not in ('GET', 'OPTIONS'):
+    # OPTIONS fica de fora porque e o preflight do proprio navegador: ele nao
+    # carrega credencial nenhuma por definicao, e responder 401 nele so faz a
+    # requisicao real nem chegar a ser tentada.
+    if request.path.startswith('/api/') and request.method != 'OPTIONS':
         log.warning("[AUTH] Requisicao sem sessao bloqueada: %s %s", request.method, request.path)
         security.log_evento_seguro("AUTH_BLOQUEIO", f"Sem sessao: {request.method} {request.path}", "warning")
         return jsonify({"erro": "Autenticacao necessaria."}), 401
