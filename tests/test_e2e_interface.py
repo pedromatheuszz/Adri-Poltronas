@@ -695,3 +695,44 @@ def test_licenca_vigente_nao_mostra_o_painel(pagina):
     """A direcao oposta: bloquear quem esta em dia seria a regressao inversa."""
     assert not pagina.locator("#painelLicenca").is_visible()
     assert pagina.locator("#aba-dashboard").is_visible()
+
+
+# =============================================================================
+# Identificacao de versao beta
+#
+# O README, a descricao do repositorio e a pagina de releases ja avisam que
+# isto e beta -- mas quem usa o app instalado nunca ve nenhum dos tres. O selo
+# fecha essa lacuna no unico lugar onde o operador realmente esta.
+# =============================================================================
+def test_o_selo_de_beta_aparece_na_interface(pagina):
+    selo = pagina.locator("#seloBeta")
+    assert selo.is_visible()
+    assert selo.inner_text().strip() == "BETA"
+
+
+def test_o_selo_carrega_a_versao_exata_do_backend(pagina):
+    """
+    A versao vai no `title`, e nao no texto: o selo precisa caber ao lado da
+    marca. E vem de /api/health, que a le do package.json -- se fosse escrita
+    a mao no HTML, um dia discordaria da versao real e ninguem perceberia.
+    """
+    pagina.wait_for_function(
+        "() => (document.getElementById('seloBeta')?.title || '').includes('1.')",
+        timeout=10000,
+    )
+    titulo = pagina.locator("#seloBeta").get_attribute("title")
+    assert "beta" in titulo.lower(), f"a versao no selo nao indica beta: {titulo}"
+
+
+def test_a_versao_do_pacote_declara_pre_lancamento():
+    """
+    O sufixo `-beta` no package.json e o que faz o instalador sair como
+    `AdriPoltronasSetup-1.4.0-beta.exe` e a sonda /api/health reportar beta.
+    Sem ele, o aviso viveria so na documentacao e o artefato entregue diria
+    que e uma versao final.
+    """
+    import json
+    caminho = os.path.join(RAIZ, "package.json")
+    with open(caminho, encoding="utf-8") as arquivo:
+        versao = json.load(arquivo)["version"]
+    assert "-beta" in versao, f"package.json declara {versao}, sem marca de pre-lancamento"
