@@ -1,8 +1,5 @@
 Adri Poltronas
-
-<p align="center">
-  <strong>Sistema de gestão para organizar clientes, locações, entregas, pagamentos e a rotina diária da Adri Poltronas.</strong>
-</p>
+Sistema desktop para organizar clientes, locações, pedidos, entregas, pagamentos e a rotina diária da Adri Poltronas.
 
 ---
 
@@ -31,588 +28,343 @@ Adri Poltronas
 
 ---
 
-Sobre o Adri Poltronas
-
-O Adri Poltronas é um aplicativo desktop para Windows desenvolvido especialmente para a rotina da Adri, empresa que trabalha com a locação de poltronas elétricas com elevação, muito utilizadas por pessoas em recuperação e em períodos de pós-operatório.
-
-O sistema foi criado para facilitar o gerenciamento do negócio, centralizando informações importantes e reduzindo a dependência de planilhas, anotações, mensagens e controles manuais.
-
-Seu principal objetivo é oferecer mais controle, organização e praticidade no dia a dia.
-
-Com o Adri Poltronas, é possível acompanhar em um único lugar:
-
-- clientes;
-- pedidos e locações;
-- modelos de poltronas;
-- entregas e retiradas;
-- pagamentos;
-- valores pendentes;
-- informações financeiras;
-- localização dos clientes;
-- relatórios;
-- alertas importantes da operação.
-
----
-
-Objetivo do sistema
-
-O Adri Poltronas foi pensado para ajudar a responder rapidamente perguntas importantes do dia a dia, como:
-
-- O que foi combinado com cada cliente?
-- Quais pedidos estão em andamento?
-- O que precisa ser entregue hoje?
-- Existem entregas atrasadas?
-- Quais clientes ainda precisam pagar?
-- Existem pagamentos vencidos?
-- Quanto foi faturado?
-- Quais cidades possuem mais clientes?
-- Quais tarefas precisam de atenção agora?
-
-A ideia é tornar a operação mais organizada e diminuir a necessidade de lembrar manualmente de cada detalhe.
-
----
-
-Como usar no dia a dia
-
-Uma forma prática de utilizar o sistema é seguir este fluxo:
-
-1. Cadastre ou localize o cliente.
-2. Confira o modelo de poltrona necessário.
-3. Crie o pedido ou locação.
-4. Informe os valores e o prazo combinado.
-5. Aprove o pedido quando a negociação estiver confirmada.
-6. Agende a entrega ou retirada.
-7. Registre ou acompanhe os pagamentos.
-8. Atualize o andamento das entregas.
-9. Consulte o Dashboard para acompanhar o negócio.
-10. Use o Mapa e os Relatórios quando precisar de uma visão mais detalhada.
-
-O ideal é atualizar o sistema conforme as atividades acontecem.
-
-Assim, as informações exibidas permanecem confiáveis.
-
----
-
-Abas do aplicativo
-
-O sistema possui oito áreas principais:
-
-- Dashboard
-- Pedidos
-- Clientes
-- Produtos
-- Entregas
-- Mapa
-- Pagamentos
-- Relatórios
-
----
-
-1. Dashboard
-
-O Dashboard apresenta uma visão geral da situação atual do negócio.
-
-É uma das melhores telas para abrir no início do dia.
-
-Ele permite visualizar informações como:
-
-- quantidade de clientes;
-- entregas e retiradas;
-- novos cadastros;
-- faturamento;
-- valores a receber;
-- pagamentos atrasados;
-- ticket médio;
-- informações recentes;
-- gráficos de desempenho.
-
-Como usar
-
-Use o Dashboard para entender rapidamente como está a operação.
-
-Ele pode ajudar a identificar:
-
-- problemas que precisam de atenção;
-- valores em atraso;
-- movimentações recentes;
-- evolução do faturamento;
-- crescimento da base de clientes.
-
-O Dashboard é principalmente uma tela de acompanhamento.
-
----
-
-2. Pedidos
-
-A aba Pedidos concentra as negociações e locações realizadas com os clientes.
-
-Ela é uma das partes mais importantes do sistema, pois reúne informações como:
-
-- cliente;
-- poltrona ou item;
-- quantidade;
-- valor;
-- desconto;
-- frete;
-- total;
-- prazo combinado;
-- observações.
-
-Status do pedido
-
-O pedido pode passar por diferentes etapas:
-
-Rascunho
-
-Utilizado enquanto o pedido ainda está sendo preparado.
-
-Aberto
-
-Pedido registrado e aguardando confirmação.
-
-Aprovado
-
-A negociação foi confirmada e pode seguir para a entrega.
-
-Faturado
-
-Os valores do pedido já foram encaminhados para o controle financeiro.
-
-Cancelado
-
-O pedido foi encerrado sem seguir o fluxo normal.
-
-Como usar
-
-O pedido deve ser a principal referência da negociação.
-
-Sempre que possível, registre nele tudo o que foi combinado com o cliente.
-
-Isso facilita consultas futuras e evita depender de mensagens antigas ou anotações.
-
----
-
-3. Clientes
-
-A aba Clientes reúne os dados das pessoas atendidas pela Adri.
-
-Cada cliente pode posteriormente ser relacionado a:
-
-- pedidos;
-- entregas;
-- pagamentos;
-- mapa;
-- relatórios.
-
-O que é possível fazer
-
-É possível:
-
-- cadastrar clientes;
-- editar informações;
-- pesquisar;
-- filtrar;
-- importar cadastros;
-- exportar informações.
-
-Endereço
-
-Manter o endereço correto é especialmente importante.
-
-Informações como:
-
-- CEP;
-- rua;
-- bairro;
-- cidade;
-
-ajudam não apenas no cadastro, mas também no planejamento das entregas e no uso do Mapa.
-
-Como usar
-
-Antes de cadastrar um cliente novo, faça uma pesquisa para verificar se ele já existe.
-
-Isso ajuda a evitar cadastros duplicados.
-
----
-
-4. Produtos
-
-A aba Produtos reúne os modelos de poltronas ou itens utilizados nos pedidos.
-
-Cada produto pode possuir informações como:
-
-- código;
-- descrição;
-- unidade;
-- preço.
-
-Como usar
-
-É importante manter uma nomenclatura organizada.
-
-Por exemplo, evite cadastrar várias vezes o mesmo modelo com nomes diferentes.
-
-Prefira um padrão único para facilitar:
-
-- buscas;
-- pedidos;
-- relatórios;
-- organização.
-
-Importante sobre estoque
-
-Atualmente, a aba Produtos funciona principalmente como um catálogo.
-
-O sistema ainda não possui um controle completo de estoque físico com recursos como:
-
-- quantidade disponível;
-- quantidade locada;
-- entradas;
-- saídas;
-- reserva automática de poltronas.
-
-Esse tipo de controle pode ser desenvolvido futuramente.
-
----
-
-5. Entregas
-
-A aba Entregas funciona como a agenda da operação.
-
-Ela ajuda a responder uma pergunta simples e importante:
-
-«O que precisa ser entregue ou retirado hoje?»
-
-As entregas podem ser organizadas por data e situação.
-
-Status
-
-Uma entrega pode estar como:
-
-- Pendente;
-- Em andamento;
-- Concluída;
-- Cancelada.
-
-Como usar
-
-No início do dia, consulte primeiro:
-
-1. entregas atrasadas;
-2. entregas de hoje;
-3. retiradas programadas;
-4. compromissos pendentes.
-
-Ao iniciar uma atividade, atualize o status.
-
-Quando ela terminar, marque como concluída.
-
-Isso mantém a agenda organizada e evita compromissos antigos aparecendo como pendentes.
-
----
-
-6. Mapa
-
-A aba Mapa apresenta visualmente a distribuição dos clientes.
-
-Ela pode ajudar a entender melhor onde estão concentradas as entregas e retiradas.
-
-Utilizações práticas
-
-O mapa pode ser útil para:
-
-- identificar clientes próximos;
-- planejar deslocamentos;
-- agrupar entregas na mesma região;
-- visualizar cidades com mais clientes;
-- apoiar a organização da logística.
-
-Como usar
-
-Antes de organizar várias entregas, consulte o mapa.
-
-Se dois ou mais clientes estiverem próximos, pode ser possível montar uma sequência de atendimento mais eficiente.
-
-Para isso, mantenha os endereços dos clientes corretos.
-
----
-
-7. Pagamentos
-
-A aba Pagamentos ajuda a controlar os valores relacionados aos pedidos.
-
-Ela permite acompanhar:
-
-- valores;
-- vencimentos;
-- situação dos pagamentos;
-- forma de pagamento;
-- cliente;
-- pedido relacionado.
-
-Status
-
-Os pagamentos podem aparecer como:
-
-- Pendente;
-- Recebido;
-- Atrasado;
-- Cancelado.
-
-Parcelas
-
-Um pedido pode gerar mais de uma parcela.
-
-Esses valores passam a fazer parte do acompanhamento financeiro.
-
-Pix e boleto
-
-Quando o recurso estiver configurado, o sistema também pode auxiliar na geração de cobranças por:
-
-- Pix;
-- boleto.
-
-Como usar
-
-Consulte essa aba diariamente.
-
-Dê prioridade para:
-
-1. pagamentos atrasados;
-2. pagamentos que vencem hoje;
-3. próximos vencimentos;
-4. conferência de valores recebidos.
-
-Quando um pagamento for realizado, mantenha sua situação atualizada.
-
----
-
-8. Relatórios
-
-A aba Relatórios permite analisar as informações cadastradas de forma mais detalhada.
-
-É possível consultar dados utilizando filtros como:
-
-- cidade;
-- tipo;
-- período.
-
-Também é possível exportar informações quando necessário.
-
-Exemplos de uso
-
-Os relatórios podem ajudar a responder perguntas como:
-
-- Quantos clientes existem em determinada cidade?
-- Quais atendimentos aconteceram em determinado período?
-- Qual região possui mais clientes?
-- Como foi o movimento em determinado mês?
-- Quais informações precisam ser analisadas separadamente?
-
-Como usar
-
-Primeiro escolha os filtros.
-
-Depois analise apenas os dados necessários.
-
-Isso torna a consulta mais simples e evita trabalhar com informações que não são relevantes naquele momento.
-
----
-
+Sobre o software
+O Adri Poltronas é um aplicativo desktop profissional para Windows, inspirado em sistemas de gestão empresarial e desenvolvido especialmente para a rotina da Adri Poltronas, empresa que realiza a locação de poltronas elétricas com elevação, muito utilizadas durante períodos de recuperação e pós-operatório.
+O aplicativo centraliza as principais informações do negócio em um só lugar. Ele ajuda a reduzir a dependência de planilhas separadas, anotações, mensagens antigas e controles manuais, oferecendo mais organização, agilidade e segurança para acompanhar cada atendimento.
+Seu objetivo principal é facilitar o gerenciamento e o controle da operação, permitindo acompanhar:
+clientes e endereços;
+pedidos e locações;
+modelos de poltronas e demais itens do catálogo;
+entregas e retiradas;
+cobranças, parcelas e recebimentos;
+valores a receber e pagamentos em atraso;
+indicadores financeiros e operacionais;
+localização dos clientes;
+relatórios e alertas importantes.
+Importante: na versão atual, a aba Produtos funciona como catálogo de itens usados nos pedidos. O controle físico de estoque — quantidade total, disponível, locada, movimentações e reservas automáticas — ainda não está completo.
+Sumário
+Primeiros passos
+Como navegar pelo aplicativo
+Fluxo recomendado de trabalho
+Dashboard
+Pedidos
+Clientes
+Produtos
+Entregas
+Mapa
+Pagamentos
+Relatórios
 Notificações
-
-O sistema também possui alertas importantes para a rotina.
-
-Entre eles:
-
-Alerta| Prioridade
-Entrega atrasada| Crítica
-Entrega hoje| Alta
-Pagamento atrasado| Alta
-Entrega nos próximos 3 dias| Média
-Pagamento vence hoje| Média
-Cliente sem movimento há 90 dias| Baixa
-
-Como usar
-
-Dê prioridade aos alertas mais importantes.
-
-Uma boa ordem é:
-
-1. Críticos
-2. Altos
-3. Médios
-4. Baixos
-
-Assim, o sistema ajuda a indicar o que merece atenção primeiro.
-
----
-
-Exemplo de rotina diária
-
-No início do dia
-
-Confira:
-
-- Dashboard;
-- Entregas;
-- Pagamentos;
-- Notificações.
-
-Veja primeiro o que está atrasado ou vence no mesmo dia.
-
-Ao atender um novo cliente
-
-1. Pesquise se ele já está cadastrado.
-2. Cadastre, caso seja necessário.
-3. Crie o pedido.
-4. Selecione a poltrona.
-5. Informe valores e prazo.
-6. Salve as informações combinadas.
-
-Quando a locação for confirmada
-
-1. Aprove o pedido.
-2. Agende a entrega.
-3. Confira a data e o endereço.
-
-No momento da cobrança
-
-1. Fature o pedido, quando necessário.
-2. Confira os valores.
-3. Acompanhe os vencimentos.
-4. Atualize os pagamentos recebidos.
-
-Depois de realizar uma entrega
-
-Marque o compromisso como concluído.
-
-No final do dia
-
-Faça uma última conferência de:
-
-- entregas em aberto;
-- pagamentos pendentes;
-- alertas;
-- Dashboard.
-
----
-
-Como aproveitar melhor o sistema
-
-O Adri Poltronas funciona melhor quando as informações são atualizadas no momento em que a operação acontece.
-
-Por exemplo:
-
-Se uma negociação ficar apenas no WhatsApp e não for cadastrada, ela não aparecerá corretamente nos controles.
-
-Se uma entrega já realizada continuar como pendente, ela continuará aparecendo na agenda.
-
-Se um pagamento já recebido não for atualizado, ele continuará aparecendo como valor pendente.
-
-Por isso, o fluxo ideal é:
-
-Registrar
-   ↓
-Acompanhar
-   ↓
-Atualizar
-   ↓
-Concluir
-   ↓
-Analisar
-
----
-
-Benefícios para a operação
-
-Utilizado corretamente, o sistema ajuda a reduzir situações como:
-
-- “Esqueci de cobrar esse cliente.”
-- “Não lembrava que essa entrega era hoje.”
-- “Qual foi o valor combinado?”
-- “Esse cliente já alugou antes?”
-- “Esse pedido já foi confirmado?”
-- “Quanto ainda temos para receber?”
-- “Quais entregas estão atrasadas?”
-- “Qual cidade possui mais clientes?”
-
-A ideia é que essas respostas estejam no sistema e não dependam apenas de memória ou mensagens antigas.
-
----
-
+Importação, exportação e backup
+Atalhos de teclado
+Rotina diária recomendada
+Boas práticas
 Limitações atuais
-
-Algumas funcionalidades ainda não fazem parte da versão atual.
-
-Entre elas:
-
-- controle completo da quantidade física de poltronas;
-- quantidade disponível e quantidade locada;
-- reserva automática de equipamentos;
-- movimentação de estoque;
-- compras;
-- contas a pagar;
-- controle de manutenção das poltronas;
-- contratos digitais;
-- emissão de nota fiscal;
-- controle completo de usuários e permissões.
-
-Esses recursos podem fazer parte de futuras evoluções.
-
----
-
-Possíveis evoluções
-
-O sistema pode futuramente incluir recursos como:
-
-- quantidade total de poltronas;
-- quantidade disponível;
-- quantidade atualmente locada;
-- disponibilidade por período;
-- reserva automática;
-- histórico individual de cada poltrona;
-- identificação de cada equipamento;
-- controle de manutenção;
-- controle de avarias;
-- contratos de locação;
-- assinatura digital;
-- agenda automática de retirada;
-- despesas;
-- fornecedores;
-- contas a pagar;
-- fluxo de caixa;
-- indicadores mais avançados.
-
----
-
-Ideia central do projeto
-
-O Adri Poltronas existe para que a operação dependa cada vez menos de:
-
-- memória;
-- anotações soltas;
-- mensagens antigas;
-- planilhas separadas;
-- conferências manuais.
-
-E cada vez mais de:
-
-- organização;
-- controle;
-- processos;
-- informações confiáveis;
-- histórico;
-- indicadores;
-- automações.
-
-O principal objetivo é permitir que a equipe saiba com clareza:
-
-O que já aconteceu
-        ↓
-O que está acontecendo
-        ↓
-O que ainda precisa acontecer
-
-O Adri Poltronas foi criado para ajudar a tornar o gerenciamento das locações mais simples, organizado e confiável, dando à empresa uma base melhor para controlar a operação e continuar crescendo.
+Dúvidas comuns
+Primeiros passos
+Instalação
+Acesse a página de versões do Adri Poltronas.
+Baixe o instalador oficial para Windows.
+Execute o instalador e siga as instruções apresentadas.
+Abra o Adri Poltronas pelo atalho criado no Windows.
+Aguarde alguns segundos até que o Dashboard seja exibido.
+Use somente instaladores obtidos pelo repositório oficial ou fornecidos diretamente pelo responsável pelo sistema.
+Preparação inicial
+Antes de registrar a primeira locação, recomenda-se:
+cadastrar os modelos de poltronas na aba Produtos;
+cadastrar ou importar os clientes existentes;
+conferir endereços, cidades e tipos de atendimento;
+criar um backup inicial;
+configurar, com o responsável pelo sistema, as integrações opcionais de Microsoft/Excel e Asaas.
+Como navegar pelo aplicativo
+As áreas principais ficam no menu lateral esquerdo, organizadas por assunto:
+Grupo
+Abas
+Visão geral
+Dashboard
+Comercial
+Pedidos, Clientes e Produtos
+Operacional
+Entregas e Mapa
+Financeiro
+Pagamentos
+Análise
+Relatórios
+O menu pode ser recolhido para aumentar a área de trabalho. Na parte superior ficam o indicador de conexão, o botão de notificações e a opção de alternar entre tema claro e escuro.
+Fluxo recomendado de trabalho
+Para manter todas as informações relacionadas, utilize esta sequência:
+Localize ou cadastre o cliente.
+Confira o produto que será incluído na locação.
+Crie o pedido e informe data prevista, desconto, frete e observações.
+Salve o pedido antes de adicionar os itens.
+Adicione a poltrona, quantidade, descrição personalizada e preço.
+Abra e aprove o pedido quando a negociação estiver confirmada.
+Agende a entrega ou retirada e confira data, horário e endereço.
+Fature o pedido para gerar as parcelas na aba Pagamentos.
+Acompanhe e confirme os recebimentos.
+Atualize o andamento da entrega até sua conclusão.
+Consulte o Dashboard, o Mapa e os Relatórios para acompanhar os resultados.
+Registrar cada mudança no momento em que ela acontece mantém os indicadores, alertas e valores pendentes confiáveis.
+Abas do aplicativo
+1. Dashboard
+O Dashboard apresenta uma visão resumida da operação. É a melhor tela para consultar no início e no final do dia.
+O que é exibido
+total de clientes cadastrados;
+cadastros classificados como entrega ou retirada;
+novos clientes dos últimos 30 dias;
+faturamento do mês e comparação com o mês anterior;
+total a receber;
+total em atraso;
+ticket médio do mês;
+gráfico de receita por mês;
+distribuição entre entregas e retiradas;
+cidades com mais clientes;
+evolução dos novos cadastros;
+clientes cadastrados recentemente.
+Como usar de forma eficiente
+Comece pelos valores em atraso e pelas tarefas que vencem no dia.
+Compare o faturamento com o mês anterior para identificar mudanças.
+Use as cidades com maior concentração de clientes para apoiar ações comerciais e logísticas.
+Se um número parecer incorreto, confira se pedidos, pagamentos e entregas foram atualizados corretamente.
+2. Pedidos
+A aba Pedidos concentra as negociações e locações realizadas com os clientes. Cada pedido recebe um número e reúne cliente, itens, valores, previsão de entrega e observações.
+Criar um pedido
+Clique em Novo Pedido.
+Selecione o cliente.
+Informe a data prevista de entrega, quando houver.
+Preencha desconto, frete e observações.
+Clique em Salvar pedido.
+Depois de salvar, selecione o produto e informe quantidade, preço unitário e detalhes como tecido, acabamento ou medida.
+Clique em Adicionar para incluir o item.
+Confira total dos itens, desconto, frete e valor final.
+Um pedido precisa ser salvo antes que seus itens possam ser adicionados.
+Situações do pedido
+Situação
+Significado
+Rascunho
+Pedido ainda em preparação e com informações editáveis.
+Aberto
+Pedido registrado e aguardando confirmação.
+Aprovado
+Negociação confirmada; a entrega pode ser agendada.
+Faturado
+Parcelas geradas em Pagamentos; o pedido deixa de aceitar alterações.
+Cancelado
+Pedido encerrado e mantido apenas no histórico.
+Ao faturar, informe a quantidade de parcelas, o primeiro vencimento e a forma de pagamento. O sistema criará os lançamentos correspondentes na aba Pagamentos.
+Confira itens, preço, desconto, frete e vencimentos antes de faturar. Depois dessa etapa, o pedido não pode mais ser alterado pela tela.
+Use a pesquisa por número ou cliente e o filtro por situação para localizar pedidos rapidamente.
+3. Clientes
+A aba Clientes reúne os dados das pessoas atendidas. O cadastro correto é a base para pedidos, agenda, mapa, pagamentos e relatórios.
+Informações do cadastro
+nome completo;
+CEP;
+rua e número;
+bairro;
+cidade;
+tipo de atendimento: entrega ou retirada;
+observações importantes para a operação.
+Recursos disponíveis
+cadastrar e editar clientes;
+pesquisar por nome e outras informações;
+aplicar e limpar filtros;
+selecionar vários registros;
+carregar mais resultados quando a lista for extensa;
+importar clientes em lote;
+exportar dados para Excel pela integração Microsoft;
+criar backup completo do banco;
+restaurar uma cópia anterior;
+consultar o histórico de alterações.
+Antes de cadastrar uma pessoa, pesquise pelo nome para evitar duplicidade. Mantenha CEP, rua, bairro e cidade completos, pois esses dados também são usados pelo Mapa e pelo planejamento das entregas.
+4. Produtos
+A aba Produtos é o catálogo dos modelos de poltronas e demais itens que podem ser adicionados aos pedidos.
+Cada produto pode conter:
+código único;
+descrição;
+unidade, como unidade, peça ou conjunto;
+preço de venda padrão;
+observações.
+O preço cadastrado serve como referência ao adicionar o produto a um pedido. Se a negociação exigir um valor ou uma configuração diferente, os detalhes podem ser informados no próprio item do pedido.
+Adote códigos e nomes padronizados. Por exemplo, evite cadastrar o mesmo modelo com grafias diferentes, pois isso dificulta pesquisas e análises.
+Sobre o estoque
+Esta área ainda não controla automaticamente quantidade disponível, equipamentos locados, entradas, saídas ou reservas por período. Para não confundir catálogo com disponibilidade real, confirme a disponibilidade física da poltrona antes de aprovar a locação.
+5. Entregas
+A aba Entregas funciona como agenda operacional. Ela organiza compromissos por data e destaca itens atrasados, de hoje, de amanhã e dos próximos dias.
+Agendar uma entrega
+Abra um pedido aprovado e use Agendar entrega, ou clique em Agendar Entrega na própria aba.
+Selecione o cliente.
+Vincule o pedido, quando existir.
+Informe data, horário e descrição.
+Confira os dados e clique em Agendar.
+O vínculo com o pedido facilita a consulta das informações da negociação diretamente pela agenda.
+Situações da entrega
+Situação
+Uso recomendado
+Pendente
+Compromisso agendado, ainda não iniciado.
+Em andamento
+Equipe realizando o atendimento.
+Concluída
+Entrega ou retirada finalizada.
+Cancelada
+Compromisso que não será realizado.
+O filtro padrão mostra os compromissos em aberto. Atualize o status assim que a atividade começar ou terminar para evitar que tarefas concluídas continuem aparecendo como pendentes.
+6. Mapa
+A aba Mapa mostra a distribuição geográfica dos clientes. Os marcadores diferenciam cadastros de entrega e retirada e podem apresentar nome, CEP, rua, bairro e cidade.
+Use o mapa para:
+localizar clientes próximos;
+agrupar atendimentos da mesma região;
+planejar uma sequência de deslocamentos;
+identificar cidades com maior concentração de clientes;
+reduzir trajetos desnecessários.
+O mapa e a localização dos endereços dependem de acesso à internet. Se um cliente não aparecer, revise CEP, rua, bairro e cidade no cadastro. O carregamento inicial de muitos endereços pode levar alguns instantes.
+7. Pagamentos
+A aba Pagamentos reúne parcelas geradas pelo faturamento dos pedidos e recebimentos registrados manualmente.
+O que pode ser feito
+filtrar lançamentos por cliente e situação;
+consultar valor, descrição, forma e data;
+registrar um novo recebimento manual;
+acompanhar pagamentos pendentes e atrasados;
+confirmar ou cancelar lançamentos, quando permitido;
+gerar cobrança por Pix ou boleto quando o Asaas estiver configurado;
+conciliar cobranças com o Asaas.
+Situações do pagamento
+Situação
+Significado
+Pendente
+Valor lançado, ainda aguardando pagamento.
+Recebido
+Pagamento confirmado.
+Atrasado
+Vencimento ultrapassado sem confirmação.
+Cancelado
+Cobrança encerrada sem recebimento.
+Para registrar um recebimento manual, selecione o cliente, informe valor, data, forma de pagamento, situação e uma descrição. Use a descrição para identificar parcelas, acordos ou outras informações importantes.
+Marque um pagamento como recebido somente depois de conferir o valor. Quando houver cobrança integrada, prefira a conciliação com o Asaas. Confirmações realizadas fora do gateway podem exigir um motivo para ficar registrado no histórico.
+8. Relatórios
+A aba Relatórios permite consultar informações de clientes e atendimentos usando filtros específicos.
+É possível filtrar por:
+tipo de atendimento;
+cidade;
+data inicial;
+data final.
+Depois de aplicar os filtros, o sistema mostra uma prévia com nome, cidade, bairro, tipo, CEP e data de criação, além da análise de desempenho por região.
+O resultado pode ser exportado em CSV ou Excel (XLSX). Para uma análise mais clara, escolha primeiro o período e a região desejados, visualize os dados e somente depois faça a exportação.
+Notificações
+O sino no canto superior da tela abre o painel de notificações. O número exibido representa os alertas ainda não lidos.
+O sistema pode avisar sobre:
+Alerta
+Prioridade
+Entrega atrasada
+Crítica
+Entrega prevista para hoje
+Alta
+Pagamento atrasado
+Alta
+Entrega nos próximos três dias
+Média
+Pagamento com vencimento hoje
+Média
+Cliente sem movimentação há 90 dias
+Baixa
+Trate primeiro alertas críticos e altos. Depois de verificar um aviso, marque-o como lido para que o contador represente apenas as pendências novas. O botão Atualizar refaz a consulta.
+Importação, exportação e backup
+Importar clientes
+A importação aceita arquivos CSV, JSON e XLSX. A primeira linha deve conter os nomes das colunas.
+Antes de importar:
+faça um backup;
+confira se a planilha possui cabeçalhos;
+padronize nomes, CEPs e cidades;
+remova linhas duplicadas quando possível;
+execute a importação e confira o resumo de sucessos, duplicados e erros.
+Exportar para Excel
+A exportação pela Microsoft permite enviar clientes selecionados ou os resultados da pesquisa atual para um arquivo do Excel. Essa função depende da conexão da conta Microsoft configurada pelo responsável pelo sistema.
+Backup e restauração
+O backup do banco inclui clientes, pedidos, pagamentos e histórico. Faça uma cópia antes de importações, restaurações ou alterações em grande quantidade.
+Guarde o arquivo em local seguro, pois ele contém informações pessoais e financeiras. Ao restaurar uma cópia, o banco atual é substituído; o sistema cria antes uma cópia de segurança do estado atual para permitir recuperação.
+Funcionamento offline
+O indicador no topo informa o estado da conexão. Parte dos dados de clientes já carregados pode continuar disponível no computador, e algumas alterações podem ficar pendentes para envio quando o serviço voltar a responder.
+Operações que dependem da internet ou de serviços externos — como mapa, Microsoft/Excel, cobranças e conciliação com o Asaas — podem ficar indisponíveis. Verifique o indicador de pendências depois que a conexão retornar e não feche o aplicativo durante uma sincronização.
+Atalhos de teclado
+Atalho
+Ação
+Ctrl + N
+Iniciar um novo cadastro de cliente
+Ctrl + F
+Ir para a pesquisa de clientes
+Ctrl + E
+Exportar clientes para Excel
+Ctrl + B
+Criar backup dos clientes em JSON
+Ctrl + I
+Abrir a importação de clientes
+Esc
+Cancelar ou fechar a janela atual, quando disponível
+Os atalhos Ctrl + N, Ctrl + F e Ctrl + E atuam principalmente na área de Clientes.
+Rotina diária recomendada
+No início do dia
+Abra o Dashboard.
+Consulte as notificações críticas e altas.
+Verifique entregas atrasadas e previstas para hoje.
+Confira pagamentos atrasados e vencimentos do dia.
+Organize os deslocamentos usando a Agenda e o Mapa.
+Ao atender um cliente
+Pesquise se o cadastro já existe.
+Atualize telefone, endereço e observações, se necessário.
+Crie o pedido e registre tudo o que foi combinado.
+Adicione os itens e confira os valores.
+Aprove o pedido somente quando a negociação estiver confirmada.
+Durante a locação
+Agende e acompanhe a entrega.
+Fature o pedido e revise as parcelas.
+Monitore os vencimentos.
+Atualize pagamentos e status da entrega conforme as atividades acontecem.
+No final do dia
+Confira compromissos que continuam em aberto.
+Atualize recebimentos já confirmados.
+Revise notificações ainda não tratadas.
+Consulte novamente os indicadores do Dashboard.
+Faça backup quando houver alterações importantes.
+Boas práticas
+Pesquise antes de cadastrar para evitar clientes duplicados.
+Use nomes e códigos padronizados para os produtos.
+Registre no pedido tudo o que foi combinado com o cliente.
+Confira os valores antes de faturar ou confirmar um pagamento.
+Mantenha endereços completos para melhorar o Mapa e a logística.
+Atualize os status no momento em que cada atividade acontecer.
+Faça backups frequentes e mantenha pelo menos uma cópia fora do computador principal.
+Não compartilhe arquivos de backup com pessoas não autorizadas.
+Não use o campo de observações para informações pessoais que não sejam necessárias à operação.
+O funcionamento correto depende da qualidade dos dados. Se uma entrega concluída continuar como pendente ou um pagamento recebido não for confirmado, os alertas e indicadores também ficarão incorretos.
+Limitações atuais
+A versão atual ainda não possui controle completo de:
+quantidade física total, disponível e locada;
+reservas automáticas por período;
+entradas e saídas de estoque;
+manutenção e avarias de cada poltrona;
+compras, fornecedores e contas a pagar;
+contratos e assinaturas digitais;
+emissão de nota fiscal;
+vários usuários com permissões diferentes;
+vários computadores trabalhando simultaneamente em uma base centralizada.
+Essas limitações não impedem o uso do sistema para cadastro, pedidos, agenda, acompanhamento financeiro e relatórios, mas devem ser consideradas na organização da operação.
+Dúvidas comuns
+O cliente não aparece no pedido
+Confirme se o cadastro foi salvo e pesquise o nome na aba Clientes. Depois feche e abra novamente o formulário do pedido para atualizar a lista.
+O produto não aparece na lista de itens
+Confira se ele foi salvo na aba Produtos. Reabra o pedido para atualizar o catálogo disponível.
+Um cliente não aparece no mapa
+Revise CEP, rua, bairro e cidade. Confirme também se o computador possui acesso à internet e aguarde o processamento dos endereços.
+Não consigo gerar Pix ou boleto
+Essa função depende da configuração do Asaas. Solicite ao responsável pelo sistema que verifique a integração.
+Não consigo exportar para Excel
+Use Conectar Microsoft antes da exportação. Se a sessão tiver expirado, faça a conexão novamente.
+Os indicadores parecem desatualizados
+Confira se as alterações foram salvas e se não existem operações offline pendentes. Navegue novamente até o Dashboard ou reinicie o aplicativo, se necessário.
+O aplicativo informa que está sem conexão
+Aguarde alguns segundos e verifique a internet. Se o aviso permanecer mesmo com internet ativa, feche e abra o aplicativo. Alterações pendentes devem ser conferidas depois que a conexão retornar.
+Privacidade e uso responsável
+O Adri Poltronas armazena informações de clientes e dados financeiros necessários à operação. Utilize esses dados somente para finalidades relacionadas ao atendimento e ao gerenciamento do negócio.
+Para mais informações, consulte a Política de Privacidade.
+Adri Poltronas — mais organização, controle e clareza para acompanhar o que já aconteceu, o que está acontecendo e o que ainda precisa ser feito.
+Versão documentada: 1.3.0.
