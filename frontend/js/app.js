@@ -1425,6 +1425,18 @@ var _clientesCarregados = [];
 var _totalDeClientes = 0;
 var _buscaDaPagina = '';
 
+// Numero da carga em curso.
+//
+// Duas cargas podem estar em voo ao mesmo tempo -- cadastrar um cliente
+// dispara uma, e digitar na busca logo em seguida dispara outra. Sem
+// sequencia, a resposta da PRIMEIRA chega depois e repinta a tabela por cima
+// do resultado da busca: o operador digita "Bruno", ve o resultado certo, e a
+// lista completa volta sozinha meio segundo depois.
+//
+// A janela sempre existiu; ela ficou mais larga quando a abertura passou a
+// consultar sessao e licenca antes de carregar. Foi assim que apareceu.
+var _sequenciaDaCarga = 0;
+
 async function carregarClientes() {
     var busca = (document.getElementById('inputPesquisa') || {}).value || '';
     _buscaDaPagina = busca.trim();
@@ -1434,18 +1446,25 @@ async function carregarClientes() {
     // algo esta em andamento, em vez de encarar a tabela vazia da consulta
     // anterior ate a resposta chegar.
     mostrarEsqueleto('tabelaClientes', 6, 5);
-    return _carregarPaginaDeClientes(true);
+    return _carregarPaginaDeClientes(true, ++_sequenciaDaCarga);
 }
 
 async function carregarMaisClientes() {
-    return _carregarPaginaDeClientes(false);
+    // Continua a MESMA carga: "carregar mais" acrescenta paginas a lista que
+    // ja esta na tela, e nao comeca uma consulta nova.
+    return _carregarPaginaDeClientes(false, _sequenciaDaCarga);
 }
 
-async function _carregarPaginaDeClientes(primeira) {
+async function _carregarPaginaDeClientes(primeira, sequencia) {
+    if (sequencia === undefined) sequencia = _sequenciaDaCarga;
     var url = API_URL + '?busca=' + encodeURIComponent(_buscaDaPagina) +
               '&limite=' + TAMANHO_DA_PAGINA +
               '&deslocamento=' + _clientesCarregados.length;
     var r = await tentarBackend(url);
+    // Chegou tarde: outra carga comecou enquanto esta esperava. Renderizar
+    // agora colocaria na tela o resultado de uma consulta que o operador ja
+    // abandonou.
+    if (sequencia !== _sequenciaDaCarga) return;
     if (r.semBackend) { carregarClientesOffline(true); return; }
     try {
         if (!r.resposta.ok) throw new Error('Falha');
