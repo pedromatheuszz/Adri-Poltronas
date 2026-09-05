@@ -16,9 +16,48 @@ OPCOES_ENTREGA = {'Entrega', 'Retirada'}
 
 # CEP: aceita com ou sem máscara, devolve canônico (8 dígitos) ou None
 _RE_CEP = re.compile(r"^\d{5}-?\d{3}$")
-_RE_SEGURO = re.compile(r"^[\w\sÀ-ÿ'.,\-()/]+$", re.UNICODE)
+# Allowlist dos campos de texto do cadastro.
+#
+# `&`, `#`, `+` e `%` entraram porque boa parte da clientela e pessoa juridica
+# e a lista anterior barrava razao social comum: "Moveis & Cia Ltda", "Loja #2",
+# "50% Decor". Nenhum deles acrescenta risco -- o SQL e parametrizado, o HTML
+# passa por `escaparHtml` no frontend, e a exportacao neutraliza prefixo de
+# formula em `planilha.neutralizar_formula`, que ja cobria o `-` aceito aqui
+# desde sempre. O sinal de que a regra era arbitraria estava a vista: os mesmos
+# caracteres sempre passaram em `observacoes`, que nao usa esta allowlist.
+#
+# As duas expressoes saem da MESMA classe de proposito. Enquanto eram literais
+# separados, ampliar uma e esquecer a outra fazia a mensagem de erro acusar
+# caractere que a validacao aceita.
+_CLASSE_SEGURA = r"[\w\sÀ-ÿ'.,\-()/&#+%]"
+_RE_SEGURO = re.compile(rf"^{_CLASSE_SEGURA}+$", re.UNICODE)
+_RE_CARACTERE_SEGURO = re.compile(_CLASSE_SEGURA, re.UNICODE)
+
+# Teto do que a mensagem de erro cita. Sem ele, colar um paragrafo inteiro num
+# campo devolveria uma mensagem do tamanho do paragrafo.
+MAX_CARACTERES_CITADOS = 5
 _RE_DATA = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 _RE_HORA = re.compile(r'^([01]\d|2[0-3]):[0-5]\d$')
+
+
+def _erro_de_caracteres(campo, valor):
+    """
+    Mensagem que diz QUAL caractere foi recusado.
+
+    "Nome contem caracteres invalidos" obriga o operador a adivinhar por
+    tentativa e erro num campo que ele acabou de digitar -- e a resposta
+    costuma ser um caractere que ele nem enxerga, como um espaco duro colado
+    de outro sistema.
+    """
+    recusados = []
+    for caractere in valor:
+        if not _RE_CARACTERE_SEGURO.match(caractere) and caractere not in recusados:
+            recusados.append(caractere)
+            if len(recusados) == MAX_CARACTERES_CITADOS:
+                break
+    if not recusados:
+        return f"{campo} contem caracteres invalidos."
+    return f"{campo} contem caracteres invalidos: {' '.join(recusados)}"
 
 
 def _normalizar_texto(valor, max_len):
@@ -111,7 +150,7 @@ def validar_cliente(dados):
     if not _campo_valido(nome, NOME_MAX, obrigatorio=True, min_len=NOME_MIN):
         erros.append(f"Nome obrigatorio (entre {NOME_MIN} e {NOME_MAX} caracteres).")
     if nome and not _RE_SEGURO.match(nome):
-        erros.append("Nome contem caracteres invalidos.")
+        erros.append(_erro_de_caracteres("Nome", nome))
 
     cep_raw = dados.get("cep", "")
     cep = normalizar_cep(cep_raw)
@@ -122,19 +161,19 @@ def validar_cliente(dados):
     if not _campo_valido(rua, ENDERECO_MAX, obrigatorio=True):
         erros.append(f"Rua obrigatoria (ate {ENDERECO_MAX} caracteres).")
     if rua and not _RE_SEGURO.match(rua):
-        erros.append("Rua contem caracteres invalidos.")
+        erros.append(_erro_de_caracteres("Rua", rua))
 
     bairro = _normalizar_texto(dados.get("bairro", ""), ENDERECO_MAX)
     if not _campo_valido(bairro, ENDERECO_MAX, obrigatorio=True):
         erros.append(f"Bairro obrigatorio (ate {ENDERECO_MAX} caracteres).")
     if bairro and not _RE_SEGURO.match(bairro):
-        erros.append("Bairro contem caracteres invalidos.")
+        erros.append(_erro_de_caracteres("Bairro", bairro))
 
     cidade = _normalizar_texto(dados.get("cidade", ""), CIDADE_MAX)
     if not _campo_valido(cidade, CIDADE_MAX, obrigatorio=True):
         erros.append(f"Cidade obrigatoria (ate {CIDADE_MAX} caracteres).")
     if cidade and not _RE_SEGURO.match(cidade):
-        erros.append("Cidade contem caracteres invalidos.")
+        erros.append(_erro_de_caracteres("Cidade", cidade))
 
     entrega_retirada = str(dados.get("entrega_retirada", "")).strip()
     if entrega_retirada not in OPCOES_ENTREGA:

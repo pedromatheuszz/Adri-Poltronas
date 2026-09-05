@@ -7,6 +7,7 @@ import logging
 from flask import Blueprint, request, jsonify
 
 import config
+from limites import LIMITE_IA, limiter
 
 log = logging.getLogger("adri.ia")
 
@@ -14,6 +15,8 @@ ia_bp = Blueprint('ia', __name__, url_prefix='/api/ia')
 
 
 @ia_bp.route('/sugestao-bairro', methods=['POST'])
+# Cota do Gemini: a sugestao e disparada por digitacao no formulario.
+@limiter.limit(LIMITE_IA)
 def ia_sugestao_bairro():
     dados = request.get_json(silent=True) or {}
     cep = (dados.get('cep') or '').replace('-', '').strip()

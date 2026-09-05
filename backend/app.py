@@ -16,7 +16,6 @@ from flask import (
     render_template_string,
 )
 from werkzeug.exceptions import HTTPException
-from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
 import database
@@ -25,6 +24,7 @@ import security
 import asaas
 import microsoft
 import capacidade
+from limites import limiter
 from erp.core.contexto import (
     ContextoOperacao,
     anonimizar_ip,
@@ -191,12 +191,25 @@ def limpar_csrf_cache():
 # ---------------------------------------------------------------------------
 # RATE LIMITING
 # ---------------------------------------------------------------------------
-limiter = Limiter(
-    get_remote_address,
-    app=app,
-    default_limits=["200 per minute", "50 per second"],
-    storage_uri="memory://",
-)
+# O objeto vive em `limites.py` para que os blueprints possam apertar as
+# proprias rotas sem importar `app` de volta. Ver aquele modulo para o que o
+# limite defende e o que nao defende.
+limiter.init_app(app)
+
+
+@limiter.request_filter
+def _sem_limite_em_testes():
+    """
+    Em TESTING o limitador nao conta, pelo mesmo motivo que a capacidade e a
+    autenticacao nao valem: a suite roda centenas de requisicoes em segundos,
+    de um IP so, e bateria em qualquer teto realista. Um teste falharia por
+    429 sem relacao com o que ele mede, e a falha apareceria em arquivos
+    diferentes conforme a ordem de execucao.
+
+    Os limites de verdade sao exercitados por test_limites.py, que desliga o
+    modo -- mesma solucao adotada em test_autenticacao.py.
+    """
+    return bool(app.config.get('TESTING'))
 
 
 # ---------------------------------------------------------------------------
@@ -237,7 +250,19 @@ def _csp_header() -> str:
 
 _METODOS_QUE_ALTERAM_ESTADO = frozenset({'POST', 'PUT', 'PATCH', 'DELETE'})
 
-ROTAS_SEM_CHECAGEM_DE_ORIGEM = frozenset({'/api/pagamentos/webhook'})
+# Rotas que chegam DE FORA por desenho, e que por isso nao podem ser medidas
+# pelas regras do trafego local. Hoje ha uma so: o webhook do Asaas, que tem
+# autenticacao propria (ASAAS_WEBHOOK_TOKEN, fail-closed) -- o controle correto
+# para quem vem da internet.
+#
+# O nome antigo, ROTAS_SEM_CHECAGEM_DE_ORIGEM, descrevia um guarda so. A lista
+# isenta tres: origem, capacidade (em capacidade.ROTAS_ISENTAS) e host de
+# loopback. O de host ficou de fora ate a 1.3.0 e recusava o webhook com 400
+# antes de o token do Asaas ser lido -- inofensivo hoje, porque nada chega de
+# fora mesmo, e uma armadilha no dia em que existir o relay publico que
+# `reconciliacao.py` menciona: o Asaas receberia 400 e a causa pareceria erro
+# de configuracao dele.
+ROTAS_QUE_CHEGAM_DE_FORA = frozenset({'/api/pagamentos/webhook'})
 
 ALIASES_LOOPBACK = config.ALIASES_LOOPBACK
 
@@ -282,6 +307,8 @@ def _nome_do_host(host: str) -> str:
 
 @app.before_request
 def _exigir_host_de_loopback():
+    if request.path in ROTAS_QUE_CHEGAM_DE_FORA:
+        return None
     if _nome_do_host(request.host) in config.ALIASES_LOOPBACK:
         return None
     log.warning("[SEGURANCA] Host recusado: %s -> %s", request.host, request.path)
@@ -478,7 +505,7 @@ def _bloquear_requisicao_de_origem_externa():
         return None
     if not request.path.startswith('/api/'):
         return None
-    if request.path in ROTAS_SEM_CHECAGEM_DE_ORIGEM:
+    if request.path in ROTAS_QUE_CHEGAM_DE_FORA:
         return None
 
     aceitas = _origens_aceitas()
