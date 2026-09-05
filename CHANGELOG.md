@@ -5,6 +5,99 @@ Versionamento [semântico](https://semver.org/lang/pt-BR/).
 
 ---
 
+## [1.4.0] — 2026-09-05
+
+Licenca de uso: 30 dias de teste a partir da primeira abertura, depois compra
+de R$ 1.500,00 via Pix do Mercado Pago, com confirmacao automatica.
+
+### Adicionado
+
+- **Periodo de teste de 30 dias.** Comeca na primeira abertura do aplicativo.
+  A topbar mostra a contagem de forma discreta, e ganha destaque na ultima
+  semana — avisar com o mesmo peso durante 30 dias ensina o operador a nao ver
+  o aviso.
+
+- **Bloqueio ao fim do teste.** O backend responde `402 Payment Required` em
+  todo `/api/`, exceto nas rotas da propria licenca, no login e na sonda de
+  identidade — sem essas isencoes o operador ficaria trancado do lado de fora
+  com a chave dentro. A tela substitui o conteudo por uma explicacao com o
+  valor a vista e o botao de pagar; nenhum numero fica visivel para ser lido
+  errado.
+
+- **Pagamento via Pix do Mercado Pago, verificado automaticamente.** O app
+  gera a cobranca, mostra o QR Code e o copia-e-cola, e pergunta ao Mercado
+  Pago a cada 5 segundos se o pagamento entrou. Confirmado, a tela libera
+  sozinha. A consulta substitui o webhook pelo mesmo motivo ja documentado
+  para o Asaas: o backend escuta em loopback e um servidor da internet nao
+  alcanca esse endereco.
+
+  Apenas `approved` libera a licenca. `authorized` — cartao autorizado e nao
+  capturado — e dinheiro reservado, nao recebido.
+
+### O limite honesto deste controle
+
+O aplicativo roda inteiro na maquina do cliente, entao quem tem administrador
+ali contorna qualquer bloqueio local. O que o desenho alcanca e tornar o
+contorno **deliberado**:
+
+- o estado vive em dois lugares — arquivo cifrado com DPAPI no perfil e tabela
+  no banco — e a reconciliacao pega sempre o lado mais restritivo. Apagar o
+  arquivo nao reinicia a contagem; restaurar um backup antigo do banco tambem
+  nao. Apagar os dois reinicia, e isso nao acontece por acidente;
+- atrasar o relogio do sistema congela a contagem em vez de reverte-la, por
+  uma marca d'agua que guarda a data mais adiantada ja vista.
+
+O `access_token` do Mercado Pago fica na maquina do cliente, cifrado com DPAPI.
+Isso o prende aquela conta do Windows, mas nao impede quem tem administrador de
+extrai-lo. A forma correta de fechar isso e um endpoint do vendedor que
+responda apenas "esta licenca esta paga?" — enquanto ele nao existe, use um
+token de aplicacao dedicada, e nao o principal da conta.
+
+### Corrigido
+
+- **A ordem dos portoes fazia o app abrir vazio depois de pagar.** A checagem
+  de sessao disparava o carregamento dos dados antes de a licenca ser
+  consultada: com o teste vencido as requisicoes voltavam 402, a tela ficava
+  com os zeros do HTML e o app se dava por carregado. Ao pagar, a tela
+  liberava sem trazer dado nenhum. Agora um unico ponto decide, e ele exige os
+  dois portoes abertos.
+
+---
+
+## [1.3.2] — 2026-09-05
+
+A 1.3.1 fechou a leitura da API sem sessão. Correto do lado do servidor — e do
+lado da tela criou um estado que nunca tinha existido, porque até a 1.3.0 abrir
+o app sem conta conectada funcionava como qualquer outra abertura.
+
+### Corrigido
+
+- **O app aberto sem conta conectada mostrava zeros como se fossem o cadastro.**
+  Não era um erro na tela: era o Dashboard exibindo "0 Total Clientes" e
+  "R$ 0,00 em atraso" — os zeros escritos no próprio HTML — enquanto quatro
+  requisições voltavam 401 no console, onde ninguém olha. Quem abrisse o
+  sistema sem ter conectado leria "nada a receber" e acreditaria. Número errado
+  com ar de número certo é pior que aviso de erro.
+
+  Agora a abertura pergunta primeiro se há sessão e só então decide: com
+  sessão, carrega; sem sessão, substitui o conteúdo por uma explicação e o
+  botão de conectar. Enquanto o painel está visível não há número na tela para
+  ser lido errado.
+
+- **A sessão que expira com o app aberto virava um "Erro ao carregar
+  pagamentos." vermelho.** Um gancho central em toda resposta 401 de `/api/`
+  troca a tela pelo mesmo painel, e o erro deixa de aparecer: a explicação
+  calma no meio da tela e um toque de alarme por cima são o pior dos dois
+  mundos. Desconectar a conta também limpa a tela na hora, em vez de deixar o
+  cadastro do operador anterior visível até a próxima requisição.
+
+- **A primeira instalação anunciava "App atualizado! Recarregue".** O evento
+  `updatefound` do Service Worker dispara igual na instalação inicial e numa
+  atualização de verdade; sem distinguir os dois casos, a primeira abertura do
+  app pedia ao operador uma ação que não servia para nada.
+
+---
+
 ## [1.3.1] — 2026-09-05
 
 Correção dos achados da auditoria de segurança e funcionamento do commit
