@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'backend'))
 
 import database  # noqa: E402
 import migrations_manager  # noqa: E402
+from erp.core.auditoria import registrar_evento  # noqa: E402
 from erp.core.contexto import (  # noqa: E402
     ContextoOperacao,
     encerrar_contexto,
@@ -86,11 +87,17 @@ def test_falha_na_auditoria_reverte_a_operacao(banco_fallback, monkeypatch):
 
 
 def test_auditoria_redige_segredos_e_e_append_only(banco_fallback):
+    """
+    A censura acontece por NOME de campo, e nao por lista de colunas.
+
+    Ate a 1.4.2 este teste provava isso gravando `pix_payload` e afins num
+    pagamento. Aqueles campos sairam com a integracao de cobranca, e amarrar o
+    teste a colunas especificas era fragil de qualquer forma: o que importa e
+    que `_chave_sensivel` reconheca o nome. Aqui o evento e registrado direto,
+    com um campo sensivel e outro que nao e.
+    """
     cliente_id = database.salvar_cliente(
         "Cliente", "11000-002", "Rua", "Centro", "Santos", "Entrega"
-    )
-    pagamento_id = database.salvar_pagamento(
-        cliente_id, "Cliente", 45.0, "Entrada", "2030-01-01"
     )
     token_contexto = iniciar_contexto(
         ContextoOperacao(
@@ -100,26 +107,35 @@ def test_auditoria_redige_segredos_e_e_append_only(banco_fallback):
         )
     )
     try:
-        database.atualizar_pagamento(
-            pagamento_id,
-            pix_payload="payload-secreto",
-            pix_qr_code="imagem-secreta",
-            boleto_url="https://boleto.exemplo/token-secreto",
-        )
+        with database.conectar() as conexao:
+            registrar_evento(
+                conexao,
+                acao="teste.censura",
+                entidade="cliente",
+                entidade_id=cliente_id,
+                valores_novos={
+                    "refresh_token": "valor-secreto",
+                    "senha": "outro-secreto",
+                    "cidade": "Santos",
+                },
+            )
     finally:
         encerrar_contexto(token_contexto)
 
     with database.conectar() as conexao:
         evento = conexao.execute(
-            "SELECT * FROM auditoria_eventos WHERE entidade='pagamento' "
-            "AND entidade_id=? ORDER BY id DESC LIMIT 1",
-            (str(pagamento_id),),
+            "SELECT * FROM auditoria_eventos WHERE acao='teste.censura' "
+            "ORDER BY id DESC LIMIT 1"
         ).fetchone()
         dados_novos = json.loads(evento["valores_novos"])
-        assert dados_novos["pix_payload"] == "[REDACTED]"
-        assert dados_novos["pix_qr_code"] == "[REDACTED]"
-        assert dados_novos["boleto_url"] == "[REDACTED]"
-        assert "payload-secreto" not in evento["valores_novos"]
+
+        assert dados_novos["refresh_token"] == "[REDACTED]"
+        assert dados_novos["senha"] == "[REDACTED]"
+        # O que nao e segredo continua legivel -- censurar tudo tiraria da
+        # trilha justamente o que ela serve para responder.
+        assert dados_novos["cidade"] == "Santos"
+        assert "valor-secreto" not in evento["valores_novos"]
+
         assert evento["correlation_id"] == "corr-123"
         assert evento["usuario_identificador"] == "gestor@empresa.local"
 
@@ -147,6 +163,9 @@ def test_migrations_reconstroem_schema_integral_em_banco_novo(tmp_path, monkeypa
             )
         }
         fks_pagamentos = conexao.execute("PRAGMA foreign_key_list(pagamentos)").fetchall()
+        colunas_pagamentos = {
+            linha[1] for linha in conexao.execute("PRAGMA table_info(pagamentos)")
+        }
         colunas_sessao = {
             linha[1] for linha in conexao.execute("PRAGMA table_info(sessao)")
         }
@@ -160,7 +179,7 @@ def test_migrations_reconstroem_schema_integral_em_banco_novo(tmp_path, monkeypa
     # Cabeca da cadeia de migrations. Atualizar junto ao acrescentar uma
     # revisao nova -- e o que garante que ela entrou na cadeia, e nao ficou
     # pendurada fora dela.
-    assert revisao == "d8f31b06a4e5"
+    assert revisao == "e5c94a17b3d8"
     # O modulo comercial: sem estas tres, pagamento e entrega continuam
     # pendurados no cliente, sem saber a que venda pertencem.
     assert {"produtos", "pedidos", "pedido_itens"} <= tabelas
@@ -176,6 +195,11 @@ def test_migrations_reconstroem_schema_integral_em_banco_novo(tmp_path, monkeypa
     # passa a depender so do arquivo do perfil -- que e o lado que se apaga com
     # um clique.
     assert "licenca" in tabelas
+    # A integracao de cobranca saiu na 1.5.0: a tabela de vinculo com o gateway
+    # e as colunas dele nao podem voltar por um schema desatualizado.
+    assert "clientes_asaas" not in tabelas
+    assert not any("asaas" in coluna for coluna in colunas_pagamentos)
+    assert "tipo_pagamento" in colunas_pagamentos
     assert any(fk[2] == "clientes" and fk[6] == "RESTRICT" for fk in fks_pagamentos)
     assert {
         "trg_auditoria_eventos_immutable_update",
@@ -194,34 +218,3 @@ def test_migrations_reconstroem_schema_integral_em_banco_novo(tmp_path, monkeypa
         ).fetchone()[0] == 1
 
 
-def test_webhook_financeiro_e_idempotente(banco_fallback):
-    cliente_id = database.salvar_cliente(
-        "Cliente", "11000-003", "Rua", "Centro", "Santos", "Entrega"
-    )
-    pagamento_id = database.salvar_pagamento(
-        cliente_id, "Cliente", 89.0, "Parcela", "2030-01-01"
-    )
-    database.atualizar_pagamento(pagamento_id, asaas_payment_id="pay_123")
-
-    assert database.atualizar_pagamento_por_asaas(
-        "pay_123", "Recebido", preencher_data_pagamento=True
-    ) == 1
-    assert database.atualizar_pagamento_por_asaas(
-        "pay_123", "Recebido", preencher_data_pagamento=True
-    ) == 0
-
-    with database.conectar() as conexao:
-        historicos = conexao.execute(
-            "SELECT COUNT(*) FROM historico WHERE cliente_id=? "
-            "AND detalhes LIKE 'Pagamento confirmado via webhook:%'",
-            (cliente_id,),
-        ).fetchone()[0]
-        eventos = conexao.execute(
-            "SELECT COUNT(*) FROM auditoria_eventos "
-            "WHERE acao='financeiro.recebivel.webhook_atualizado' "
-            "AND entidade_id=?",
-            (str(pagamento_id),),
-        ).fetchone()[0]
-
-    assert historicos == 1
-    assert eventos == 1

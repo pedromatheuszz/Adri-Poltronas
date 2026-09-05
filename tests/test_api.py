@@ -116,58 +116,10 @@ def test_service_worker(client):
     assert response.status_code == 200
 
 
-def test_criar_pagamento(client):
-    """Testa criar um pagamento."""
-    # Primeiro, criar um cliente
-    cliente_data = {
-        "nome": "Cliente Teste",
-        "cep": "12345-678",
-        "rua": "Rua Teste",
-        "bairro": "Centro",
-        "cidade": "São Paulo",
-        "entrega_retirada": "Entrega"
-    }
-    client.post('/api/clientes',
-        data=json.dumps(cliente_data),
-        content_type='application/json')
-    
-    # Obter cliente criado
-    response = client.get('/api/clientes')
-    clientes = json.loads(response.data)
-    cliente_id = clientes[0]['id']
-    
-    # Criar pagamento
-    pagamento_data = {
-        "cliente_id": cliente_id,
-        "cliente_nome": "Cliente Teste",
-        "valor": 100.50,
-        "descricao": "Pagamento teste",
-        "data_vencimento": "2026-08-15",
-        "tipo_pagamento": "Pix"
-    }
-    response = client.post('/api/pagamentos',
-        data=json.dumps(pagamento_data),
-        content_type='application/json')
-    assert response.status_code == 201
-    data = json.loads(response.data)
-    assert "id" in data
 
 
-def test_listar_pagamentos(client):
-    """Testa listar pagamentos."""
-    response = client.get('/api/pagamentos')
-    assert response.status_code == 200
-    data = json.loads(response.data)
-    assert isinstance(data, list)
 
 
-def test_pagamentos_metricas(client):
-    """Testa métricas de pagamentos."""
-    response = client.get('/api/pagamentos/metricas')
-    assert response.status_code == 200
-    data = json.loads(response.data)
-    assert "total_recebido" in data
-    assert "total_pendente" in data
 
 
 def test_notificacoes(client):

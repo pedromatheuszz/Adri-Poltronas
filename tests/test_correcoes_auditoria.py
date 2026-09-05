@@ -65,54 +65,14 @@ def _post_pagamento(client, **campos):
 # recebimento registrado pelo modal virava "Pendente" -- vencido, portanto
 # contabilizado como ATRASADO no mesmo instante em que era recebido.
 # -----------------------------------------------------------------------------
-def test_pagamento_criado_como_recebido_permanece_recebido(client):
-    cliente_id = _criar_cliente(client)
-    resposta = _post_pagamento(client, cliente_id=cliente_id,
-        status="Recebido", data_pagamento="2020-01-10")
-    assert resposta.status_code == 201
-
-    pagamento = database.obter_pagamento_por_id(json.loads(resposta.data)['id'])
-    assert pagamento['status'] == 'Recebido'
-    assert pagamento['data_pagamento'] == '2020-01-10'
 
 
-def test_recebimento_nao_entra_como_atrasado_nas_metricas(client):
-    cliente_id = _criar_cliente(client)
-    _post_pagamento(client, cliente_id=cliente_id,
-        status="Recebido", data_pagamento="2020-01-10")
-
-    metricas = database.obter_metricas_pagamentos()
-    assert metricas['total_recebido'] == 250.00
-    assert metricas['total_atrasado'] == 0
-    assert metricas['qtd_recebido'] == 1
 
 
-def test_pagamento_sem_status_continua_pendente(client):
-    cliente_id = _criar_cliente(client)
-    resposta = _post_pagamento(client, cliente_id=cliente_id)
-
-    pagamento = database.obter_pagamento_por_id(json.loads(resposta.data)['id'])
-    assert pagamento['status'] == 'Pendente'
-    assert pagamento['data_pagamento'] == ''
 
 
-def test_recebido_sem_data_de_pagamento_assume_hoje(client):
-    import time
-    cliente_id = _criar_cliente(client)
-    resposta = _post_pagamento(client, cliente_id=cliente_id, status="Recebido")
-
-    pagamento = database.obter_pagamento_por_id(json.loads(resposta.data)['id'])
-    assert pagamento['status'] == 'Recebido'
-    assert pagamento['data_pagamento'] == time.strftime('%Y-%m-%d')
 
 
-def test_data_de_pagamento_em_formato_invalido_e_recusada(client):
-    cliente_id = _criar_cliente(client)
-    resposta = _post_pagamento(client, cliente_id=cliente_id,
-        status="Recebido", data_pagamento="10/01/2020")
-
-    assert resposta.status_code == 400
-    assert 'Data de pagamento' in ' '.join(json.loads(resposta.data)['detalhes'])
 
 
 # -----------------------------------------------------------------------------
@@ -141,69 +101,14 @@ def _put_pagamento(client, pagamento_id, cliente_id, **campos):
         data=json.dumps(corpo), content_type='application/json')
 
 
-def test_put_sem_status_preserva_recebimento(client):
-    cliente_id, pagamento_id = _pagamento_recebido(client)
-
-    resposta = _put_pagamento(client, pagamento_id, cliente_id, descricao="Poltrona reclinavel")
-    assert resposta.status_code == 200
-
-    pagamento = database.obter_pagamento_por_id(pagamento_id)
-    assert pagamento['status'] == 'Recebido'
-    assert pagamento['data_pagamento'] == '2020-01-10'
-    assert pagamento['descricao'] == 'Poltrona reclinavel'
 
 
-def test_put_sem_status_nao_apaga_a_receita(client):
-    cliente_id, pagamento_id = _pagamento_recebido(client)
-    _put_pagamento(client, pagamento_id, cliente_id, descricao="Outra descricao")
-
-    metricas = database.obter_metricas_pagamentos()
-    assert metricas['total_recebido'] == 250.00
-    assert metricas['total_pendente'] == 0
 
 
-def test_put_com_status_explicito_e_recusado(client):
-    """
-    O PUT deixou de ser porta dos fundos da maquina de estados.
-
-    Este teste afirmava o contrario ate a versao 1.2.1 -- que mandar `status`
-    no corpo era respeitado. Isso permitia marcar 'Recebido' sem passar pela
-    conferencia com o gateway, ou reabrir uma cobranca cancelada, sem registro
-    do porque. A regra que impedia o estrago vivia no comportamento da tela,
-    que por acaso nao enviava o campo; e regra que depende de o cliente se
-    comportar nao e regra.
-
-    Transicao de estado tem porta propria, e cada uma carrega a checagem
-    correspondente.
-    """
-    cliente_id, pagamento_id = _pagamento_recebido(client)
-
-    resposta = _put_pagamento(client, pagamento_id, cliente_id, status="Cancelado")
-
-    assert resposta.status_code == 409
-    assert database.obter_pagamento_por_id(pagamento_id)['status'] == 'Recebido'
 
 
-def test_put_repetindo_o_status_atual_passa(client):
-    """Um formulario que reenvia o registro inteiro nao esta tentando mudar
-    estado nenhum -- recusar isso quebraria a edicao de descricao."""
-    cliente_id, pagamento_id = _pagamento_recebido(client)
-
-    resposta = _put_pagamento(client, pagamento_id, cliente_id,
-                              status="Recebido", descricao="Poltrona azul")
-
-    assert resposta.status_code == 200
-    pagamento = database.obter_pagamento_por_id(pagamento_id)
-    assert pagamento['descricao'] == 'Poltrona azul'
-    assert pagamento['status'] == 'Recebido'
-    # E a data de recebimento continua intacta: o PUT nao a reescreve.
-    assert pagamento['data_pagamento'] == '2020-01-10'
 
 
-def test_put_em_pagamento_inexistente_retorna_404(client):
-    cliente_id = _criar_cliente(client)
-    resposta = _put_pagamento(client, 999999, cliente_id)
-    assert resposta.status_code == 404
 
 
 # -----------------------------------------------------------------------------
@@ -294,50 +199,10 @@ def asaas_espiao(monkeypatch):
     return chamadas, _cancelar
 
 
-def test_delete_em_pagamento_recebido_nao_toca_no_asaas(client, asaas_espiao):
-    chamadas, _ = asaas_espiao
-    cliente_id, pagamento_id = _pagamento_recebido(client)
-    database.atualizar_pagamento(pagamento_id, asaas_payment_id='pay_123')
-
-    resposta = client.delete(f'/api/pagamentos/{pagamento_id}', headers={'Origin': ORIGEM_LOCAL})
-
-    assert resposta.status_code == 400
-    assert chamadas == [], "a cobranca foi cancelada no Asaas apesar de ja estar recebida"
-    assert database.obter_pagamento_por_id(pagamento_id)['status'] == 'Recebido'
 
 
-def test_falha_no_asaas_preserva_o_registro_local(client, asaas_espiao):
-    chamadas, cancelar = asaas_espiao
-    cancelar.resposta = {"_erro": True, "_status": 500}
-    cliente_id = _criar_cliente(client)
-    pagamento_id = json.loads(_post_pagamento(client, cliente_id=cliente_id).data)['id']
-    database.atualizar_pagamento(pagamento_id, asaas_payment_id='pay_456')
-
-    resposta = client.delete(f'/api/pagamentos/{pagamento_id}', headers={'Origin': ORIGEM_LOCAL})
-
-    assert resposta.status_code == 502
-    assert chamadas == ['pay_456']
-    # A cobranca continua viva no Asaas; apagar aqui cegaria a conciliacao.
-    assert database.obter_pagamento_por_id(pagamento_id) is not None
 
 
-def test_cancelamento_de_pendente_com_sucesso(client, asaas_espiao):
-    chamadas, _ = asaas_espiao
-    cliente_id = _criar_cliente(client)
-    pagamento_id = json.loads(_post_pagamento(client, cliente_id=cliente_id).data)['id']
-    database.atualizar_pagamento(pagamento_id, asaas_payment_id='pay_789')
-
-    resposta = client.delete(f'/api/pagamentos/{pagamento_id}', headers={'Origin': ORIGEM_LOCAL})
-
-    assert resposta.status_code == 200
-    assert chamadas == ['pay_789']
-    # A linha continua no banco, agora como 'Cancelado'. Apagar registro
-    # financeiro o faz sumir do extrato, da conferencia com o Asaas (que segue
-    # conhecendo a cobranca pelo asaas_payment_id) e da propria auditoria, que
-    # ficaria com um evento de cancelamento apontando para um id sem destino.
-    cancelado = database.obter_pagamento_por_id(pagamento_id)
-    assert cancelado is not None
-    assert cancelado['status'] == 'Cancelado'
 
 
 # -----------------------------------------------------------------------------
@@ -360,7 +225,7 @@ def test_modelo_de_env_e_criado_na_primeira_execucao(tmp_path, monkeypatch):
 
     assert caminho and os.path.exists(caminho)
     conteudo = open(caminho, encoding='utf-8').read()
-    for chave in ('ASAAS_API_KEY', 'ASAAS_WEBHOOK_TOKEN', 'GEMINI_API_KEY', 'ADRI_FLASK_SECRET'):
+    for chave in ('MP_ACCESS_TOKEN', 'GEMINI_API_KEY', 'ADRI_FLASK_SECRET'):
         assert chave in conteudo
 
 
@@ -519,70 +384,17 @@ def test_sincronizar_cache_e_exportado_e_usado_pelo_app():
 # informado pelo usuario passavam intactas para a URL do Graph:
 # '../../Documentos/x' virava 'root:/../../Documentos/x.xlsx:/content'.
 # -----------------------------------------------------------------------------
-@pytest.mark.parametrize("bruto,esperado", [
-    ("Clientes_AdriPoltronas", "Clientes_AdriPoltronas.xlsx"),
-    ("../../../Documentos/relatorio", "relatorio.xlsx"),
-    ("..\\..\\Windows\\system32\\payload", "payload.xlsx"),
-    ("a:/b", "b.xlsx"),
-    ("x?y#z", "xy#z.xlsx"),
-    ("relatorio.xlsx", "relatorio.xlsx"),
-    ("   ", "Clientes_AdriPoltronas.xlsx"),
-    ("...", "Clientes_AdriPoltronas.xlsx"),
-    ("/", "Clientes_AdriPoltronas.xlsx"),
-])
-def test_nome_de_arquivo_do_onedrive_e_saneado(bruto, esperado):
-    from blueprints.excel import nome_arquivo_seguro
-    assert nome_arquivo_seguro(bruto) == esperado
 
 
-@pytest.mark.parametrize("bruto", [
-    "../../../Documentos/relatorio",
-    # Raw string: sem o prefixo, `\W` e `\s` sao sequencias de escape
-    # invalidas -- o Python ainda as aceita, com SyntaxWarning, mas a partir
-    # da 3.12 o aviso e ruido a cada execucao da suite.
-    r"..\..\Windows\system32\payload",
-    "pasta/subpasta/arquivo",
-    "a:/b",
-])
-def test_nome_saneado_nao_produz_travessia_na_url(bruto):
-    import urllib.parse
-    from blueprints.excel import nome_arquivo_seguro
-
-    prefixo = "https://graph.microsoft.com/v1.0/me/drive/root:/"
-    nome = nome_arquivo_seguro(bruto)
-    url = prefixo + urllib.parse.quote(nome, safe='') + ":/content"
-
-    assert '..' not in url
-    # O nome do usuario ocupa exatamente um segmento: nada que ele digite
-    # pode introduzir uma barra a mais no caminho do Graph.
-    segmento = url[len(prefixo):-len(":/content")]
-    assert '/' not in segmento
-    assert segmento.endswith('.xlsx')
 
 
 # -----------------------------------------------------------------------------
 # Item 10 - int() sem guarda derrubava o endpoint com 500 e stack trace.
 # -----------------------------------------------------------------------------
-@pytest.mark.parametrize("valor", ["abc", "1.5", "", "  ", "-1", "0", "9" * 40])
-def test_filtro_cliente_id_invalido_nao_gera_500(client, valor):
-    resposta = client.get(f'/api/pagamentos?cliente_id={valor}')
-    assert resposta.status_code in (200, 400), f"cliente_id={valor!r} -> {resposta.status_code}"
 
 
-def test_filtro_cliente_id_valido_continua_funcionando(client):
-    cliente_id = _criar_cliente(client)
-    _post_pagamento(client, cliente_id=cliente_id)
-    resposta = client.get(f'/api/pagamentos?cliente_id={cliente_id}')
-    assert resposta.status_code == 200
-    assert len(json.loads(resposta.data)) == 1
 
 
-def test_gerar_cobranca_com_id_nao_numerico_nao_gera_500(client, monkeypatch):
-    import asaas
-    monkeypatch.setattr(asaas, 'esta_configurado', lambda: True)
-    resposta = client.post('/api/pagamentos/gerar-cobranca', headers={'Origin': ORIGEM_LOCAL},
-        data=json.dumps({"pagamento_id": "abc"}), content_type='application/json')
-    assert resposta.status_code == 400
 
 
 # -----------------------------------------------------------------------------
@@ -809,12 +621,6 @@ def test_carregamento_obsoleto_do_mapa_e_abortado():
 # -----------------------------------------------------------------------------
 # Itens 19/20 - sinks de atributo montados por concatenacao no frontend.
 # -----------------------------------------------------------------------------
-def test_qr_code_e_url_do_boleto_passam_por_saneamento():
-    codigo = _ler_app_js()
-    assert 'function base64Seguro(' in codigo
-    assert 'function urlSegura(' in codigo
-    assert "'<img src=\"data:image/png;base64,' + qrSeguro" in codigo
-    assert 'var url = urlSegura(dados.boleto_url);' in codigo
 
 
 # -----------------------------------------------------------------------------
@@ -822,29 +628,8 @@ def test_qr_code_e_url_do_boleto_passam_por_saneamento():
 # porque nao existe coluna com esse nome; e uma extensao de compatibilidade que
 # pode ser desligada (e o e, em builds com SQLITE_DQS=0).
 # -----------------------------------------------------------------------------
-def test_sql_do_webhook_nao_usa_aspas_duplas_para_literais():
-    caminho = os.path.join(os.path.dirname(__file__), '..', 'backend', 'blueprints', 'webhook.py')
-    with open(caminho, encoding='utf-8') as arquivo:
-        codigo = arquivo.read()
-    for proibido in ('status="Recebido"', 'status="Atrasado"', 'status="Cancelado"', 'status="Pendente"'):
-        assert proibido not in codigo, f"literal SQL com aspas duplas: {proibido}"
 
 
-def test_webhook_continua_confirmando_pagamento(client, monkeypatch):
-    import config as config_local
-    monkeypatch.setattr(config_local, 'ASAAS_WEBHOOK_TOKEN', 'token-de-teste')
-
-    cliente_id = _criar_cliente(client)
-    pagamento_id = json.loads(_post_pagamento(client, cliente_id=cliente_id).data)['id']
-    database.atualizar_pagamento(pagamento_id, asaas_payment_id='pay_wh')
-
-    resposta = client.post('/api/pagamentos/webhook',
-        headers={'asaas-access-token': 'token-de-teste'},
-        data=json.dumps({"event": "PAYMENT_RECEIVED", "payment": {"id": "pay_wh"}}),
-        content_type='application/json')
-
-    assert resposta.status_code == 200
-    assert database.obter_pagamento_por_id(pagamento_id)['status'] == 'Recebido'
 
 
 # -----------------------------------------------------------------------------

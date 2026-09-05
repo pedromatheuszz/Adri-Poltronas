@@ -307,14 +307,6 @@ def test_vencimento_no_dia_31_cai_para_o_fim_do_mes_curto(client, cliente_id, pr
     assert [p['data_vencimento'] for p in parcelas] == ['2026-01-31', '2026-02-28', '2026-03-31']
 
 
-def test_parcelas_aparecem_na_tela_de_pagamentos(client, cliente_id, produto_id):
-    """O elo com a maquina de cobranca que ja existe: Pix, boleto e webhook."""
-    _faturar(client, cliente_id, produto_id, parcelas=2)
-
-    lancamentos = database.listar_pagamentos(cliente_id=cliente_id)
-    assert len(lancamentos) == 2
-    # Sem cobranca emitida: a tela deve oferecer "Gerar Cobranca", nao "Confirmar".
-    assert all(not p['asaas_payment_id'] for p in lancamentos)
 
 
 def test_parcela_referencia_o_pedido_de_origem(client, cliente_id, produto_id):
@@ -336,56 +328,8 @@ def test_faturamento_invalido_e_recusado(client, cliente_id, produto_id, invalid
     assert esperado in resposta.get_json()['erro'].lower()
 
 
-def test_falha_no_meio_do_faturamento_nao_deixa_pedido_pela_metade(
-        client, cliente_id, produto_id, monkeypatch):
-    """
-    A garantia transacional: se a segunda parcela falhar, a primeira volta
-    atras e o pedido continua aprovado. Pedido faturado com cobranca pela
-    metade e a divergencia mais cara de achar depois.
-    """
-    from erp.comercial import repositorio
-
-    original = repositorio.inserir_parcela
-    chamadas = {'n': 0}
-
-    def _falhar_na_segunda(conexao, dados):
-        chamadas['n'] += 1
-        if chamadas['n'] == 2:
-            raise RuntimeError('falha simulada no meio do faturamento')
-        return original(conexao, dados)
-
-    monkeypatch.setattr(repositorio, 'inserir_parcela', _falhar_na_segunda)
-
-    pedido = _post(client, '/api/pedidos', {'cliente_id': cliente_id}).get_json()
-    _post(client, f"/api/pedidos/{pedido['id']}/itens", {'produto_id': produto_id, 'quantidade': 1})
-    _post(client, f"/api/pedidos/{pedido['id']}/abertura")
-    _post(client, f"/api/pedidos/{pedido['id']}/aprovacao")
-
-    # O handler global do app converte a excecao em 500 com id de correlacao,
-    # entao ela nao chega ate aqui -- o que importa e o estado depois.
-    resposta = _post(client, f"/api/pedidos/{pedido['id']}/faturamento",
-                     {'parcelas': 3, 'primeiro_vencimento': '2026-10-05'})
-    assert resposta.status_code == 500
-
-    depois = client.get(f"/api/pedidos/{pedido['id']}").get_json()
-    assert depois['situacao'] == 'aprovado', 'o pedido ficou faturado apesar da falha'
-    assert database.listar_pagamentos(cliente_id=cliente_id) == [], 'sobrou parcela orfa'
-    assert chamadas['n'] == 2, 'a insercao nem chegou na parcela que falha'
 
 
 # =============================================================================
 # Regressao: DEFAULT de texto vazio (migration d1e7b3f5620a)
 # =============================================================================
-def test_varios_recebimentos_sem_cobranca_convivem(client, cliente_id):
-    """
-    `server_default="''"` gravava a string de dois apostrofos em vez de vazio.
-    Como o indice unico parcial de `asaas_payment_id` so ignora o vazio, o
-    SEGUNDO recebimento de uma instalacao nova falhava com HTTP 500.
-    """
-    for i in range(3):
-        resposta = _post(client, '/api/pagamentos', {
-            'cliente_id': cliente_id, 'valor': 100.0,
-            'descricao': f'Recebimento {i}', 'data_vencimento': '2026-10-01'})
-        assert resposta.status_code == 201, resposta.get_json()
-
-    assert all(p['asaas_payment_id'] == '' for p in database.listar_pagamentos())

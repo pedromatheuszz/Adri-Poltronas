@@ -642,16 +642,10 @@ function trocarAba(aba) {
     if (aba === 'produtos') { carregarProdutos(); }
     if (aba === 'entregas') { carregarEntregas(); }
     if (aba === 'mapa') { setTimeout(function() { initMapa(); carregarMapaClientes(); }, 100); }
-    if (aba === 'relatorios') { carregarRelatorio(); }
     if (aba === 'clientes') { atualizarAvisoDePendenciasComErro(); }
-    if (aba === 'pagamentos') {
-        carregarPagamentos();
-        // Conciliacao silenciosa ao abrir a aba: e o momento em que o
-        // operador vai olhar os numeros, e o webhook do Asaas nao chega aqui.
-        // `silenciosa` para nao poluir a tela com toast a cada troca de aba --
-        // so avisa quando algo realmente mudou.
-        conciliarPagamentos(true);
-    }
+    // `pagamentos` e `relatorios` nao carregam nada: as duas areas estao
+    // desativadas nesta versao e a secao ja traz o aviso escrito no HTML.
+    // Pedir dado a elas so renderia 503 no console.
 }
 
 var chartInstances = {};
@@ -685,7 +679,6 @@ function carregarDadosDoApp() {
     carregarClientes();
     carregarNotificacoes();
     carregarDashboardGraficos();
-    iniciarConciliacaoAutomatica();
 }
 
 // O portao. Perguntar PRIMEIRO se ha sessao, e so entao decidir, e o que
@@ -815,9 +808,6 @@ document.addEventListener('DOMContentLoaded', function() {
     var btnTodasLidas = document.getElementById('btnMarcarTodasLidas');
     if (btnTodasLidas) btnTodasLidas.addEventListener('click', marcarTodasNotificacoesLidas);
 
-    var btnConciliar = document.getElementById('btnConciliarAsaas');
-    if (btnConciliar) btnConciliar.addEventListener('click', function(){ conciliarPagamentos(false); });
-
     var btnMais = document.getElementById('btnCarregarMaisClientes');
     if (btnMais) btnMais.addEventListener('click', carregarMaisClientes);
 
@@ -863,12 +853,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
     var modalImportarCancelar = document.getElementById('modalImportarCancelar');
     if (modalImportarCancelar) modalImportarCancelar.addEventListener('click', function(){ fecharModal('modalImportar'); });
-
-    // Formulario de novo recebimento
-    var formNovoRecebimento = document.getElementById('formNovoRecebimento');
-    if (formNovoRecebimento) {
-        formNovoRecebimento.addEventListener('submit', salvarNovoRecebimento);
-    }
 
     var tabelaClientes = document.getElementById('tabelaClientes');
     if (tabelaClientes) {
@@ -929,7 +913,6 @@ async function carregarDashboardGraficos() {
         if (elRE) elRE.textContent = totalRetiradas;
         if (el30) el30.textContent = cadastros30d;
 
-        renderizarFinanceiro(dados.financeiro);
 
         // Gráfico Pizza: Entregas vs Retiradas
         var tipoLabels = Object.keys(dados.por_tipo || {});
@@ -1059,81 +1042,6 @@ function rotuloMes(chave) {
     var partes = String(chave).split('-');
     if (partes.length !== 2) return chave;
     return nomes[parseInt(partes[1], 10) - 1] + '/' + partes[0].slice(2);
-}
-
-function renderizarFinanceiro(fin) {
-    if (!fin) return;
-
-    var def = function(id, texto) { var el = document.getElementById(id); if (el) el.textContent = texto; };
-    def('metricFaturamentoMes', formatarReal(fin.faturamento_mes));
-    def('metricAReceber', formatarReal(fin.a_receber));
-    def('metricEmAtraso', formatarReal(fin.em_atraso));
-    def('metricTicketMedio', formatarReal(fin.ticket_medio_mes));
-    def('metricQtdRecebimentos', fin.qtd_recebimentos_mes + ' recebimento(s) no mes');
-    def('metricQtdAtraso', fin.qtd_em_atraso > 0 ? fin.qtd_em_atraso + ' cobranca(s) vencida(s)' : 'Nenhuma cobranca vencida');
-    def('metricMesAnterior', 'Mes anterior: ' + formatarReal(fin.faturamento_mes_anterior));
-
-    // Variacao vs mes anterior. `null` = nao havia base de comparacao, entao
-    // nao inventa um "0%" que sugeriria estabilidade.
-    var elVar = document.getElementById('metricVariacao');
-    if (elVar) {
-        if (fin.variacao_percentual === null || fin.variacao_percentual === undefined) {
-            elVar.textContent = '';
-            elVar.className = 'metrica-variacao';
-        } else {
-            var v = fin.variacao_percentual;
-            var subiu = v >= 0;
-            elVar.textContent = (subiu ? '▲ +' : '▼ ') + v.toFixed(1).replace('.', ',') + '%';
-            elVar.className = 'metrica-variacao ' + (subiu ? 'variacao-alta' : 'variacao-baixa');
-        }
-    }
-
-    var ctx = document.getElementById('chartReceitaMensal');
-    var serie = fin.serie_mensal || [];
-    if (!ctx || typeof Chart === 'undefined' || serie.length === 0) return;
-
-    // Destaca o mes corrente (ultimo da serie) para a leitura de "onde estou".
-    var ultimoIndice = serie.length - 1;
-    var paleta = paletaGraficos();
-    var cores = serie.map(function(_, i) { return i === ultimoIndice ? paleta.sucesso : paleta.primaria; });
-
-    if (chartInstances.receita) chartInstances.receita.destroy();
-    chartInstances.receita = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: serie.map(function(p){ return rotuloMes(p.mes); }),
-            datasets: [{
-                label: 'Receita',
-                data: serie.map(function(p){ return p.total; }),
-                backgroundColor: cores,
-                borderRadius: 6,
-                maxBarThickness: 64
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: { display: false },
-                tooltip: {
-                    callbacks: {
-                        label: function(item) { return formatarReal(item.parsed.y); }
-                    }
-                }
-            },
-            scales: {
-                y: {
-                    beginAtZero: true,
-                    ticks: {
-                        color: corDoTexto(),
-                        callback: function(v) { return 'R$ ' + v.toLocaleString('pt-BR'); }
-                    },
-                    grid: { color: corDaGrade() }
-                },
-                x: { ticks: { color: corDoTexto() }, grid: { display: false } }
-            }
-        }
-    });
 }
 
 // -----------------------------------------------------------------------------
@@ -2330,102 +2238,6 @@ async function enviarExcelComNome(ids, nomeArquivo) {
 }
 
 // -----------------------------------------------------------------------------
-// Relatorios
-// -----------------------------------------------------------------------------
-function obterParamsRelatorio() {
-    var tipo = (document.getElementById('relFiltroTipo') || {}).value || '';
-    var cidade = (document.getElementById('relFiltroCidade') || {}).value || '';
-    var dataInicio = (document.getElementById('relDataInicio') || {}).value || '';
-    var dataFim = (document.getElementById('relDataFim') || {}).value || '';
-    var params = new URLSearchParams();
-    if (tipo) params.set('tipo', tipo);
-    if (cidade) params.set('cidade', cidade);
-    if (dataInicio) params.set('data_inicio', dataInicio);
-    if (dataFim) params.set('data_fim', dataFim);
-    return params;
-}
-
-async function carregarRelatorio() {
-    var contador = document.getElementById('relatorioContador');
-    var previewCard = document.getElementById('relatorioPreviewCard');
-    var tabela = document.getElementById('relatorioTabela');
-    var dataInicio = (document.getElementById('relDataInicio') || {}).value || '';
-    var dataFim = (document.getElementById('relDataFim') || {}).value || '';
-    if (dataInicio && dataFim && dataFim < dataInicio) {
-        exibirToast('Data final deve ser posterior a data inicial.', 'error');
-        return;
-    }
-    try {
-        if (contador) contador.textContent = 'Carregando...';
-        var params = obterParamsRelatorio();
-        var resp = await fetch('/api/relatorios?' + params.toString());
-        if (!resp.ok) throw new Error('Falha ao buscar dados');
-        var dados = await resp.json();
-        var clientes = dados.clientes || [];
-        if (contador) contador.textContent = clientes.length + ' cliente(s) encontrado(s).';
-        if (clientes.length === 0) {
-            if (previewCard) previewCard.hidden = true;
-            return;
-        }
-        if (previewCard) previewCard.hidden = false;
-        if (tabela) {
-            tabela.innerHTML = clientes.map(function(c) {
-                var badgeClass = c.entrega_retirada === 'Retirada' ? 'badge-retirada' : 'badge-entrega';
-                var dataFormatada = c.criado_em ? new Date(c.criado_em).toLocaleDateString('pt-BR') : '-';
-                return '<tr>' +
-                    '<td><strong>' + escaparHtml(c.nome) + '</strong></td>' +
-                    '<td>' + escaparHtml(c.cidade || '-') + '</td>' +
-                    '<td>' + escaparHtml(c.bairro || '-') + '</td>' +
-                    '<td><span class="' + badgeClass + '">' + escaparHtml(c.entrega_retirada) + '</span></td>' +
-                    '<td class="valor">' + escaparHtml(c.cep || '-') + '</td>' +
-                    '<td class="valor">' + dataFormatada + '</td>' +
-                    '</tr>';
-            }).join('');
-        }
-        carregarRelatorioRegioes(dados.regioes || []);
-    } catch(e) {
-        console.error('Erro ao carregar relatorio:', e);
-        exibirToast('Erro ao carregar relatorio.', 'error');
-        if (contador) contador.textContent = 'Erro ao carregar dados.';
-    }
-}
-
-function exportarRelatorio() {
-    var params = obterParamsRelatorio();
-    var formato = (document.getElementById('relFormato') || {}).value || 'csv';
-    params.set('formato', formato);
-    window.open('/api/relatorios/exportar?' + params.toString(), '_blank');
-    exibirToast('Relatorio exportado!');
-}
-
-function carregarRelatorioRegioes(regioes) {
-    var container = document.getElementById('relatorioRegioes');
-    if (!container) return;
-    if (!regioes || regioes.length === 0) {
-        container.innerHTML = '<div class="empty-state">' +
-            '<div class="empty-state-icon" aria-hidden="true">' + ICONE_VAZIO + '</div>' +
-            '<h3>Sem dados por regiao</h3>' +
-            '<p>Cadastre clientes com cidade preenchida para ver a distribuicao aqui.</p>' +
-            '</div>';
-        return;
-    }
-    var total = regioes.reduce(function(a, r) { return a + r.total; }, 0);
-    container.innerHTML = '<table class="tabela-simples"><caption class="visually-hidden">Clientes por cidade</caption>' +
-        '<thead><tr><th scope="col">Cidade</th><th scope="col" class="centro">Total</th>' +
-        '<th scope="col" class="centro">Entregas</th><th scope="col" class="centro">Retiradas</th>' +
-        '<th scope="col" class="direita">%</th></tr></thead><tbody>' +
-        regioes.map(function(r) {
-            var pct = total > 0 ? Math.round((r.total / total) * 100) : 0;
-            return '<tr><td><strong>' + escaparHtml(r.cidade) + '</strong></td>' +
-                '<td class="centro">' + r.total + '</td>' +
-                '<td class="centro"><span class="badge-entrega">' + r.entregas + '</span></td>' +
-                '<td class="centro"><span class="badge-retirada">' + r.retiradas + '</span></td>' +
-                '<td class="direita">' + pct + '%</td></tr>';
-        }).join('') +
-        '</tbody></table>';
-}
-
-// -----------------------------------------------------------------------------
 // Mapa de Clientes (Leaflet/OpenStreetMap)
 // -----------------------------------------------------------------------------
 var mapaInstance = null;
@@ -2576,475 +2388,20 @@ async function geocodificarCidade(query) {
     return null;
 }
 // -----------------------------------------------------------------------------
-// Pagamentos
-// -----------------------------------------------------------------------------
-
-async function carregarPagamentos() {
-    carregarPagamentosLista();
-    carregarPagamentosMetricas();
-    // Load clients into the modal's select (recClienteId)
-    try {
-        var resp = await fetch('/api/clientes?busca=');
-        var clientes = await resp.json();
-        var select = document.getElementById('recClienteId');
-        if (select) {
-            var valAtual = select.value;
-            select.innerHTML = '<option value="">Selecione um cliente...</option>';
-            clientes.forEach(function(c) {
-                var opt = document.createElement('option');
-                opt.value = c.id;
-                opt.textContent = c.nome + (c.cidade ? ' (' + c.cidade + ')' : '');
-                opt.setAttribute('data-nome', c.nome);
-                select.appendChild(opt);
-            });
-            if (valAtual) select.value = valAtual;
-        }
-    } catch(_) {}
-}
-
-async function carregarPagamentosMetricas() {
-    try {
-        var resp = await fetch('/api/pagamentos/metricas');
-        var dados = await resp.json();
-        var elRecebido = document.getElementById('pagTotalRecebido');
-        var elPendente = document.getElementById('pagTotalPendente');
-        var elAtrasado = document.getElementById('pagTotalAtrasado');
-        if (elRecebido) elRecebido.textContent = 'R$ ' + (dados.total_recebido || 0).toFixed(2).replace('.', ',');
-        if (elPendente) elPendente.textContent = 'R$ ' + (dados.total_pendente || 0).toFixed(2).replace('.', ',');
-        if (elAtrasado) elAtrasado.textContent = 'R$ ' + (dados.total_atrasado || 0).toFixed(2).replace('.', ',');
-    } catch(_) {}
-}
-
-// carregarClientesParaPagamento removed — clients are now loaded directly
-// in carregarPagamentos() and abrirModalNovoRecebimento() targeting recClienteId
-
-async function carregarPagamentosLista() {
-    mostrarEsqueleto('tabelaPagamentos', 7, 4);
-    try {
-        var filtroCliente = (document.getElementById('pagFiltroCliente') || {}).value || '';
-        var filtroStatus = (document.getElementById('pagFiltroStatus') || {}).value || '';
-        var resp = await fetch('/api/pagamentos');
-        var pagamentos = await resp.json();
-        // Apply client-side filters
-        if (filtroCliente) {
-            var term = filtroCliente.toLowerCase();
-            pagamentos = pagamentos.filter(function(p) {
-                return (p.cliente_nome || '').toLowerCase().indexOf(term) !== -1;
-            });
-        }
-        if (filtroStatus) {
-            pagamentos = pagamentos.filter(function(p) {
-                return p.status === filtroStatus;
-            });
-        }
-        renderizarTabelaPagamentos(pagamentos);
-    } catch(e) {
-        console.error('Erro ao carregar pagamentos:', e);
-        // Sem isto a tabela ficaria presa no esqueleto, sugerindo carregamento
-        // eterno em vez de falha.
-        renderizarTabelaPagamentos([]);
-        exibirToast('Erro ao carregar pagamentos.', 'error');
-    }
-}
-
-function renderizarTabelaPagamentos(pagamentos) {
-    var tbody = document.getElementById('tabelaPagamentos');
-    if (!tbody) return;
-    if (!pagamentos || pagamentos.length === 0) {
-        tbody.innerHTML = linhaEstadoVazio(7, 'Nenhum pagamento registrado',
-            'Use "Novo Recebimento" para lancar o primeiro, ou revise o filtro de status.');
-        return;
-    }
-    tbody.innerHTML = pagamentos.map(function(p) {
-        var statusClass = 'badge-pendente';
-        if (p.status === 'Recebido') statusClass = 'badge-recebido';
-        else if (p.status === 'Atrasado') statusClass = 'badge-atrasado';
-        else if (p.status === 'Cancelado') statusClass = 'badge-cancelado';
-        var tipoClass = 'badge-entrega';
-        if (p.tipo_pagamento === 'Boleto') tipoClass = 'badge-retirada';
-        else if (p.tipo_pagamento === 'Dinheiro') tipoClass = 'badge-recebido';
-        else if (p.tipo_pagamento === 'Cartao') tipoClass = 'badge-pendente';
-        else if (p.tipo_pagamento === 'Outro') tipoClass = 'badge-atrasado';
-        var valor = parseFloat(p.valor || 0).toFixed(2).replace('.', ',');
-        var dataVen = p.data_vencimento ? p.data_vencimento.split('-').reverse().join('/') : '-';
-        // So a acao mais provavel do estado atual ganha peso visual; as demais
-        // ficam secundarias. "Cancelar" e destrutiva e usa o contorno vermelho.
-        var acoes = '';
-        if (p.status === 'Pendente') {
-            if (!p.asaas_payment_id) {
-                acoes = '<button type="button" class="btn btn-primary btn-sm" data-comando="gerarCobranca" data-id="' + p.id + '">Gerar Cobranca</button>';
-            } else {
-                acoes = '<button type="button" class="btn btn-sucesso btn-sm" data-comando="confirmarPagamentoLocal" data-id="' + p.id + '">Confirmar</button>';
-            }
-            acoes += '<button type="button" class="btn btn-perigo btn-sm" data-comando="cancelarPagamentoLocal" data-id="' + p.id + '">Cancelar</button>';
-        }
-        var descricao = escaparHtml(p.descricao || '-');
-        return '<tr>' +
-            '<td><strong>' + escaparHtml(p.cliente_nome || '') + '</strong></td>' +
-            '<td class="valor">R$ ' + valor + '</td>' +
-            '<td title="' + descricao + '">' + descricao + '</td>' +
-            '<td><span class="' + statusClass + '">' + escaparHtml(p.status) + '</span></td>' +
-            '<td><span class="' + tipoClass + '">' + escaparHtml(p.tipo_pagamento || 'Pix') + '</span></td>' +
-            '<td class="valor">' + dataVen + '</td>' +
-            '<td class="col-acoes"><div class="tabela-acoes">' + acoes + '</div></td>' +
-            '</tr>';
-    }).join('');
-}
-
-// salvarPagamento() and cancelarPagamentoForm() removed — replaced by
-// salvarNovoRecebimento() and fecharModalNovoRecebimento() which target
-// the new modal IDs (recClienteId, recValor, recDataPagamento, etc.)
-
-async function gerarCobranca(pagamentoId) {
-    exibirToast('Gerando cobranca...');
-    try {
-        var resp = await fetch('/api/pagamentos/gerar-cobranca', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ pagamento_id: pagamentoId })
-        });
-        var dados = await resp.json();
-        if (!resp.ok) throw new Error(dados.erro || 'Erro');
-        exibirToast(dados.mensagem || 'Cobranca gerada!');
-        exibirDadosCobranca(pagamentoId);
-        carregarPagamentos();
-    } catch(e) { exibirToast('Erro: ' + e.message, 'error'); }
-}
-
-async function exibirDadosCobranca(pagamentoId) {
-    try {
-        var resp = await fetch('/api/pagamentos/' + pagamentoId + '/cobranca-dados');
-        var dados = await resp.json();
-        if (!resp.ok) return;
-        var modal = document.getElementById('modalCobranca');
-        var conteudo = document.getElementById('cobrancaConteudo');
-        if (!modal || !conteudo) return;
-        if (dados.tipo_pagamento === 'Pix') {
-            var qrSeguro = base64Seguro(dados.pix_qr_code);
-            // `src` continua sendo o primeiro atributo, colado no
-            // `base64Seguro()` que o produziu: e assim que a suite verifica
-            // que o sink nao voltou a ser montado com valor cru.
-            var qrImg = qrSeguro
-                ? '<img src="data:image/png;base64,' + qrSeguro + '" class="cobranca-qr" alt="QR Code do Pix">'
-                : '<p class="cobranca-indisponivel">QR Code nao disponivel.</p>';
-            var payload = dados.pix_payload || '';
-            conteudo.innerHTML = '<div class="cobranca-bloco">' +
-                '<h3 class="cobranca-titulo">Pagamento Pix</h3>' +
-                '<p class="cobranca-valor">Valor: R$ ' + (dados.valor || 0).toFixed(2).replace('.', ',') + '</p>' +
-                qrImg +
-                // O id substitui o antigo seletor por atributo de estilo
-                // (`div[style*="word-break"]`), que quebrava a copia assim que
-                // o CSS inline mudasse.
-                (payload ? '<div class="cobranca-payload" id="cobrancaPayload">' + escaparHtml(payload) + '</div>' : '') +
-                (payload ? '<button type="button" class="btn btn-primary" data-comando="copiarPix">Copiar Copia e Cola</button>' : '') +
-                '</div>';
-        } else if (dados.tipo_pagamento === 'Boleto') {
-            var url = urlSegura(dados.boleto_url);
-            conteudo.innerHTML = '<div class="cobranca-bloco">' +
-                '<h3 class="cobranca-titulo">Boleto Bancario</h3>' +
-                '<p class="cobranca-valor">Valor: R$ ' + (dados.valor || 0).toFixed(2).replace('.', ',') + '</p>' +
-                (dados.nosso_numero ? '<p class="cobranca-indisponivel">Nosso Numero: ' + escaparHtml(dados.nosso_numero) + '</p>' : '') +
-                (url ? '<a href="' + escaparHtml(url) + '" target="_blank" rel="noopener" class="btn btn-primary">Abrir Boleto</a>' : '<p class="cobranca-indisponivel">URL do boleto nao disponivel.</p>') +
-                '</div>';
-        }
-        abrirModal(modal);
-    } catch(e) { console.error('Erro ao obter dados da cobranca:', e); }
-}
-
-function fecharModalCobranca() {
-    fecharModal('modalCobranca');
-}
-
-async function copiarPix() {
-    var payloadEl = document.getElementById('cobrancaPayload');
-    if (payloadEl && navigator.clipboard) {
-        try {
-            await navigator.clipboard.writeText(payloadEl.textContent);
-            exibirToast('Copia e Cola copiado!');
-        } catch(_) { exibirToast('Falha ao copiar.', 'error'); }
-    }
-}
-
-async function confirmarPagamentoLocal(pagamentoId) {
-    // O backend confere com o Asaas antes de marcar como recebido. Ate aqui
-    // um clique bastava, e o ERP passava a declarar receita que ninguem tinha
-    // recebido -- o pior tipo de erro num modulo financeiro, porque o numero
-    // errado parece certo.
-    var resposta = await _enviarConfirmacao(pagamentoId, null);
-    if (!resposta) return;
-
-    if (resposta.status === 409 && resposta.dados.pode_forcar) {
-        var motivo = await confirmarAcao({
-            titulo: 'Confirmar mesmo assim?',
-            mensagem: resposta.dados.erro,
-            textoConfirmar: 'Confirmar com motivo',
-            textoCancelar: 'Voltar',
-            icone: 'alerta',
-            variante: 'perigo',
-            campoTexto: {
-                rotulo: 'Por que esta confirmando fora do gateway?',
-                exemplo: 'Ex.: pago em dinheiro na retirada'
-            }
-        });
-        if (!motivo) return;
-        resposta = await _enviarConfirmacao(pagamentoId, motivo);
-        if (!resposta) return;
-    }
-
-    if (resposta.ok) {
-        exibirToast(resposta.dados.mensagem || 'Pagamento confirmado!');
-        carregarPagamentos();
-    } else {
-        exibirToast(resposta.dados.erro || 'Erro ao confirmar.', 'error');
-    }
-}
-
-async function _enviarConfirmacao(pagamentoId, motivo) {
-    var corpo = motivo ? { forcar: true, motivo: motivo } : {};
-    try {
-        var resp = await fetch('/api/pagamentos/' + pagamentoId + '/confirmar', {
-            method: 'POST',
-            headers: CABECALHOS_JSON,
-            body: JSON.stringify(corpo)
-        });
-        return { ok: resp.ok, status: resp.status, dados: await resp.json().catch(function(){ return {}; }) };
-    } catch(_) {
-        exibirToast('Erro ao confirmar pagamento.', 'error');
-        return null;
-    }
-}
-
-// -----------------------------------------------------------------------------
-// Conciliacao com o Asaas
+// Pagamentos -- area desativada nesta versao
 //
-// O webhook do Asaas nunca chega numa instalacao normal: o backend escuta em
-// 127.0.0.1:5000 e um servidor na internet nao alcanca o loopback desta
-// maquina. Sem isto, o cliente pagava o Pix, o dinheiro entrava na conta do
-// Asaas e a cobranca continuava "Pendente" na tela ate alguem confirmar na mao.
-//
-// Uma consulta de saida atravessa qualquer firewall e nao expoe nada.
+// O registro, a listagem, a emissao de cobranca e a confirmacao viviam aqui.
+// Sairam junto com o Asaas: sem gateway nao ha conferencia, e confirmacao sem
+// conferencia era o bloqueio financeiro que a auditoria apontou. O backend
+// responde 503 nas rotas, e a aba mostra o aviso.
 // -----------------------------------------------------------------------------
-var _conciliacaoEmCurso = false;
 
-// A cada quanto tempo o app pergunta sozinho.
+// A conciliacao com o Asaas vivia aqui. Saiu junto com a integracao: sem
+// gateway nao ha a quem perguntar se o dinheiro entrou.
 //
-// O botao existia, a rota existia e a operacao ja era idempotente -- so nao
-// havia nada que a acionasse. Nem agendador no backend, nem temporizador
-// aqui: a unica chamada partia de um clique. Na pratica o cliente pagava o
-// Pix, o dinheiro entrava na conta do Asaas e a cobranca ficava "Pendente"
-// ate alguem lembrar de conciliar. Um relatorio financeiro tirado nesse
-// meio-tempo estava errado, sem nada na tela indicando isso.
-//
-// Vinte minutos e o meio-termo entre o financeiro defasado e gastar cota da
-// API do Asaas a toa. `reconciliar()` so consulta cobrancas EM ABERTO, entao
-// uma rodada numa loja sem pendencia nao custa requisicao nenhuma.
-var INTERVALO_CONCILIACAO_MS = 20 * 60 * 1000;
-
-var CHAVE_ULTIMA_CONCILIACAO = 'adri:ultimaConciliacao';
-
-function registrarConciliacaoBemSucedida() {
-    try { localStorage.setItem(CHAVE_ULTIMA_CONCILIACAO, new Date().toISOString()); } catch(_) {}
-    atualizarSeloDeConciliacao();
-}
-
-// Sem isto o operador le um numero sem saber se ele e de agora ou de ontem --
-// que era exatamente o problema quando a conciliacao dependia de alguem
-// lembrar de clicar. O selo torna a defasagem visivel em vez de silenciosa.
-function atualizarSeloDeConciliacao() {
-    var selo = document.getElementById('ultimaConciliacao');
-    if (!selo) return;
-
-    var marca = null;
-    try { marca = localStorage.getItem(CHAVE_ULTIMA_CONCILIACAO); } catch(_) {}
-    if (!marca) {
-        selo.textContent = 'Nunca conferido';
-        return;
-    }
-
-    var quando = new Date(marca);
-    if (isNaN(quando.getTime())) { selo.textContent = ''; return; }
-
-    // Texto curto de proposito: o selo divide a linha com o filtro, o seletor
-    // de status e dois botoes, e uma frase longa empurrava tudo para fora do
-    // cartao. Precisao de minuto tambem nao serve para nada aqui -- o que o
-    // operador precisa saber e se o numero e de agora ou de outro dia.
-    var minutos = Math.floor((Date.now() - quando.getTime()) / 60000);
-    var horas = String(quando.getHours()).padStart(2, '0') + ':'
-              + String(quando.getMinutes()).padStart(2, '0');
-
-    if (minutos < 1) selo.textContent = 'Conferido agora';
-    else if (minutos < 60) selo.textContent = 'Conferido ha ' + minutos + ' min';
-    else if (quando.toDateString() === new Date().toDateString()) selo.textContent = 'Conferido as ' + horas;
-    else selo.textContent = 'Conferido em ' + quando.toLocaleDateString('pt-BR');
-}
-
-function iniciarConciliacaoAutomatica() {
-    atualizarSeloDeConciliacao();
-    // Silenciosa: na abertura do app o operador nao pediu nada, e um toast
-    // dizendo "nada mudou" a cada inicializacao vira ruido que se aprende a
-    // ignorar -- inclusive quando tiver algo a dizer.
-    conciliarPagamentos(true);
-    setInterval(function() { conciliarPagamentos(true); }, INTERVALO_CONCILIACAO_MS);
-    // O selo envelhece sozinho entre uma rodada e outra.
-    setInterval(atualizarSeloDeConciliacao, 60 * 1000);
-}
-
-async function conciliarPagamentos(silenciosa) {
-    if (_conciliacaoEmCurso) return;
-    _conciliacaoEmCurso = true;
-    var botao = document.getElementById('btnConciliarAsaas');
-    if (botao) botao.disabled = true;
-    if (!silenciosa) exibirToast('Consultando o Asaas...');
-    try {
-        var resp = await fetch('/api/pagamentos/reconciliar', {
-            method: 'POST', headers: CABECALHOS_JSON
-        });
-        var dados = await resp.json();
-        if (resp.status === 503) {
-            if (!silenciosa) exibirToast(dados.erro || 'Asaas nao configurado.', 'error');
-            return;
-        }
-        if (!resp.ok) throw new Error(dados.erro || 'Erro');
-
-        registrarConciliacaoBemSucedida();
-
-        if (dados.atualizadas > 0) {
-            exibirToast(dados.atualizadas + ' cobranca(s) atualizada(s) pelo Asaas.');
-            carregarPagamentos();
-            carregarDashboardGraficos();
-        } else if (!silenciosa) {
-            var texto = dados.consultadas
-                ? 'Nada mudou: ' + dados.consultadas + ' cobranca(s) conferida(s).'
-                : 'Nenhuma cobranca em aberto para conferir.';
-            if (dados.falhas) texto += ' ' + dados.falhas + ' nao respondeu(ram).';
-            exibirToast(texto);
-        }
-    } catch(e) {
-        if (!silenciosa) exibirToast('Nao foi possivel conciliar: ' + e.message, 'error');
-    } finally {
-        _conciliacaoEmCurso = false;
-        if (botao) botao.disabled = false;
-    }
-}
-
-async function cancelarPagamentoLocal(pagamentoId) {
-    var confirmado = await confirmarAcao({
-        titulo: 'Cancelar Cobranca',
-        mensagem: 'Esta cobranca sera marcada como cancelada. O registro continua no historico para conferencia. Deseja continuar?',
-        textoConfirmar: 'Cancelar cobranca',
-        textoCancelar: 'Voltar',
-        icone: 'alerta',
-        variante: 'perigo'
-    });
-    if (!confirmado) return;
-    try {
-        var resp = await fetch('/api/pagamentos/' + pagamentoId, { method: 'DELETE' });
-        var dados = await resp.json();
-        if (!resp.ok) throw new Error(dados.erro || 'Erro');
-        exibirToast('Pagamento cancelado!');
-        carregarPagamentos();
-    } catch(e) { exibirToast('Erro: ' + e.message, 'error'); }
-}
-
-// -----------------------------------------------------------------------------
-// Novo Recebimento Manual
-// -----------------------------------------------------------------------------
-async function abrirModalNovoRecebimento() {
-    var modal = document.getElementById('modalNovoRecebimento');
-    if (!modal) return;
-    
-    // Carregar lista de clientes no select
-    var select = document.getElementById('recClienteId');
-    if (select) {
-        try {
-            var resp = await fetch('/api/clientes?busca=');
-            var clientes = await resp.json();
-            select.innerHTML = '<option value="">Selecione um cliente...</option>';
-            clientes.forEach(function(c) {
-                var opt = document.createElement('option');
-                opt.value = c.id;
-                opt.textContent = c.nome + (c.cidade ? ' (' + c.cidade + ')' : '');
-                opt.setAttribute('data-nome', c.nome);
-                select.appendChild(opt);
-            });
-        } catch(_) {}
-    }
-    
-    // Definir data atual como padrao
-    var dataInput = document.getElementById('recDataPagamento');
-    if (dataInput) {
-        var hoje = new Date().toISOString().split('T')[0];
-        dataInput.value = hoje;
-    }
-    
-    // Limpar formulario
-    var form = document.getElementById('formNovoRecebimento');
-    if (form) form.reset();
-    if (dataInput) dataInput.value = hoje;
-    
-    abrirModal(modal);
-}
-
-function fecharModalNovoRecebimento() {
-    fecharModal('modalNovoRecebimento');
-}
-
-async function salvarNovoRecebimento(e) {
-    if (e) e.preventDefault();
-    
-    var clienteSelect = document.getElementById('recClienteId');
-    var clienteId = clienteSelect ? clienteSelect.value : '';
-    if (!clienteId) {
-        exibirToast('Selecione um cliente.', 'error');
-        return;
-    }
-    
-    var clienteOpt = clienteSelect.options[clienteSelect.selectedIndex];
-    var clienteNome = clienteOpt ? (clienteOpt.getAttribute('data-nome') || clienteOpt.textContent) : '';
-    
-    var valor = parseFloat((document.getElementById('recValor') || {}).value || 0);
-    if (isNaN(valor) || valor <= 0) {
-        exibirToast('Informe um valor valido.', 'error');
-        return;
-    }
-    
-    var dataPagamento = (document.getElementById('recDataPagamento') || {}).value || '';
-    if (!dataPagamento) {
-        exibirToast('Informe a data do recebimento.', 'error');
-        return;
-    }
-    
-    var tipoPagamento = (document.getElementById('recTipoPagamento') || {}).value || 'Pix';
-    var status = (document.getElementById('recStatus') || {}).value || 'Recebido';
-    var descricao = (document.getElementById('recDescricao') || {}).value || '';
-    
-    var dados = {
-        cliente_id: parseInt(clienteId),
-        cliente_nome: clienteNome,
-        valor: valor,
-        descricao: descricao,
-        data_vencimento: dataPagamento,
-        tipo_pagamento: tipoPagamento,
-        status: status,
-        data_pagamento: status === 'Recebido' ? dataPagamento : ''
-    };
-    
-    try {
-        var resp = await fetch('/api/pagamentos', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(dados)
-        });
-        var resultado = await resp.json();
-        if (!resp.ok) throw new Error(resultado.erro || 'Erro ao registrar recebimento');
-        
-        exibirToast('Recebimento registrado com sucesso!');
-        fecharModalNovoRecebimento();
-        carregarPagamentos();
-    } catch(e) {
-        exibirToast('Erro: ' + e.message, 'error');
-    }
-}
+// Se um gateway voltar, o desenho a recuperar e o de perguntar de dentro para
+// fora -- o backend escuta em loopback e webhook nao alcanca este endereco.
+// Ver o historico deste arquivo na versao 1.4.2.
 
 async function carregarMapaClientes() {
     if (!mapaInstance || _mapaCarregando) return;
@@ -3139,28 +2496,18 @@ var COMANDOS_PERMITIDOS = [
     'abrirFormularioEntrega',
     'abrirFormularioPedido',
     'abrirFormularioProduto',
-    'abrirModalNovoRecebimento',
     'abrirNotificacoes',
     'adicionarItemAoPedido',
     'alternarSidebar',
     'aplicarFiltros',
     'atualizarNotificacoes',
-    'cancelarPagamentoLocal',
-    'carregarPagamentos',
-    'carregarRelatorio',
     'conectarMicrosoft',
-    'confirmarPagamentoLocal',
-    'copiarPix',
     'copiarPixDaLicenca',
     'enviarParaExcel',
     'executarImportacao',
-    'exportarRelatorio',
     'fazerBackupSQLite',
     'fecharModal',
-    'fecharModalCobranca',
-    'fecharModalNovoRecebimento',
     'fecharNotificacoes',
-    'gerarCobranca',
     'gerarPixDaLicenca',
     'limparFiltros',
     'sugerirBairro',

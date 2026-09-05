@@ -58,16 +58,7 @@ def _criar_indices(conexao: sqlite3.Connection) -> None:
     indices_unicos = [
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_produtos_codigo "
         "ON produtos(codigo) WHERE ativo = 1",
-        "CREATE UNIQUE INDEX IF NOT EXISTS ux_pedidos_numero ON pedidos(numero)",
-        "CREATE UNIQUE INDEX IF NOT EXISTS ux_pagamentos_asaas_payment_id "
-        "ON pagamentos(asaas_payment_id) WHERE asaas_payment_id IS NOT NULL AND asaas_payment_id != ''",
-        "CREATE UNIQUE INDEX IF NOT EXISTS ux_pagamentos_asaas_external_reference "
-        "ON pagamentos(asaas_external_reference) WHERE asaas_external_reference IS NOT NULL AND asaas_external_reference != ''",
-        "CREATE UNIQUE INDEX IF NOT EXISTS ux_clientes_asaas_customer_id "
-        "ON clientes_asaas(asaas_customer_id) WHERE asaas_customer_id IS NOT NULL AND asaas_customer_id != ''",
-        "CREATE UNIQUE INDEX IF NOT EXISTS ux_clientes_asaas_external_reference "
-        "ON clientes_asaas(asaas_external_reference) WHERE asaas_external_reference IS NOT NULL AND asaas_external_reference != ''",
-    ]
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_pedidos_numero ON pedidos(numero)",    ]
     for comando in indices_unicos:
         try:
             conexao.execute(comando)
@@ -122,14 +113,6 @@ def garantir_schema_fallback(conexao: sqlite3.Connection) -> None:
             data_vencimento TEXT DEFAULT '',
             criado_em TEXT DEFAULT (datetime('now', 'localtime')),
             tipo_pagamento TEXT NOT NULL DEFAULT 'Pix',
-            asaas_payment_id TEXT DEFAULT '',
-            pix_payload TEXT DEFAULT '',
-            pix_qr_code TEXT DEFAULT '',
-            boleto_url TEXT DEFAULT '',
-            nosso_numero TEXT DEFAULT '',
-            asaas_external_reference TEXT DEFAULT '',
-            asaas_emissao_estado TEXT DEFAULT '',
-            asaas_emissao_inicio TEXT DEFAULT '',
             pedido_id INTEGER,
             parcela INTEGER NOT NULL DEFAULT 1,
             total_parcelas INTEGER NOT NULL DEFAULT 1,
@@ -146,17 +129,6 @@ def garantir_schema_fallback(conexao: sqlite3.Connection) -> None:
             CONSTRAINT fk_pagamentos_pedido_id_pedidos
                 FOREIGN KEY (pedido_id) REFERENCES pedidos(id) ON DELETE RESTRICT
         );
-
-        CREATE TABLE IF NOT EXISTS clientes_asaas (
-            cliente_id INTEGER PRIMARY KEY,
-            asaas_customer_id TEXT NOT NULL DEFAULT '',
-            asaas_external_reference TEXT DEFAULT '',
-            asaas_criacao_estado TEXT DEFAULT '',
-            asaas_criacao_inicio TEXT DEFAULT '',
-            CONSTRAINT fk_clientes_asaas_cliente_id_clientes
-                FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE RESTRICT
-        );
-
         CREATE TABLE IF NOT EXISTS notificacoes_lidas (
             chave TEXT PRIMARY KEY,
             lida_em TEXT DEFAULT (datetime('now', 'localtime'))
@@ -292,14 +264,6 @@ def garantir_schema_fallback(conexao: sqlite3.Connection) -> None:
     colunas_pagamentos = {
         "data_vencimento": "TEXT DEFAULT ''",
         "tipo_pagamento": "TEXT NOT NULL DEFAULT 'Pix'",
-        "asaas_payment_id": "TEXT DEFAULT ''",
-        "pix_payload": "TEXT DEFAULT ''",
-        "pix_qr_code": "TEXT DEFAULT ''",
-        "boleto_url": "TEXT DEFAULT ''",
-        "nosso_numero": "TEXT DEFAULT ''",
-        "asaas_external_reference": "TEXT DEFAULT ''",
-        "asaas_emissao_estado": "TEXT DEFAULT ''",
-        "asaas_emissao_inicio": "TEXT DEFAULT ''",
         # Dinheiro em centavos inteiros. `valor` (REAL) continua sendo gravado
         # durante a transicao; ver a migration a3b6f019c72d para o porque.
         "valor_centavos": "INTEGER",
@@ -345,21 +309,6 @@ def garantir_schema_fallback(conexao: sqlite3.Connection) -> None:
     }
     for coluna, declaracao in colunas_sessao.items():
         _garantir_coluna(conexao, "sessao", coluna, declaracao)
-
-    colunas_clientes_asaas = {
-        "asaas_external_reference": "TEXT DEFAULT ''",
-        "asaas_criacao_estado": "TEXT DEFAULT ''",
-        "asaas_criacao_inicio": "TEXT DEFAULT ''",
-    }
-    for coluna, declaracao in colunas_clientes_asaas.items():
-        _garantir_coluna(conexao, "clientes_asaas", coluna, declaracao)
-
-    conexao.execute(
-        "UPDATE clientes SET criado_em=datetime('now', 'localtime') WHERE criado_em IS NULL"
-    )
-    conexao.execute(
-        "UPDATE clientes SET atualizado_em=datetime('now', 'localtime') WHERE atualizado_em IS NULL"
-    )
 
     _criar_indices(conexao)
     conexao.executescript(

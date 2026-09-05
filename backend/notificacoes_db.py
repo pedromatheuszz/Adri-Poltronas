@@ -3,7 +3,7 @@ Notificacoes derivadas do estado do banco.
 
 Extraido de `database.py` para manter aquele arquivo abaixo do teto de 800
 linhas adotado no projeto. As notificacoes nao sao armazenadas: cada categoria
-e uma consulta sobre entregas, clientes e pagamentos, e so o estado de "lida"
+e uma consulta sobre entregas e clientes, e so o estado de "lida"
 e persistido.
 
 Este modulo NAO importa `database`. A fabrica de conexao chega como parametro
@@ -130,44 +130,6 @@ def obter_notificacoes(conectar):
                 'detalhes': c['cidade'] or '',
                 'cliente_id': c['id'],
                 'data': c['atualizado_em'] or ''
-            })
-
-        # 5. Pagamentos atrasados
-        pagamentos_atrasados = conexao.execute(
-            "SELECT p.*, c.nome as nome_cliente FROM pagamentos p LEFT JOIN clientes c ON p.cliente_id = c.id "
-            "WHERE p.data_vencimento != '' "
-            "AND date(p.data_vencimento) < date('now', 'localtime') "
-            "AND p.status = 'Pendente' "
-            "ORDER BY p.data_vencimento LIMIT ?", (MAX_NOTIFICACOES_POR_TIPO,)
-        ).fetchall()
-        for p in pagamentos_atrasados:
-            notifs.append({
-                'tipo': 'pagamento_atrasado',
-                'chave': f"pagamento_atrasado:{p['id']}",
-                'prioridade': 'alta',
-                'icone': '💰',
-                'msg': f"Pagamento R$ {p['valor']:.2f} de {p['nome_cliente'] or p['cliente_nome']} atrasado!",
-                'detalhes': f"Vencimento: {p['data_vencimento']}",
-                'pagamento_id': p['id'],
-                'data': p['data_vencimento']
-            })
-
-        # 6. Pagamentos vencendo hoje
-        pagamentos_hoje = conexao.execute(
-            "SELECT p.*, c.nome as nome_cliente FROM pagamentos p LEFT JOIN clientes c ON p.cliente_id = c.id "
-            "WHERE date(p.data_vencimento) = date('now', 'localtime') AND p.status = 'Pendente' "
-            "LIMIT ?", (MAX_NOTIFICACOES_POR_TIPO,)
-        ).fetchall()
-        for p in pagamentos_hoje:
-            notifs.append({
-                'tipo': 'pagamento_hoje',
-                'chave': f"pagamento_hoje:{p['id']}",
-                'prioridade': 'media',
-                'icone': '💳',
-                'msg': f"Pagamento R$ {p['valor']:.2f} de {p['nome_cliente'] or p['cliente_nome']} vence HOJE!",
-                'detalhes': '',
-                'pagamento_id': p['id'],
-                'data': p['data_vencimento']
             })
 
         # Marca quais ja foram lidas. Notificacoes lidas continuam na lista

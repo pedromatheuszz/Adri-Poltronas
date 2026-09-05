@@ -59,7 +59,7 @@ NOME_DO_COFRE = ".segredos"
 # Chaves que o cofre guarda. Sao as credenciais de integracao; `ADRI_FLASK_SECRET`
 # fica de fora de proposito -- ele e um segredo de sessao, regeneravel, e
 # perde-lo custa apenas relogin.
-CHAVES_PROTEGIDAS = ("ASAAS_API_KEY", "GEMINI_API_KEY", "ASAAS_WEBHOOK_TOKEN")
+CHAVES_PROTEGIDAS = ("MP_ACCESS_TOKEN", "GEMINI_API_KEY")
 
 _cache: Optional[dict] = None
 

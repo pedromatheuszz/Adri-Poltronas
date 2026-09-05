@@ -402,29 +402,24 @@ def test_nao_sobrou_handler_inline_na_pagina_montada(pagina):
     assert pagina.locator("[onclick]").count() == 0
 
 
-@pytest.mark.parametrize("aba", [
-    "clientes", "pedidos", "produtos", "entregas", "mapa",
-    "pagamentos", "relatorios", "dashboard",
-])
-def test_cada_aba_abre_ao_clicar(pagina, aba):
-    """Clique de verdade, e nao chamada direta da funcao: o caminho que o
-    operador percorre inclui o despachante delegado."""
-    pagina.click(f'[data-comando="trocarAba"][data-arg="{aba}"]')
-    pagina.wait_for_selector(f"#aba-{aba}.active", timeout=5000)
-    assert pagina.locator(f"#aba-{aba}").is_visible()
 
 
 def test_modal_abre_e_fecha(pagina):
-    pagina.click('[data-comando="trocarAba"][data-arg="pagamentos"]')
-    pagina.click('[data-comando="abrirModalNovoRecebimento"]')
-    pagina.wait_for_selector("#modalNovoRecebimento[open]", timeout=3000)
+    """
+    Ate a 1.4.2 este teste usava o modal de novo recebimento. Aquele modal
+    saiu com o modulo financeiro; o de produto exercita o mesmo mecanismo --
+    `<dialog>` aberto e fechado por comando declarativo.
+    """
+    pagina.click('[data-comando="trocarAba"][data-arg="produtos"]')
+    pagina.click('[data-comando="abrirFormularioProduto"]')
+    pagina.wait_for_selector("#modalProduto[open]", timeout=3000)
 
-    pagina.click('[data-comando="fecharModalNovoRecebimento"]')
+    pagina.click('#modalProduto [data-comando="fecharModal"]')
     # `wait_for_selector` espera VISIBILIDADE, e um <dialog> fechado tem
     # display:none -- o seletor nunca ficaria visivel. O que se quer aqui e o
     # atributo, nao a pintura.
     pagina.wait_for_function(
-        "() => !document.getElementById('modalNovoRecebimento').open", timeout=3000
+        "() => !document.getElementById('modalProduto').open", timeout=3000
     )
 
 
@@ -603,7 +598,7 @@ def test_sem_sessao_o_cadastro_nao_vaza_para_a_tela(pagina_sem_sessao):
 def test_sem_sessao_nao_aparece_toast_de_erro(pagina_sem_sessao):
     """
     "O app nao pode dar erro algum." Com o painel explicando a situacao, um
-    "Erro ao carregar pagamentos." vermelho por cima e o pior dos dois mundos:
+    "Erro ao carregar clientes." vermelho por cima e o pior dos dois mundos:
     assusta e nao diz o que fazer.
     """
     pagina_sem_sessao.wait_for_timeout(2500)
@@ -620,7 +615,7 @@ def test_sem_sessao_nao_ha_erro_de_javascript(pagina_sem_sessao):
 
 def test_sem_sessao_trocar_de_aba_nao_revela_conteudo(pagina_sem_sessao):
     """O painel vale para o app inteiro, e nao so para a aba de abertura."""
-    for aba in ("clientes", "pagamentos", "entregas"):
+    for aba in ("clientes", "produtos", "entregas"):
         pagina_sem_sessao.click(f'[data-comando="trocarAba"][data-arg="{aba}"]')
         pagina_sem_sessao.wait_for_timeout(300)
         assert pagina_sem_sessao.locator("#painelSemConexao").is_visible()

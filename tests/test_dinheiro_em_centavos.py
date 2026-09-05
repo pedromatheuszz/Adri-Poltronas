@@ -142,74 +142,10 @@ def test_faturamento_grava_centavos_sem_passar_por_float(client):
 # =============================================================================
 # Escrita dupla: as duas colunas nunca divergem
 # =============================================================================
-def test_recebimento_avulso_deriva_os_centavos(client):
-    cliente_id = _cliente(client)
-    resposta = client.post('/api/pagamentos', headers={'Origin': ORIGEM_LOCAL},
-                           data=json.dumps({
-                               "cliente_id": cliente_id,
-                               "cliente_nome": "Cliente Centavos",
-                               "valor": 1234.56,
-                               "descricao": "Avulso",
-                               "data_vencimento": "2030-01-10",
-                               "tipo_pagamento": "Pix",
-                           }), content_type='application/json')
-    pagamento_id = json.loads(resposta.data)['id']
-
-    with database.conectar() as conexao:
-        linha = conexao.execute(
-            "SELECT valor, valor_centavos FROM pagamentos WHERE id = ?", (pagamento_id,)
-        ).fetchone()
-
-    assert linha["valor_centavos"] == 123456
-    assert linha["valor"] == 1234.56
 
 
-def test_editar_o_valor_leva_os_centavos_junto(client):
-    """Deixar `valor` mudar sozinho faria `valor_centavos` guardar o numero
-    antigo -- divergencia silenciosa ate alguem comparar os dois."""
-    cliente_id = _cliente(client)
-    resposta = client.post('/api/pagamentos', headers={'Origin': ORIGEM_LOCAL},
-                           data=json.dumps({
-                               "cliente_id": cliente_id,
-                               "cliente_nome": "Cliente Centavos",
-                               "valor": 100.00,
-                               "descricao": "Avulso",
-                               "data_vencimento": "2030-01-10",
-                               "tipo_pagamento": "Pix",
-                           }), content_type='application/json')
-    pagamento_id = json.loads(resposta.data)['id']
-
-    database.atualizar_pagamento(pagamento_id, valor=250.75)
-
-    with database.conectar() as conexao:
-        linha = conexao.execute(
-            "SELECT valor, valor_centavos FROM pagamentos WHERE id = ?", (pagamento_id,)
-        ).fetchone()
-
-    assert linha["valor"] == 250.75
-    assert linha["valor_centavos"] == 25075
 
 
-def test_valores_com_dizima_nao_perdem_centavo(client):
-    """`CAST(x * 100 AS INTEGER)` trunca. Sobre uma base inteira, um centavo
-    por linha nao e arredondamento -- e erro."""
-    cliente_id = _cliente(client)
-    for valor, esperado in [(0.07, 7), (1.10, 110), (19.99, 1999), (0.29, 29)]:
-        resposta = client.post('/api/pagamentos', headers={'Origin': ORIGEM_LOCAL},
-                               data=json.dumps({
-                                   "cliente_id": cliente_id,
-                                   "cliente_nome": "Cliente Centavos",
-                                   "valor": valor,
-                                   "descricao": f"Valor {valor}",
-                                   "data_vencimento": "2030-01-10",
-                                   "tipo_pagamento": "Pix",
-                               }), content_type='application/json')
-        pagamento_id = json.loads(resposta.data)['id']
-        with database.conectar() as conexao:
-            centavos = conexao.execute(
-                "SELECT valor_centavos FROM pagamentos WHERE id = ?", (pagamento_id,)
-            ).fetchone()[0]
-        assert centavos == esperado, f"{valor} virou {centavos} em vez de {esperado}"
 
 
 # =============================================================================
@@ -245,38 +181,6 @@ def test_parcela_apontando_para_pedido_inexistente_e_recusada(client):
             )
 
 
-def test_backfill_converte_o_que_ja_existia(tmp_path, monkeypatch):
-    """
-    Um banco que ja tinha lancamentos precisa sair da migration com os
-    centavos preenchidos -- senao o primeiro relatorio que lesse a coluna nova
-    veria zero onde ha dinheiro.
-    """
-    caminho = tmp_path / "legado.db"
-    monkeypatch.setattr(database, "DB_PATH", str(caminho))
-
-    # Sobe ate a revisao ANTERIOR a que acrescenta a coluna.
-    import alembic.command
-    alembic.command.upgrade(migrations_manager._config(), "e2a9c4d70f61")
-
-    with closing(sqlite3.connect(caminho)) as conexao:
-        conexao.execute("INSERT INTO clientes (nome, cep, rua, bairro, cidade) "
-                        "VALUES ('Antigo', '11000-000', 'Rua', 'Centro', 'Santos')")
-        for valor in (33.33, 1234.56, 0.07):
-            conexao.execute(
-                "INSERT INTO pagamentos (cliente_id, cliente_nome, valor, descricao, "
-                "status, data_vencimento, tipo_pagamento) "
-                "VALUES (1, 'Antigo', ?, 'Legado', 'Pendente', '2030-01-10', 'Pix')",
-                (valor,),
-            )
-        conexao.commit()
-
-    migrations_manager.aplicar_migrações()
-
-    with closing(sqlite3.connect(caminho)) as conexao:
-        centavos = [linha[0] for linha in conexao.execute(
-            "SELECT valor_centavos FROM pagamentos ORDER BY id")]
-
-    assert centavos == [3333, 123456, 7]
 
 
 # =============================================================================
@@ -326,25 +230,8 @@ def test_dashboard_soma_exatamente_o_que_esta_nas_linhas(client):
     assert metricas['total_recebido'] == round(centavos / 100, 2)
 
 
-def test_metricas_financeiras_somam_em_centavos(client):
-    cliente_id = _cliente(client)
-    _receber(client, cliente_id, 0.07, quantos=1000)
-
-    financeiras = database.obter_metricas_financeiras()
-
-    # Mil vezes sete centavos sao exatamente setenta reais.
-    assert financeiras['faturamento_mes'] == 70.00
-    assert financeiras['ticket_medio_mes'] == 0.07
 
 
-def test_serie_mensal_tambem_vem_de_centavos(client):
-    cliente_id = _cliente(client)
-    _receber(client, cliente_id, 19.99, quantos=101)
-
-    serie = database.obter_metricas_financeiras()['serie_mensal']
-    total_da_serie = round(sum(m['total'] for m in serie), 2)
-
-    assert total_da_serie == 2018.99
 
 
 def test_linha_sem_centavos_ainda_e_somada(client):

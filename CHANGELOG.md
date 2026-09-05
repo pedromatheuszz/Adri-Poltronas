@@ -5,6 +5,59 @@ Versionamento [semântico](https://semver.org/lang/pt-BR/).
 
 ---
 
+## [1.5.0-beta] — 2026-09-05
+
+Remoção do Asaas e das áreas Financeiro e Análise. É uma **regressão
+deliberada de escopo**: funcionalidade que existia sai do produto enquanto a
+base de cobrança é repensada.
+
+### Removido
+
+- **A integração com o Asaas, por inteiro.** Cliente HTTP, emissão idempotente
+  de Pix e boleto, conciliação automática e o webhook. Com ele saem as
+  credenciais `ASAAS_API_KEY`, `ASAAS_SANDBOX` e `ASAAS_WEBHOOK_TOKEN`.
+
+- **A aba Pagamentos e a aba Relatórios**, e com elas as rotas `/api/pagamentos`
+  e `/api/relatorios`. O registro local de pagamento funcionava sem gateway,
+  mas a **confirmação** não: conferir o recebimento contra o Asaas era o que
+  impedia o ERP de declarar receita que ninguém recebeu — um dos bloqueios
+  financeiros que a auditoria da 1.3.1 apontou. Sem gateway sobrava a versão
+  sem lastro do mesmo problema.
+
+- **Os indicadores financeiros e o gráfico de receita do Dashboard**, e as
+  notificações de pagamento vencido e vencendo hoje.
+
+- **As colunas do gateway e a tabela `clientes_asaas`** (migration
+  `e5c94a17b3d8`). Isso descarta dados, e foi aplicado sabendo disso: o
+  aplicativo ainda não foi entregue a nenhum cliente, então não existe cobrança
+  emitida em lugar nenhum.
+
+### O que ficou, e por quê
+
+- **A tabela `pagamentos`.** O módulo Comercial gera as parcelas de um pedido
+  como linhas nela, e `pagamentos` tem chave estrangeira para `pedidos`.
+  Removê-la quebraria Pedidos, que não estava no escopo. `tipo_pagamento`
+  também fica: "Pix", "Boleto" e "Dinheiro" descrevem como o dinheiro chegou, e
+  isso continua verdade sem gateway.
+
+### Segurança
+
+Some o webhook, e com ele o único caminho pelo qual algo da internet falava com
+este backend. As isenções que existiam só para ele caíram junto — as de
+capacidade passaram de três rotas para duas, e `ROTAS_QUE_CHEGAM_DE_FORA` ficou
+vazia.
+
+### Notas de teste
+
+A suíte foi de 751 para 580 testes. Os que sumiram cobriam o que deixou de
+existir. Dois foram **adaptados** em vez de removidos, porque a cobertura era
+de outra coisa e só usava o financeiro como cenário: as notificações passaram a
+se apoiar em entregas atrasadas, e a censura de segredos na auditoria passou a
+ser exercitada pelo mecanismo (`registrar_evento` com campo sensível) em vez de
+por colunas específicas de cobrança.
+
+---
+
 ## [1.4.1-beta] — 2026-09-05
 
 O aplicativo não se identificava como beta em lugar nenhum. O README, a

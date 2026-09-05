@@ -239,52 +239,8 @@ def test_numero_nao_vira_texto():
     assert planilha.neutralizar_formula(None) is None
 
 
-def test_exportacao_csv_neutraliza_o_que_veio_do_cadastro(client):
-    client.post('/api/clientes', headers={'Origin': ORIGEM_LOCAL},
-                data=json.dumps({
-                    "nome": "Cliente Normal", "cep": "12345-678", "rua": "Rua A",
-                    "bairro": "Centro", "cidade": "Santos",
-                    "entrega_retirada": "Entrega",
-                    "observacoes": '=HYPERLINK("http://mal.exemplo","clique")',
-                }), content_type='application/json')
-
-    resposta = client.get('/api/relatorios/exportar?formato=csv')
-
-    assert resposta.status_code == 200
-    texto = resposta.data.decode('utf-8-sig')
-    assert '"\'=HYPERLINK' in texto or "'=HYPERLINK" in texto
-    assert ',=HYPERLINK' not in texto
 
 
-def test_exportacao_xlsx_neutraliza_tambem(client):
-    """O ataque nao e do CSV: e de quem abre o arquivo."""
-    import openpyxl
-
-    client.post('/api/clientes', headers={'Origin': ORIGEM_LOCAL},
-                data=json.dumps({
-                    "nome": "Cliente XLSX", "cep": "12345-678", "rua": "Rua A",
-                    "bairro": "Centro", "cidade": "Santos",
-                    "entrega_retirada": "Entrega",
-                    "observacoes": '=1+1',
-                }), content_type='application/json')
-
-    resposta = client.get('/api/relatorios/exportar?formato=xlsx')
-    assert resposta.status_code == 200
-
-    with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as arquivo:
-        arquivo.write(resposta.data)
-        caminho = arquivo.name
-    try:
-        planilha_lida = openpyxl.load_workbook(caminho)
-        valores = [
-            celula.value
-            for linha in planilha_lida.active.iter_rows()
-            for celula in linha
-            if isinstance(celula.value, str) and '1+1' in celula.value
-        ]
-        assert valores == ["'=1+1"]
-    finally:
-        os.unlink(caminho)
 
 
 # =============================================================================

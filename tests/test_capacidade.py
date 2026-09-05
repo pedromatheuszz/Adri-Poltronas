@@ -289,12 +289,17 @@ def test_host_forjado_e_recusado(cliente_com_guarda_ligado):
 # =============================================================================
 # Rotas isentas: cada uma tem um motivo, e nenhuma devolve dado de negocio
 # =============================================================================
-def test_isencoes_sao_apenas_as_tres_necessarias():
-    """Uma isencao a mais e uma porta aberta. As tres que existem sao o
-    webhook do Asaas (chega de fora, tem token proprio), o callback do OAuth
-    (chega pelo navegador do sistema) e a sonda de identidade."""
+def test_isencoes_sao_apenas_as_duas_necessarias():
+    """
+    Uma isencao a mais e uma porta aberta.
+
+    Eram tres ate a 1.4.2. O webhook do Asaas saiu com a integracao, e com ele
+    o unico caminho pelo qual algo da internet falava com este backend. Restam
+    o callback do OAuth, que chega pelo navegador do sistema e nao tem como
+    carregar o cabecalho, e a sonda de identidade, que nao devolve dado de
+    negocio.
+    """
     assert capacidade.ROTAS_ISENTAS == frozenset({
-        '/api/pagamentos/webhook',
         '/callback',
         '/api/health',
     })
