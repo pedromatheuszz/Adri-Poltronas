@@ -5,6 +5,40 @@ Versionamento [semântico](https://semver.org/lang/pt-BR/).
 
 ---
 
+## [1.3.2] — 2026-09-05
+
+A 1.3.1 fechou a leitura da API sem sessão. Correto do lado do servidor — e do
+lado da tela criou um estado que nunca tinha existido, porque até a 1.3.0 abrir
+o app sem conta conectada funcionava como qualquer outra abertura.
+
+### Corrigido
+
+- **O app aberto sem conta conectada mostrava zeros como se fossem o cadastro.**
+  Não era um erro na tela: era o Dashboard exibindo "0 Total Clientes" e
+  "R$ 0,00 em atraso" — os zeros escritos no próprio HTML — enquanto quatro
+  requisições voltavam 401 no console, onde ninguém olha. Quem abrisse o
+  sistema sem ter conectado leria "nada a receber" e acreditaria. Número errado
+  com ar de número certo é pior que aviso de erro.
+
+  Agora a abertura pergunta primeiro se há sessão e só então decide: com
+  sessão, carrega; sem sessão, substitui o conteúdo por uma explicação e o
+  botão de conectar. Enquanto o painel está visível não há número na tela para
+  ser lido errado.
+
+- **A sessão que expira com o app aberto virava um "Erro ao carregar
+  pagamentos." vermelho.** Um gancho central em toda resposta 401 de `/api/`
+  troca a tela pelo mesmo painel, e o erro deixa de aparecer: a explicação
+  calma no meio da tela e um toque de alarme por cima são o pior dos dois
+  mundos. Desconectar a conta também limpa a tela na hora, em vez de deixar o
+  cadastro do operador anterior visível até a próxima requisição.
+
+- **A primeira instalação anunciava "App atualizado! Recarregue".** O evento
+  `updatefound` do Service Worker dispara igual na instalação inicial e numa
+  atualização de verdade; sem distinguir os dois casos, a primeira abertura do
+  app pedia ao operador uma ação que não servia para nada.
+
+---
+
 ## [1.3.1] — 2026-09-05
 
 Correção dos achados da auditoria de segurança e funcionamento do commit

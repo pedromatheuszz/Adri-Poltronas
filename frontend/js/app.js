@@ -39,6 +39,68 @@ async function fetchSeguro(url, options) {
     }
 }
 
+// -----------------------------------------------------------------------------
+// Sessao ausente
+//
+// Ate a 1.3.0 a leitura da API respondia sem sessao, entao "app aberto sem
+// conta conectada" nunca precisou ser um estado: a tela carregava como
+// qualquer outra. Fechada essa folga, o MESMO app passou a mostrar a casca com
+// os zeros escritos no proprio HTML -- "0 Total Clientes", "R$ 0,00 em atraso"
+// -- enquanto o console acumulava 401 que ninguem ve.
+//
+// O sintoma nao era um erro na tela. Era pior: numero errado com ar de numero
+// certo. Quem abrisse o app sem ter conectado leria "nada a receber" e
+// acreditaria.
+//
+// Sao dois mecanismos. O portao em `iniciarAplicacao()` resolve a abertura --
+// nao se pede dado antes de saber se ha sessao. Este gancho resolve o resto:
+// a sessao que expira com o app aberto, e qualquer chamada futura que alguem
+// escreva sem lembrar do assunto.
+// -----------------------------------------------------------------------------
+var _semSessao = false;
+
+// `/api/auth/` e `/api/health` respondem antes de existir sessao por desenho;
+// um 401 vindo delas significaria outra coisa, e nao "precisa conectar".
+function _ehRotaQueExigeSessao(url) {
+    if (typeof url !== 'string' || url.indexOf('/api/') !== 0) return false;
+    return url.indexOf('/api/auth/') !== 0 && url.indexOf('/api/health') !== 0;
+}
+
+function registrarSessaoAusente() {
+    if (_semSessao) return;
+    _semSessao = true;
+    mostrarPainelSemConexao();
+}
+
+function registrarSessaoPresente() {
+    if (!_semSessao) return;
+    _semSessao = false;
+    esconderPainelSemConexao();
+}
+
+// O cabecalho da topbar fica por conta da troca de abas, e nao deste painel.
+//
+// A primeira versao daqui o trocava por "Conecte-se para comecar", o que
+// parecia melhor e nao era: trocar de aba com o painel aberto reescreve o
+// titulo, e o valor guardado para restaurar depois envelhecia na hora. Quem
+// conectasse estando em "Pagamentos" veria a tela voltar dizendo "Dashboard".
+//
+// Alem disso as duas informacoes sao diferentes e ambas verdadeiras: o titulo
+// diz onde o operador esta, o painel diz por que nao ha numero ali.
+function mostrarPainelSemConexao() {
+    var painel = document.getElementById('painelSemConexao');
+    var casca = document.getElementById('appShell');
+    if (painel) painel.hidden = false;
+    if (casca) casca.classList.add('sem-conexao');
+}
+
+function esconderPainelSemConexao() {
+    var painel = document.getElementById('painelSemConexao');
+    var casca = document.getElementById('appShell');
+    if (painel) painel.hidden = true;
+    if (casca) casca.classList.remove('sem-conexao');
+}
+
 // Patch do fetch original para injetar CSRF automaticamente
 var _fetchOriginal = window.fetch;
 window.fetch = function(url, options) {
@@ -53,7 +115,15 @@ window.fetch = function(url, options) {
             options.headers['Content-Type'] = 'application/json';
         }
     }
-    return _fetchOriginal.apply(this, arguments);
+    var promessa = _fetchOriginal.apply(this, arguments);
+    if (_ehRotaQueExigeSessao(url)) {
+        // Observa sem consumir: a promessa devolvida a quem chamou e a
+        // original, entao o corpo continua intacto para ele ler.
+        promessa.then(function(resposta) {
+            if (resposta && resposta.status === 401) registrarSessaoAusente();
+        }, function() { /* rede fora: e outro assunto, tratado em tentarBackend */ });
+    }
+    return promessa;
 };
 
 // Atualiza o cookie CSRF a partir do header da resposta inicial
@@ -115,6 +185,18 @@ async function tentarBackend(url, opcoes) {
 
 function exibirToast(mensagem, tipo) {
     tipo = tipo || 'success';
+    // Com o painel de "sem conexao" na tela, todo erro de carregamento tem a
+    // mesma causa e ja esta explicada la. Deixar passar produzia o pior dos
+    // dois mundos: a explicacao calma no meio da tela e, por cima dela, um
+    // "Erro ao carregar pagamentos." vermelho que nao diz o que fazer.
+    //
+    // A ordem funciona porque o gancho do 401 e registrado no momento do
+    // fetch: ele roda antes de quem chamou retomar do `await`, entao
+    // `_semSessao` ja esta ligado quando o catch tenta avisar.
+    if (_semSessao && tipo === 'error') {
+        console.warn('[sessao] erro suprimido (o painel ja explica):', mensagem);
+        return;
+    }
     var toast = document.getElementById('toast');
     if (!toast) return;
     toast.innerText = mensagem;
@@ -345,17 +427,42 @@ function trocarAba(aba) {
 
 var chartInstances = {};
 
-document.addEventListener('DOMContentLoaded', function() {
+var _dadosJaCarregados = false;
+
+// Tudo o que fala com /api/ e precisa de sessao. Chamado depois do portao, e
+// de novo quando o operador termina de conectar.
+function carregarDadosDoApp() {
+    if (_dadosJaCarregados) return;
+    _dadosJaCarregados = true;
     carregarClientes();
-    checarLoginExistente();
     carregarNotificacoes();
+    carregarDashboardGraficos();
+    iniciarConciliacaoAutomatica();
+}
+
+// O portao. Perguntar PRIMEIRO se ha sessao, e so entao decidir, e o que
+// impede a tela de aparecer preenchida com os zeros do HTML enquanto quatro
+// requisicoes voltam 401 em silencio.
+async function iniciarAplicacao() {
+    var logado = false;
+    try {
+        logado = await checarLoginExistente();
+    } catch (_) {
+        // /api/auth/status e isenta de sessao; falhar aqui significa backend
+        // fora do ar, nao falta de conta. Tratar como desconectado e o lado
+        // seguro: melhor pedir conexao do que mostrar numero que nao veio.
+    }
+    if (logado) carregarDadosDoApp();
+    else registrarSessaoAusente();
+}
+
+document.addEventListener('DOMContentLoaded', function() {
     initTheme();
     initSidebar();
     registrarAtalhosTeclado();
 
     initObservacoesCounter();
-    carregarDashboardGraficos();
-    iniciarConciliacaoAutomatica();
+    iniciarAplicacao();
 
     // O modulo comercial vive em comercial.js; a checagem cobre o caso de o
     // arquivo nao ter carregado, para o resto da tela seguir funcionando.
@@ -1831,9 +1938,14 @@ async function checarLoginExistente() {
         if (status.logado) {
             atualizarVisualBotaoConexao(status.conta);
             if (intervaloChecagem) { clearInterval(intervaloChecagem); intervaloChecagem = null; }
+            // A ordem importa: some o painel, e so entao os dados entram numa
+            // tela que ja voltou a mostrar conteudo.
+            registrarSessaoPresente();
+            carregarDadosDoApp();
             return true;
         }
         resetarVisualBotaoConexao();
+        registrarSessaoAusente();
         // O backend so devolve este motivo quando havia uma sessao que nao
         // pode mais ser renovada -- vale avisar, porque a tela acabou de
         // mudar de "Conectado" para "Conectar" sem o operador ter feito nada.
@@ -1881,7 +1993,15 @@ async function conectarMicrosoft() {
 async function desconectarMicrosoft() {
     try {
         var resp = await fetch('/api/auth/logout', { method: 'POST' });
-        if (resp.ok) { resetarVisualBotaoConexao(); exibirToast('Desconectado da Microsoft.'); }
+        if (resp.ok) {
+            resetarVisualBotaoConexao();
+            // Sem isto a tela ficaria com o cadastro do operador anterior
+            // ate a proxima requisicao voltar 401 -- dado visivel depois de
+            // desconectar e exatamente o que a desconexao deveria encerrar.
+            _dadosJaCarregados = false;
+            registrarSessaoAusente();
+            exibirToast('Desconectado da Microsoft.');
+        }
     } catch(_) { exibirToast('Erro ao desconectar.', 'error'); }
 }
 

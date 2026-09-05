@@ -24,6 +24,7 @@ COMO RODAR
 Sem o Playwright instalado, o arquivo inteiro e pulado -- a suite normal nao
 depende dele. No CI ha um job proprio.
 """
+import contextlib
 import os
 import socket
 import subprocess
@@ -79,11 +80,30 @@ def _semear_sessao(caminho_do_banco) -> None:
         database.DB_PATH = original
 
 
-@pytest.fixture(scope="module")
-def servidor(tmp_path_factory):
-    """Sobe o backend real, num banco descartavel."""
-    banco = tmp_path_factory.mktemp("e2e") / "e2e.db"
-    _semear_sessao(banco)
+def _semear_cliente(caminho_do_banco) -> None:
+    """
+    Grava um cliente, e NAO uma sessao.
+
+    Serve ao teste do estado desconectado: e preciso haver cadastro no banco
+    para provar que ele nao aparece na tela. Um banco vazio deixaria passar
+    exatamente o defeito que se quer pegar.
+    """
+    sys.path.insert(0, BACKEND)
+    import database
+
+    original = database.DB_PATH
+    database.DB_PATH = str(caminho_do_banco)
+    try:
+        database.criar_tabela()
+        database.salvar_cliente("Maria Souza", "89201-000", "Rua X",
+                                "Centro", "Joinville", "Entrega", "")
+    finally:
+        database.DB_PATH = original
+
+
+@contextlib.contextmanager
+def _backend_no_ar(banco):
+    """Sobe o backend real sobre `banco` e devolve a URL base."""
     porta = _porta_livre()
 
     ambiente = {
@@ -136,13 +156,40 @@ def servidor(tmp_path_factory):
             processo.kill()
             pytest.fail(f"o backend nao respondeu em {TIMEOUT_BOOT_S}s")
 
+        try:
+            yield base
+        finally:
+            processo.terminate()
+            try:
+                processo.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                processo.kill()
+
+
+@pytest.fixture(scope="module")
+def servidor(tmp_path_factory):
+    """Backend com sessao Microsoft gravada: o app em uso normal."""
+    banco = tmp_path_factory.mktemp("e2e") / "e2e.db"
+    _semear_sessao(banco)
+    with _backend_no_ar(banco) as base:
         yield base
 
-        processo.terminate()
-        try:
-            processo.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            processo.kill()
+
+@pytest.fixture(scope="module")
+def servidor_sem_sessao(tmp_path_factory):
+    """
+    Backend COM cadastro e SEM sessao: o app aberto por quem nunca conectou.
+
+    Ate a 1.3.0 esse estado nao existia -- a leitura respondia sem sessao e a
+    tela carregava como qualquer outra. Fechada a folga, o mesmo app passou a
+    exibir a casca com os zeros escritos no proprio HTML enquanto as chamadas
+    voltavam 401 em silencio. Nao era um erro na tela: era numero errado com
+    ar de numero certo.
+    """
+    banco = tmp_path_factory.mktemp("e2e-sem-sessao") / "e2e.db"
+    _semear_cliente(banco)
+    with _backend_no_ar(banco) as base:
+        yield base
 
 
 @pytest.fixture(scope="module")
@@ -158,6 +205,44 @@ def navegador():
         instancia = p.chromium.launch()
         yield instancia
         instancia.close()
+
+
+def _preparar_contexto(navegador):
+    """Contexto novo, com os CDNs neutralizados."""
+    contexto = navegador.new_context()
+
+    # Leaflet e Chart.js vem de CDN. Numa maquina sem internet -- ou num
+    # runner de CI com saida restrita -- esperar por eles trava o teste em
+    # algo que nao e o objeto do teste.
+    def _script_vazio(rota):
+        rota.fulfill(status=200, content_type="application/javascript", body="")
+
+    contexto.route("**unpkg.com/**", _script_vazio)
+    contexto.route("**cdn.jsdelivr.net/**", _script_vazio)
+    contexto.route("**tile.openstreetmap.org/**", lambda rota: rota.abort())
+    return contexto
+
+
+@pytest.fixture
+def pagina_sem_sessao(navegador, servidor_sem_sessao):
+    """A tela de quem abre o app sem nunca ter conectado a conta."""
+    contexto = _preparar_contexto(navegador)
+    pagina = contexto.new_page()
+
+    erros = []
+    pagina.on("pageerror", lambda erro: erros.append(str(erro)))
+
+    pagina.goto(servidor_sem_sessao, wait_until="load")
+    # `state="attached"`, e nao visivel: as abas continuam no DOM e e o CSS
+    # que as esconde enquanto o painel esta na tela. Esperar por visibilidade
+    # aqui daria timeout justamente quando o comportamento esta CERTO.
+    pagina.wait_for_selector("#aba-dashboard", state="attached", timeout=15000)
+    pagina.wait_for_selector("#painelSemConexao", timeout=15000)
+    pagina.erros_de_javascript = erros
+
+    yield pagina
+
+    contexto.close()
 
 
 @pytest.fixture
@@ -370,3 +455,75 @@ def test_o_foco_do_teclado_e_visivel(pagina):
         or contorno["sombra"] not in ("none", "")
     )
     assert tem_indicador, f"elemento focado sem indicacao visual: {contorno}"
+
+
+# =============================================================================
+# O app aberto sem conta conectada
+#
+# A 1.3.1 fechou a leitura da API sem sessao -- correto do lado do servidor, e
+# do lado da tela criou um estado que nunca tinha existido. O que o operador
+# via nao era um erro: era o Dashboard com "0 Total Clientes" e "R$ 0,00 em
+# atraso", numeros que sao os zeros escritos no HTML e nao o cadastro. Quem
+# abrisse o app sem ter conectado leria "nada a receber" e acreditaria.
+#
+# Estes testes fixam as duas metades: a tela nao inventa numero, e a tela nao
+# assusta com erro. Ela explica e oferece o caminho.
+# =============================================================================
+def test_sem_sessao_a_tela_pede_conexao(pagina_sem_sessao):
+    painel = pagina_sem_sessao.locator("#painelSemConexao")
+    assert painel.is_visible()
+    assert "Conecte sua conta Microsoft" in painel.inner_text()
+    assert pagina_sem_sessao.locator("#btnConectarPeloPainel").is_visible()
+
+
+def test_sem_sessao_nenhum_numero_do_dashboard_aparece(pagina_sem_sessao):
+    """
+    O ponto do achado. Nao basta o painel existir: o conteudo atras dele
+    precisa sumir, senao "R$ 0,00 em atraso" continua legivel -- e continua
+    mentindo.
+    """
+    for identificador in ("metricTotalClientes", "metricEntregas", "metricRetiradas"):
+        elemento = pagina_sem_sessao.locator("#" + identificador)
+        if elemento.count():
+            assert not elemento.is_visible(), f"{identificador} visivel sem sessao"
+
+    assert not pagina_sem_sessao.locator("#aba-dashboard").is_visible()
+
+
+def test_sem_sessao_o_cadastro_nao_vaza_para_a_tela(pagina_sem_sessao):
+    """O banco TEM um cliente. Nenhum pedaco dele pode aparecer."""
+    assert "Maria Souza" not in pagina_sem_sessao.content()
+
+
+def test_sem_sessao_nao_aparece_toast_de_erro(pagina_sem_sessao):
+    """
+    "O app nao pode dar erro algum." Com o painel explicando a situacao, um
+    "Erro ao carregar pagamentos." vermelho por cima e o pior dos dois mundos:
+    assusta e nao diz o que fazer.
+    """
+    pagina_sem_sessao.wait_for_timeout(2500)
+    toast = pagina_sem_sessao.locator("#toast")
+    if toast.count() and toast.is_visible():
+        texto = toast.inner_text().lower()
+        assert "erro" not in texto and "falha" not in texto, f"toast de erro: {texto}"
+
+
+def test_sem_sessao_nao_ha_erro_de_javascript(pagina_sem_sessao):
+    pagina_sem_sessao.wait_for_timeout(2000)
+    assert pagina_sem_sessao.erros_de_javascript == []
+
+
+def test_sem_sessao_trocar_de_aba_nao_revela_conteudo(pagina_sem_sessao):
+    """O painel vale para o app inteiro, e nao so para a aba de abertura."""
+    for aba in ("clientes", "pagamentos", "entregas"):
+        pagina_sem_sessao.click(f'[data-comando="trocarAba"][data-arg="{aba}"]')
+        pagina_sem_sessao.wait_for_timeout(300)
+        assert pagina_sem_sessao.locator("#painelSemConexao").is_visible()
+        assert not pagina_sem_sessao.locator(f"#aba-{aba}").is_visible()
+
+
+def test_com_sessao_o_painel_nao_atrapalha(pagina):
+    """A outra direcao: fechar demais seria a mesma regressao ao contrario."""
+    painel = pagina.locator("#painelSemConexao")
+    assert not painel.is_visible()
+    assert pagina.locator("#aba-dashboard").is_visible()

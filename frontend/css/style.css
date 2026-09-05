@@ -2421,3 +2421,44 @@ button, [role="tab"], summary { touch-action: manipulation; }
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+
+
+/* -----------------------------------------------------------------------------
+   Estado "sem conta conectada"
+
+   Substitui o conteudo em vez de flutuar sobre ele. A diferenca importa: um
+   veu translucido por cima ainda deixa ler "R$ 0,00 em atraso" atras, e esse
+   numero nao e verdade -- e o zero escrito no HTML, nao o cadastro. O que a
+   tela nao pode fazer e informar errado com ar de informacao certa.
+   ----------------------------------------------------------------------------- */
+.app-shell.sem-conexao main > .tab-content { display: none !important; }
+
+.painel-sem-conexao { display: flex; justify-content: center; padding: var(--esp-6) var(--esp-4); }
+.painel-sem-conexao[hidden] { display: none; }
+
+.painel-sem-conexao__caixa {
+    max-width: 34rem;
+    text-align: center;
+    background: var(--cor-superficie);
+    border: 1px solid var(--cor-borda);
+    border-radius: var(--raio-3, 12px);
+    padding: var(--esp-6) var(--esp-5);
+}
+
+.painel-sem-conexao__icone { color: var(--cor-texto-3); margin-bottom: var(--esp-3); }
+
+.painel-sem-conexao__caixa h2 {
+    margin: 0 0 var(--esp-3);
+    font-size: 1.25rem;
+    color: var(--cor-texto);
+}
+
+.painel-sem-conexao__caixa p {
+    margin: 0 0 var(--esp-3);
+    color: var(--cor-texto-2);
+    line-height: 1.6;
+}
+
+.painel-sem-conexao__nota { font-size: 0.9rem; color: var(--cor-texto-3); }
+
+.painel-sem-conexao__caixa .btn { margin-top: var(--esp-2); }
