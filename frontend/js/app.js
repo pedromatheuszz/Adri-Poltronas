@@ -355,6 +355,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     initObservacoesCounter();
     carregarDashboardGraficos();
+    iniciarConciliacaoAutomatica();
 
     // O modulo comercial vive em comercial.js; a checagem cobre o caso de o
     // arquivo nao ter carregado, para o resto da tela seguir funcionando.
@@ -2429,6 +2430,69 @@ async function _enviarConfirmacao(pagamentoId, motivo) {
 // -----------------------------------------------------------------------------
 var _conciliacaoEmCurso = false;
 
+// A cada quanto tempo o app pergunta sozinho.
+//
+// O botao existia, a rota existia e a operacao ja era idempotente -- so nao
+// havia nada que a acionasse. Nem agendador no backend, nem temporizador
+// aqui: a unica chamada partia de um clique. Na pratica o cliente pagava o
+// Pix, o dinheiro entrava na conta do Asaas e a cobranca ficava "Pendente"
+// ate alguem lembrar de conciliar. Um relatorio financeiro tirado nesse
+// meio-tempo estava errado, sem nada na tela indicando isso.
+//
+// Vinte minutos e o meio-termo entre o financeiro defasado e gastar cota da
+// API do Asaas a toa. `reconciliar()` so consulta cobrancas EM ABERTO, entao
+// uma rodada numa loja sem pendencia nao custa requisicao nenhuma.
+var INTERVALO_CONCILIACAO_MS = 20 * 60 * 1000;
+
+var CHAVE_ULTIMA_CONCILIACAO = 'adri:ultimaConciliacao';
+
+function registrarConciliacaoBemSucedida() {
+    try { localStorage.setItem(CHAVE_ULTIMA_CONCILIACAO, new Date().toISOString()); } catch(_) {}
+    atualizarSeloDeConciliacao();
+}
+
+// Sem isto o operador le um numero sem saber se ele e de agora ou de ontem --
+// que era exatamente o problema quando a conciliacao dependia de alguem
+// lembrar de clicar. O selo torna a defasagem visivel em vez de silenciosa.
+function atualizarSeloDeConciliacao() {
+    var selo = document.getElementById('ultimaConciliacao');
+    if (!selo) return;
+
+    var marca = null;
+    try { marca = localStorage.getItem(CHAVE_ULTIMA_CONCILIACAO); } catch(_) {}
+    if (!marca) {
+        selo.textContent = 'Nunca conferido';
+        return;
+    }
+
+    var quando = new Date(marca);
+    if (isNaN(quando.getTime())) { selo.textContent = ''; return; }
+
+    // Texto curto de proposito: o selo divide a linha com o filtro, o seletor
+    // de status e dois botoes, e uma frase longa empurrava tudo para fora do
+    // cartao. Precisao de minuto tambem nao serve para nada aqui -- o que o
+    // operador precisa saber e se o numero e de agora ou de outro dia.
+    var minutos = Math.floor((Date.now() - quando.getTime()) / 60000);
+    var horas = String(quando.getHours()).padStart(2, '0') + ':'
+              + String(quando.getMinutes()).padStart(2, '0');
+
+    if (minutos < 1) selo.textContent = 'Conferido agora';
+    else if (minutos < 60) selo.textContent = 'Conferido ha ' + minutos + ' min';
+    else if (quando.toDateString() === new Date().toDateString()) selo.textContent = 'Conferido as ' + horas;
+    else selo.textContent = 'Conferido em ' + quando.toLocaleDateString('pt-BR');
+}
+
+function iniciarConciliacaoAutomatica() {
+    atualizarSeloDeConciliacao();
+    // Silenciosa: na abertura do app o operador nao pediu nada, e um toast
+    // dizendo "nada mudou" a cada inicializacao vira ruido que se aprende a
+    // ignorar -- inclusive quando tiver algo a dizer.
+    conciliarPagamentos(true);
+    setInterval(function() { conciliarPagamentos(true); }, INTERVALO_CONCILIACAO_MS);
+    // O selo envelhece sozinho entre uma rodada e outra.
+    setInterval(atualizarSeloDeConciliacao, 60 * 1000);
+}
+
 async function conciliarPagamentos(silenciosa) {
     if (_conciliacaoEmCurso) return;
     _conciliacaoEmCurso = true;
@@ -2445,6 +2509,8 @@ async function conciliarPagamentos(silenciosa) {
             return;
         }
         if (!resp.ok) throw new Error(dados.erro || 'Erro');
+
+        registrarConciliacaoBemSucedida();
 
         if (dados.atualizadas > 0) {
             exibirToast(dados.atualizadas + ' cobranca(s) atualizada(s) pelo Asaas.');

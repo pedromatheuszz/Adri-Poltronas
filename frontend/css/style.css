@@ -2402,3 +2402,22 @@ button, [role="tab"], summary { touch-action: manipulation; }
         border-color: var(--cor-texto-2);
     }
 }
+
+/* Selo da ultima conciliacao com o Asaas.
+   Fica ao lado do botao "Conciliar": o app concilia sozinho a cada 20 minutos
+   e o operador precisa conseguir ver, sem clicar em nada, se o valor na tela
+   e de agora ou de horas atras. Peso visual baixo de proposito -- e contexto
+   do numero, nao um numero a mais. */
+.selo-conciliacao {
+    align-self: center;
+    color: var(--cor-texto-3);
+    font-size: 0.8rem;
+    /* Encolhe antes de estourar o cartao. Sem `min-width: 0` um item flex nao
+       diminui abaixo do proprio texto, e o selo saia pela borda direita em vez
+       de ceder espaco aos campos da barra. */
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
