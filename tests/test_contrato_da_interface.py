@@ -131,3 +131,103 @@ def test_as_parcelas_do_faturamento_tem_onde_ser_mostradas():
     assert '_renderizarParcelas' in js
     # E precisa haver como dar baixa: so exibir devolveria metade do ciclo.
     assert '/parcelas/' in js
+
+
+# =============================================================================
+# A documentacao nao pode descrever um produto que nao existe
+# =============================================================================
+# Este foi o achado de maior alcance da auditoria de 1.5.0: o repositorio e
+# excepcional em explicar POR QUE as coisas sao como sao, e estava desatualizado
+# em dizer O QUE elas sao. README e SECURITY.md sao a primeira leitura de quem
+# chega -- operador ou auditor -- e ambos descreviam abas, integracoes e rotas
+# removidas uma versao antes.
+#
+# O CHANGELOG, em contraste, estava impecavel. A diferenca e que ele e escrito
+# no momento da mudanca; os outros so envelhecem.
+DOCS = ['README.md', 'SECURITY.md', 'API_STANDARD.md', 'PRIVACIDADE.md']
+
+
+def _docs_existentes() -> dict:
+    conteudo = {}
+    for nome in DOCS:
+        caminho = os.path.join(RAIZ, nome)
+        if os.path.exists(caminho):
+            conteudo[nome] = _ler(caminho)
+    return conteudo
+
+
+def test_a_documentacao_nao_promete_integracao_removida():
+    """
+    A palavra so pode aparecer dizendo que a integracao SAIU.
+
+    Sem essa folga o teste proibiria a nota historica, que e justamente o que
+    ajuda quem procura a funcionalidade e nao acha.
+    """
+    marcas_de_remocao = ('remov', 'saiu', 'apagad', 'nao ha', 'não há',
+                         'deixou de', 'ate a 1.4', 'até a 1.4',
+                         'nao existe', 'não existe')
+    ofensas = []
+
+    # A unidade e o PARAGRAFO, e nao a linha. Em prosa quebrada em 80 colunas a
+    # mencao e a explicacao caem em linhas diferentes: "A tabela
+    # `clientes_asaas` [...] / foi apagada do banco pela migracao" seria
+    # acusada por uma checagem linha a linha, e a nota historica e justamente o
+    # que ajuda quem procura a funcionalidade e nao acha.
+    for nome, fonte in _docs_existentes().items():
+        posicao = 0
+        for paragrafo in fonte.split('\n\n'):
+            numero = fonte[:posicao].count('\n') + 1
+            posicao += len(paragrafo) + 2
+            baixa = paragrafo.lower()
+            if 'asaas' not in baixa:
+                continue
+            if not any(marca in baixa for marca in marcas_de_remocao):
+                ofensas.append(f"{nome}:{numero}")
+
+    assert not ofensas, (
+        "documentacao citando o gateway removido como se existisse: "
+        f"{ofensas}"
+    )
+
+
+def test_a_documentacao_nao_manda_procurar_aba_removida():
+    """Mesmo teste das abas, aplicado a documentacao em vez da interface."""
+    abas = _abas_existentes()
+    ofensas = []
+
+    for nome, fonte in _docs_existentes().items():
+        for numero, linha in enumerate(fonte.splitlines(), start=1):
+            baixa = linha.lower()
+            if 'aba ' not in baixa:
+                continue
+            for encontrado in re.finditer(r'\baba\s+([A-Z][a-zA-Zç]+)', linha):
+                citada = encontrado.group(1).lower().replace('ç', 'c')
+                if citada in abas:
+                    continue
+                # "a aba Pagamentos foi removida" e informacao util, nao erro.
+                if any(m in baixa for m in ('remov', 'saiu', 'nao ha', 'não há',
+                                            'nao encontro', 'não encontro')):
+                    continue
+                ofensas.append(f"{nome}:{numero} cita a aba '{encontrado.group(1)}'")
+
+    assert not ofensas, f"documentacao apontando para abas inexistentes: {ofensas}"
+
+
+def test_a_versao_documentada_acompanha_o_package_json():
+    """
+    O README dizia "Versao documentada: 1.3.0" com o produto na 1.5.0 -- duas
+    versoes inteiras de distancia, incluindo a que removeu dois modulos.
+    """
+    import json
+
+    with open(os.path.join(RAIZ, 'package.json'), encoding='utf-8') as arquivo:
+        versao = json.load(arquivo)['version']
+
+    readme = _ler(os.path.join(RAIZ, 'README.md'))
+    achado = re.search(r'Vers[ãa]o documentada:\s*([^\s.]+(?:\.[^\s.]+)*)\.?', readme)
+
+    assert achado, "o README deixou de declarar a versao documentada"
+    declarada = achado.group(1).rstrip('.')
+    assert declarada == versao, (
+        f"README diz {declarada!r} e o package.json diz {versao!r}"
+    )

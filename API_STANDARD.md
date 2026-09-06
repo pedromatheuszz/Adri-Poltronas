@@ -68,13 +68,15 @@ log da aplicação, para rastrear o caso sem expor o stack trace:
 | Status | Uso | Onde aparece |
 |--------|-----|--------------|
 | 200 | Sucesso geral | GET, PUT, confirmações |
-| 201 | Recurso criado | POST de cliente, pagamento, entrega |
+| 201 | Recurso criado | POST de cliente, produto, pedido, item, entrega |
 | 400 | Requisição inválida | Falha de validação, arquivo ilegível |
-| 401 | Não autenticado | Sessão OneDrive ausente/expirada; webhook sem token válido |
-| 403 | Origem não permitida | Bloqueio de CSRF (`Origin`/`Referer` externo) |
-| 404 | Não encontrado | Cliente, pagamento ou entrega inexistente |
-| 502 | Falha em serviço externo | Erro retornado pelo Asaas ou Microsoft Graph |
-| 503 | Integração indisponível | `ASAAS_API_KEY` ou `ASAAS_WEBHOOK_TOKEN` ausente |
+| 401 | Não autenticado | Sessão Microsoft ausente ou expirada |
+| 403 | Proibido | Origem externa (`Origin`/`Referer`); token de capacidade ausente; conta fora da allowlist |
+| 404 | Não encontrado | Cliente, pedido, parcela ou entrega inexistente |
+| 409 | Conflito de estado | Situação do pedido incompatível; cliente com vínculos em aberto |
+| 402 | Licença requerida | Teste de 30 dias vencido sem licença paga |
+| 502 | Falha em serviço externo | Erro retornado pelo Microsoft Graph ou pelo Mercado Pago |
+| 503 | Operação em andamento | `Idempotency-Key` reenviada enquanto a primeira ainda executa |
 
 ## Tratamento centralizado
 
@@ -110,5 +112,11 @@ como a mesma origem, já que o navegador os considera distintos.
 Requisições sem `Origin` nem `Referer` são permitidas: não vêm de navegador
 (curl, scripts locais) e portanto não são vetor de CSRF.
 
-O webhook do Asaas (`/api/pagamentos/webhook`) é isento dessa checagem por ser
-uma chamada servidor-para-servidor — ele tem autenticação própria por token.
+Nenhuma rota é isenta dessa checagem. Até a 1.4.2 o webhook do gateway de
+cobrança era a única exceção — ele chegava de fora, servidor-para-servidor, com
+autenticação própria por token. Removida a integração na 1.5.0, todo o tráfego
+é local, e o conjunto de rotas isentas ficou vazio.
+
+A verificação do pagamento da licença NÃO usa webhook, e não é por falta de
+vontade: o Flask escuta em `127.0.0.1` e não há endereço na internet para o
+Mercado Pago chamar de volta. Quem pergunta é sempre o aplicativo.
