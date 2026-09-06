@@ -120,7 +120,7 @@ def _resumo_do_erro(corpo: str) -> str:
 
 def _executar(requisicao, descricao: str) -> dict:
     try:
-        with urllib.request.urlopen(requisicao, timeout=TIMEOUT_S) as resposta:
+        with urllib.request.urlopen(requisicao, timeout=TIMEOUT_S) as resposta:  # noqa: S310 - URL montada de constante do proprio codigo, sempre https
             bruto = resposta.read().decode("utf-8")
             return json.loads(bruto) if bruto else {}
     except urllib.error.HTTPError as erro:
@@ -152,7 +152,7 @@ def criar_cobranca_pix(valor_centavos: int, descricao: str, referencia: str,
         "external_reference": referencia,
         "payer": {"email": email_do_pagador or "licenca@adripoltronas.local"},
     }
-    requisicao = urllib.request.Request(
+    requisicao = urllib.request.Request(  # noqa: S310 - URL montada de constante do proprio codigo, sempre https
         f"{url_base()}/v1/payments",
         data=json.dumps(corpo).encode("utf-8"),
         # A chave de idempotencia deriva da referencia da instalacao mais um
@@ -183,7 +183,7 @@ def obter_pagamento(pagamento_id: str) -> dict:
         return {"_erro": True, "_detalhe": "Sem pagamento a consultar."}
 
     caminho = urllib.parse.quote(str(pagamento_id), safe="")
-    requisicao = urllib.request.Request(
+    requisicao = urllib.request.Request(  # noqa: S310 - URL montada de constante do proprio codigo, sempre https
         f"{url_base()}/v1/payments/{caminho}",
         headers=_cabecalhos(),
         method="GET",

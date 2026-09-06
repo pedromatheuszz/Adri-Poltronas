@@ -134,7 +134,7 @@ def _backend_no_ar(banco):
     log = banco.parent / "backend.log"
     with open(log, "w", encoding="utf-8") as saida:
         processo = subprocess.Popen(
-            [sys.executable, os.path.join(BACKEND, 'servidor.py')],
+            [sys.executable, os.path.join(BACKEND, 'servidor.py')],  # noqa: S603 - argumentos fixos, montados no codigo e nao pela entrada
             cwd=BACKEND, env=ambiente,
             stdout=saida, stderr=subprocess.STDOUT, text=True,
         )

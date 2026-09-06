@@ -142,7 +142,7 @@ def contar_clientes(busca='') -> int:
     filtro, parametros = _filtro_de_busca(busca)
     with conectar() as conexao:
         return conexao.execute(
-            f'SELECT COUNT(*) FROM clientes WHERE ativo=1{filtro}', parametros
+            f'SELECT COUNT(*) FROM clientes WHERE ativo=1{filtro}', parametros  # noqa: S608 - fragmento constante do proprio codigo, nunca entrada do usuario
         ).fetchone()[0]
 
 
@@ -159,7 +159,7 @@ def listar_clientes(busca='', limite=None, deslocamento=0):
     a resposta e parcial.
     """
     filtro, parametros = _filtro_de_busca(busca)
-    sql = f'SELECT * FROM clientes WHERE ativo=1{filtro} ORDER BY id DESC'
+    sql = f'SELECT * FROM clientes WHERE ativo=1{filtro} ORDER BY id DESC'  # noqa: S608 - fragmento constante do proprio codigo, nunca entrada do usuario
     if limite is not None:
         sql += ' LIMIT ? OFFSET ?'
         parametros = parametros + [int(limite), int(deslocamento or 0)]
@@ -235,7 +235,7 @@ def listar_clientes_por_ids(ids):
     marcadores = ','.join('?' * len(numeros[:MAX_IDS_POR_CONSULTA]))
     with conectar() as conexao:
         linhas = conexao.execute(
-            f'SELECT * FROM clientes WHERE ativo=1 AND id IN ({marcadores})',
+            f'SELECT * FROM clientes WHERE ativo=1 AND id IN ({marcadores})',  # noqa: S608 - fragmento constante do proprio codigo, nunca entrada do usuario
             numeros[:MAX_IDS_POR_CONSULTA],
         ).fetchall()
 
@@ -604,14 +604,14 @@ def obter_metricas_pagamentos():
     """Retorna metricas de pagamentos para o dashboard."""
     with conectar() as conexao:
         total_recebido = conexao.execute(
-            f"SELECT {_SOMA_EM_CENTAVOS} FROM pagamentos WHERE status='Recebido'"
+            f"SELECT {_SOMA_EM_CENTAVOS} FROM pagamentos WHERE status='Recebido'"  # noqa: S608 - fragmento constante do proprio codigo, nunca entrada do usuario
         ).fetchone()[0]
         total_pendente = conexao.execute(
-            f"SELECT {_SOMA_EM_CENTAVOS} FROM pagamentos "
+            f"SELECT {_SOMA_EM_CENTAVOS} FROM pagamentos "  # noqa: S608 - fragmento constante do proprio codigo, nunca entrada do usuario
             f"WHERE status IN {_STATUS_A_RECEBER}"
         ).fetchone()[0]
         total_atrasado = conexao.execute(
-            f"SELECT {_SOMA_EM_CENTAVOS} FROM pagamentos "
+            f"SELECT {_SOMA_EM_CENTAVOS} FROM pagamentos "  # noqa: S608 - fragmento constante do proprio codigo, nunca entrada do usuario
             f"WHERE status IN {_STATUS_A_RECEBER} "
             "AND data_vencimento != '' AND date(data_vencimento) < date('now', 'localtime')"
         ).fetchone()[0]
@@ -619,7 +619,7 @@ def obter_metricas_pagamentos():
             "SELECT COUNT(*) FROM pagamentos WHERE status='Recebido'"
         ).fetchone()[0]
         qtd_pendente = conexao.execute(
-            "SELECT COUNT(*) FROM pagamentos "
+            "SELECT COUNT(*) FROM pagamentos "  # noqa: S608 - fragmento constante do proprio codigo, nunca entrada do usuario
             f"WHERE status IN {_STATUS_A_RECEBER}"
         ).fetchone()[0]
     return {

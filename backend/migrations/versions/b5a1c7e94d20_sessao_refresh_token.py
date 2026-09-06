@@ -9,15 +9,15 @@ mostrava "Conectado" e o envio da planilha so falhava no clique.
 Revision ID: b5a1c7e94d20
 Revises: a7e3c9d1f5b2
 """
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
 
 revision: str = "b5a1c7e94d20"
-down_revision: Union[str, None] = "a7e3c9d1f5b2"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "a7e3c9d1f5b2"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def _colunas(nome_tabela: str) -> set:

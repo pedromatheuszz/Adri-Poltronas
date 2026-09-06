@@ -30,7 +30,6 @@ import shutil
 import sqlite3
 import tempfile
 import time
-from typing import Optional
 
 log = logging.getLogger("adri.backup")
 
@@ -74,7 +73,7 @@ def pasta_de_backups(caminho_banco: str) -> str:
     return os.path.join(os.path.dirname(os.path.abspath(caminho_banco)), "backups")
 
 
-def _nome_do_arquivo(motivo: str, momento: Optional[time.struct_time] = None) -> str:
+def _nome_do_arquivo(motivo: str, momento: time.struct_time | None = None) -> str:
     carimbo = time.strftime("%Y%m%d_%H%M%S", momento or time.localtime())
     return f"{PREFIXO}_{motivo}_{carimbo}.db"
 
@@ -118,7 +117,7 @@ def existe_backup_de_hoje(caminho_banco: str, motivo: str = MOTIVO_DIARIO) -> bo
     )
 
 
-def criar_backup(caminho_banco: str, motivo: str) -> Optional[str]:
+def criar_backup(caminho_banco: str, motivo: str) -> str | None:
     """
     Grava uma copia integra do banco e rotaciona as antigas.
 
@@ -170,7 +169,7 @@ def criar_backup(caminho_banco: str, motivo: str) -> Optional[str]:
     return destino
 
 
-def _copiar_para_destino_extra(origem: str) -> Optional[str]:
+def _copiar_para_destino_extra(origem: str) -> str | None:
     """
     Duplica a copia num segundo lugar, quando o operador configurou um.
 
@@ -219,7 +218,7 @@ def listar_copias(caminho_banco: str) -> list:
     return sorted(copias, key=lambda c: c["arquivo"], reverse=True)
 
 
-def caminho_da_copia(caminho_banco: str, nome_do_arquivo: str) -> Optional[str]:
+def caminho_da_copia(caminho_banco: str, nome_do_arquivo: str) -> str | None:
     """
     Resolve o nome de uma copia para o caminho dela, recusando qualquer coisa
     que nao seja um nome de arquivo simples.
@@ -307,7 +306,7 @@ def restaurar(caminho_banco: str, caminho_copia: str) -> tuple[bool, str]:
     )
 
 
-def copia_para_download(caminho_banco: str) -> Optional[str]:
+def copia_para_download(caminho_banco: str) -> str | None:
     """
     Copia integra e temporaria do banco, para o download manual.
 
@@ -365,13 +364,13 @@ def copia_para_download(caminho_banco: str) -> Optional[str]:
     return destino
 
 
-def backup_diario(caminho_banco: str) -> Optional[str]:
+def backup_diario(caminho_banco: str) -> str | None:
     """Uma copia por dia, no maximo. Silencioso quando a do dia ja existe."""
     if existe_backup_de_hoje(caminho_banco, MOTIVO_DIARIO):
         return None
     return criar_backup(caminho_banco, MOTIVO_DIARIO)
 
 
-def backup_antes_de_migrar(caminho_banco: str) -> Optional[str]:
+def backup_antes_de_migrar(caminho_banco: str) -> str | None:
     """Copia obrigatoria antes de mexer no schema."""
     return criar_backup(caminho_banco, MOTIVO_PRE_MIGRACAO)

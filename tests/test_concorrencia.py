@@ -120,7 +120,11 @@ def test_duplo_faturamento_simultaneo_emite_um_conjunto_de_parcelas(client):
     for _ in range(RODADAS):
         pedido_id = _pedido_aprovado(client)
 
-        resultados = _em_paralelo(lambda: servico.faturar_pedido(pedido_id, {
+        # `pid=pedido_id` amarra o valor DESTA rodada. Hoje `_em_paralelo`
+        # espera as threads antes de voltar, entao a captura tardia daria no
+        # mesmo -- mas o dia em que ele deixar de esperar, o teste passaria
+        # exercitando o pedido errado, em silencio.
+        resultados = _em_paralelo(lambda pid=pedido_id: servico.faturar_pedido(pid, {
             'parcelas': 3, 'primeiro_vencimento': '2026-10-31', 'forma_pagamento': 'Pix',
         }))
 
@@ -217,7 +221,7 @@ def test_codigo_de_produto_duplicado_simultaneo_vira_erro_de_negocio(client):
     for rodada in range(RODADAS):
         corpo = {'codigo': f'DUP-{rodada:03d}', 'descricao': 'Poltrona',
                  'preco_venda': '10,00'}
-        resultados = _em_paralelo(lambda: _post(client, '/api/produtos', corpo))
+        resultados = _em_paralelo(lambda c=corpo: _post(client, '/api/produtos', c))
 
         codigos = [r[1].status_code for r in resultados if r and r[0] == 'ok']
         assert sorted(codigos) == [201, 400], f"status inesperado: {codigos}"

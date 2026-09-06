@@ -13,10 +13,11 @@ sem deixar metade do trabalho feito se algo falhar no meio.
 from __future__ import annotations
 
 import sqlite3
-from typing import Any, Iterable, Optional
+from typing import Any
+from collections.abc import Iterable
 
 
-def _dict(linha: Optional[sqlite3.Row]) -> Optional[dict]:
+def _dict(linha: sqlite3.Row | None) -> dict | None:
     return dict(linha) if linha is not None else None
 
 
@@ -40,11 +41,11 @@ def listar_produtos(conexao, busca: str = "", incluir_inativos: bool = False) ->
     return _dicts(conexao.execute(sql, parametros))
 
 
-def obter_produto(conexao, produto_id: int) -> Optional[dict]:
+def obter_produto(conexao, produto_id: int) -> dict | None:
     return _dict(conexao.execute("SELECT * FROM produtos WHERE id = ?", (produto_id,)).fetchone())
 
 
-def codigo_em_uso(conexao, codigo: str, ignorar_id: Optional[int] = None) -> bool:
+def codigo_em_uso(conexao, codigo: str, ignorar_id: int | None = None) -> bool:
     sql = "SELECT 1 FROM produtos WHERE codigo = ? AND ativo = 1"
     parametros: list[Any] = [codigo]
     if ignorar_id:
@@ -141,11 +142,11 @@ def listar_pedidos(conexao, situacao: str = "", busca: str = "") -> list[dict]:
     return _dicts(conexao.execute(sql, parametros))
 
 
-def obter_pedido(conexao, pedido_id: int) -> Optional[dict]:
+def obter_pedido(conexao, pedido_id: int) -> dict | None:
     return _dict(conexao.execute("SELECT * FROM pedidos WHERE id = ?", (pedido_id,)).fetchone())
 
 
-def obter_pedido_com_itens(conexao, pedido_id: int) -> Optional[dict]:
+def obter_pedido_com_itens(conexao, pedido_id: int) -> dict | None:
     pedido = obter_pedido(conexao, pedido_id)
     if pedido is None:
         return None
@@ -213,8 +214,8 @@ COLUNAS_DE_TRANSICAO = frozenset({"faturado_em", "cancelado_em", "motivo_cancela
 
 
 def mudar_situacao(conexao, pedido_id: int, situacao: str,
-                   extras: Optional[dict] = None,
-                   situacao_esperada: Optional[str] = None) -> int:
+                   extras: dict | None = None,
+                   situacao_esperada: str | None = None) -> int:
     """
     Grava a nova situacao e devolve quantas linhas mudaram.
 
@@ -246,7 +247,7 @@ def mudar_situacao(conexao, pedido_id: int, situacao: str,
         parametros.append(situacao_esperada)
 
     cursor = conexao.execute(
-        f"UPDATE pedidos SET {', '.join(campos)} WHERE {condicao}", parametros)
+        f"UPDATE pedidos SET {', '.join(campos)} WHERE {condicao}", parametros)  # noqa: S608 - fragmento constante do proprio codigo, nunca entrada do usuario
     return cursor.rowcount
 
 
@@ -312,7 +313,7 @@ def parcelas_do_pedido(conexao, pedido_id: int) -> list[dict]:
     )
 
 
-def obter_parcela(conexao, pedido_id: int, parcela: int) -> Optional[dict]:
+def obter_parcela(conexao, pedido_id: int, parcela: int) -> dict | None:
     return _dict(
         conexao.execute(
             "SELECT * FROM pagamentos WHERE pedido_id = ? AND parcela = ?",

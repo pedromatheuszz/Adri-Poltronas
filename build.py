@@ -46,7 +46,7 @@ def run_command(cmd, cwd=None, description=""):
         print(f"\n📦 {description}...")
     print(f"  $ {' '.join(cmd)}")
     try:
-        subprocess.run(cmd, cwd=cwd or PROJECT_ROOT, check=True)
+        subprocess.run(cmd, cwd=cwd or PROJECT_ROOT, check=True)  # noqa: S603 - argumentos fixos, montados no codigo e nao pela entrada
         return True
     except subprocess.CalledProcessError:
         print(f"❌ Erro: {description or 'Comando falhou'}")

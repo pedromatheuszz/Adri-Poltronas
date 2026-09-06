@@ -677,13 +677,13 @@ def auth_callback():
     data = urllib.parse.urlencode(payload).encode('utf-8')
 
     try:
-        with urllib.request.urlopen(urllib.request.Request(config.URL_TOKEN_MICROSOFT, data=data, method='POST')) as resposta:
+        with urllib.request.urlopen(urllib.request.Request(config.URL_TOKEN_MICROSOFT, data=data, method='POST')) as resposta:  # noqa: S310 - URL montada de constante do proprio codigo, sempre https
             res_dados = json.loads(resposta.read().decode('utf-8'))
             token_acesso = res_dados.get('access_token')
 
             req_perfil = urllib.request.Request("https://graph.microsoft.com/v1.0/me",
                 headers={"Authorization": f"Bearer {token_acesso}"})
-            with urllib.request.urlopen(req_perfil) as resp_perfil:
+            with urllib.request.urlopen(req_perfil) as resp_perfil:  # noqa: S310 - URL montada de constante do proprio codigo, sempre https
                 dados_perfil = json.loads(resp_perfil.read().decode('utf-8'))
                 email_usuario = dados_perfil.get('userPrincipalName', 'Conta Conectada')
 

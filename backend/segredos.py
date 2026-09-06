@@ -49,7 +49,6 @@ from __future__ import annotations
 import logging
 import os
 import shutil
-from typing import Optional
 
 import security
 
@@ -62,7 +61,7 @@ NOME_DO_COFRE = ".segredos"
 # perde-lo custa apenas relogin.
 CHAVES_PROTEGIDAS = ("MP_ACCESS_TOKEN", "GEMINI_API_KEY")
 
-_cache: Optional[dict] = None
+_cache: dict | None = None
 
 
 def caminho_do_cofre() -> str:
@@ -87,7 +86,7 @@ def _ler_cofre() -> dict:
         return _cache
 
     try:
-        with open(caminho, "r", encoding="utf-8") as arquivo:
+        with open(caminho, encoding="utf-8") as arquivo:
             linhas = arquivo.read().splitlines()
     except OSError as erro:
         log.warning("[SEGREDOS] Nao foi possivel ler o cofre: %s", erro)
@@ -209,7 +208,7 @@ def migrar_do_env(caminho_env: str) -> list:
         return []
 
     try:
-        with open(caminho_env, "r", encoding="utf-8") as arquivo:
+        with open(caminho_env, encoding="utf-8") as arquivo:
             linhas = arquivo.read().splitlines()
     except OSError as erro:
         log.warning("[SEGREDOS] Nao foi possivel ler %s: %s", caminho_env, erro)

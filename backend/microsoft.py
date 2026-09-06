@@ -102,10 +102,10 @@ def renovar_token(refresh_token: str):
         'redirect_uri': config.REDIRECT_URI,
     }
     dados = urllib.parse.urlencode(payload).encode('utf-8')
-    requisicao = urllib.request.Request(config.URL_TOKEN_MICROSOFT, data=dados, method='POST')
+    requisicao = urllib.request.Request(config.URL_TOKEN_MICROSOFT, data=dados, method='POST')  # noqa: S310 - URL montada de constante do proprio codigo, sempre https
 
     try:
-        with urllib.request.urlopen(requisicao, timeout=TIMEOUT_S) as resposta:
+        with urllib.request.urlopen(requisicao, timeout=TIMEOUT_S) as resposta:  # noqa: S310 - URL montada de constante do proprio codigo, sempre https
             return json.loads(resposta.read().decode('utf-8')), RENOVADO
     except urllib.error.HTTPError as erro:
         corpo = erro.read().decode('utf-8', errors='replace')

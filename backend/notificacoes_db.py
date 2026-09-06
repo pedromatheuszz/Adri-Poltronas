@@ -51,6 +51,25 @@ def _dias_desde(data_hora):
         return None
 
 
+# Montada uma vez, no import, e nao a cada chamada -- o unico trecho
+# interpolado e `_STATUS_ENCERRADOS`, que ja e literal constante. Extrair para
+# constante tambem torna visivel que aqui nao entra nada do usuario.
+_SQL_EXPURGO = f"""
+    DELETE FROM notificacoes_lidas
+     WHERE (
+            chave LIKE 'entrega_%'
+        AND CAST(substr(chave, instr(chave, ':') + 1) AS INTEGER) NOT IN (
+                SELECT id FROM entregas_agendadas
+                 WHERE status NOT IN {_STATUS_ENCERRADOS})
+     )
+        OR (
+            chave LIKE 'cliente_inativo:%'
+        AND CAST(substr(chave, instr(chave, ':') + 1) AS INTEGER) NOT IN (
+                SELECT id FROM clientes WHERE ativo = 1)
+     )
+"""  # noqa: S608 - fragmento constante do proprio codigo, nunca entrada do usuario
+
+
 def expurgar_lidas_orfas(conexao) -> int:
     """
     Remove marcas de "lida" que nao correspondem mais a notificacao nenhuma.
@@ -69,20 +88,7 @@ def expurgar_lidas_orfas(conexao) -> int:
     Sobra a marca quando o registro nao existe mais, ou quando a entrega ja
     esta encerrada.
     """
-    cursor = conexao.execute(
-        f"""DELETE FROM notificacoes_lidas
-             WHERE (
-                    chave LIKE 'entrega_%'
-                AND CAST(substr(chave, instr(chave, ':') + 1) AS INTEGER) NOT IN (
-                        SELECT id FROM entregas_agendadas
-                         WHERE status NOT IN {_STATUS_ENCERRADOS})
-             )
-                OR (
-                    chave LIKE 'cliente_inativo:%'
-                AND CAST(substr(chave, instr(chave, ':') + 1) AS INTEGER) NOT IN (
-                        SELECT id FROM clientes WHERE ativo = 1)
-             )"""
-    )
+    cursor = conexao.execute(_SQL_EXPURGO)
     return cursor.rowcount
 
 
@@ -101,7 +107,7 @@ def obter_notificacoes(conectar):
 
         # 1. Entregas agendadas para hoje
         entregas_hoje = conexao.execute(
-            "SELECT * FROM entregas_agendadas WHERE date(data_entrega) = date('now', 'localtime') "
+            "SELECT * FROM entregas_agendadas WHERE date(data_entrega) = date('now', 'localtime') "  # noqa: S608 - fragmento constante do proprio codigo, nunca entrada do usuario
             f"AND status NOT IN {_STATUS_ENCERRADOS} ORDER BY hora_entrega LIMIT ?",
             (MAX_NOTIFICACOES_POR_TIPO,)
         ).fetchall()
@@ -119,7 +125,7 @@ def obter_notificacoes(conectar):
 
         # 2. Entregas proximas (3 dias)
         entregas_proximas = conexao.execute(
-            "SELECT * FROM entregas_agendadas WHERE date(data_entrega) > date('now', 'localtime') "
+            "SELECT * FROM entregas_agendadas WHERE date(data_entrega) > date('now', 'localtime') "  # noqa: S608 - fragmento constante do proprio codigo, nunca entrada do usuario
             "AND date(data_entrega) <= date('now', '+3 days', 'localtime') "
             f"AND status NOT IN {_STATUS_ENCERRADOS} "
             "ORDER BY data_entrega LIMIT ?", (MAX_NOTIFICACOES_POR_TIPO,)
@@ -138,7 +144,7 @@ def obter_notificacoes(conectar):
 
         # 3. Entregas atrasadas
         entregas_atrasadas = conexao.execute(
-            "SELECT * FROM entregas_agendadas WHERE date(data_entrega) < date('now', 'localtime') "
+            "SELECT * FROM entregas_agendadas WHERE date(data_entrega) < date('now', 'localtime') "  # noqa: S608 - fragmento constante do proprio codigo, nunca entrada do usuario
             f"AND status NOT IN {_STATUS_ENCERRADOS} ORDER BY data_entrega LIMIT ?",
             (MAX_NOTIFICACOES_POR_TIPO,)
         ).fetchall()
@@ -227,5 +233,5 @@ def desmarcar_notificacoes_lidas(conectar, chaves=None) -> int:
                 return 0
             marcadores = ','.join('?' * len(chaves))
             cursor = conexao.execute(
-                f'DELETE FROM notificacoes_lidas WHERE chave IN ({marcadores})', chaves)
+                f'DELETE FROM notificacoes_lidas WHERE chave IN ({marcadores})', chaves)  # noqa: S608 - fragmento constante do proprio codigo, nunca entrada do usuario
         return cursor.rowcount

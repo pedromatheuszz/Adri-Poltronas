@@ -5,7 +5,7 @@ from __future__ import annotations
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field
 import hashlib
-from typing import Mapping
+from collections.abc import Mapping
 
 
 @dataclass(frozen=True)
@@ -62,6 +62,6 @@ def anonimizar_ip(ip: str, segredo: str) -> str:
     """Gera identificador correlacionavel sem persistir o endereco IP bruto."""
     if not ip:
         return ""
-    material = f"{segredo}:{ip}".encode("utf-8")
+    material = f"{segredo}:{ip}".encode()
     return hashlib.sha256(material).hexdigest()[:24]
 

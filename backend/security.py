@@ -19,7 +19,7 @@ import hmac
 import secrets
 import json
 import logging
-from typing import Optional, Any
+from typing import Any
 
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
@@ -36,7 +36,7 @@ PRODUCAO = bool(getattr(sys, 'frozen', False))
 
 log = logging.getLogger("adri.security")
 
-_fernet_key_cache: Optional[bytes] = None
+_fernet_key_cache: bytes | None = None
 
 def _obter_chave_fernet() -> bytes:
     """
@@ -70,7 +70,7 @@ def _obter_chave_fernet() -> bytes:
             pass
         if os.path.exists(storage_path):
             try:
-                with open(storage_path, 'r') as f:
+                with open(storage_path) as f:
                     stored = f.read().strip()
                 decrypted = win32.CryptUnprotectData(
                     base64.b64decode(stored), None, None, None, 0
@@ -202,7 +202,7 @@ def fernet_cifrar(texto: str) -> str:
     return PREFIXO_FERNET + f.encrypt(dado).decode("ascii")
 
 
-def fernet_decifrar(valor: str) -> Optional[str]:
+def fernet_decifrar(valor: str) -> str | None:
     """Decifra um valor Fernet. Retorna None se invalido."""
     if not valor or not valor.startswith(PREFIXO_FERNET):
         return None
@@ -226,7 +226,7 @@ def fernet_cifrar_objeto(objeto: Any) -> str:
     return fernet_cifrar(json_str)
 
 
-def fernet_decifrar_objeto(valor: str) -> Optional[Any]:
+def fernet_decifrar_objeto(valor: str) -> Any | None:
     """Decifra e deserializa um objeto JSON Fernet."""
     json_str = fernet_decifrar(valor)
     if json_str is None:
@@ -241,7 +241,7 @@ def fernet_decifrar_objeto(valor: str) -> Optional[Any]:
 # Hashing seguro (PBKDF2-HMAC-SHA256)
 # ---------------------------------------------------------------------------
 
-def hash_senha(senha: str, salt: Optional[bytes] = None) -> str:
+def hash_senha(senha: str, salt: bytes | None = None) -> str:
     """
     Gera hash PBKDF2-HMAC-SHA256 da senha.
     Retorna string formatada: algorithm$iterations$salt$hash

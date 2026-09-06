@@ -107,7 +107,7 @@ def test_serializacao_leva_inteiro_e_texto():
 # =============================================================================
 def test_ciclo_completo_do_pedido():
     caminho = [estados.RASCUNHO, estados.ABERTO, estados.APROVADO, estados.FATURADO]
-    for origem, destino in zip(caminho, caminho[1:]):
+    for origem, destino in zip(caminho, caminho[1:], strict=False):
         assert estados.pode_transicionar(origem, destino), f'{origem} -> {destino}'
 
 

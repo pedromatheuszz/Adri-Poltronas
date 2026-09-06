@@ -1,0 +1,72 @@
+# Analise estatica do Python.
+#
+# Ate a 1.5.0 o ruff rodava na CI SEM configuracao, o que significa apenas `E`
+# (pycodestyle) e `F` (pyflakes). O codigo passava limpo -- e passaria limpo
+# tambem se alguem escrevesse uma consulta SQL concatenando entrada do usuario,
+# porque a regra que pega isso (S608) nunca esteve ligada.
+#
+# Ligar `S` agora, e nao "quando der", tem um motivo: as ocorrencias atuais
+# foram verificadas uma a uma e nenhuma e vulnerabilidade real. Esse e
+# exatamente o momento barato de fixar a regra. Depois de acumular divida ela
+# vira um mutirao que ninguem faz.
+
+target-version = "py310"   # a CI roda 3.10, 3.11 e 3.12; vale o menor.
+
+# 100, e nao os 88 do padrao: e a largura que o codigo ja usa. Baixar para 88
+# reformataria centenas de linhas sem ganho e enterraria as mudancas reais.
+line-length = 100
+
+[lint]
+select = [
+    "E",   # pycodestyle -- ja estava ligado
+    "F",   # pyflakes -- ja estava ligado
+    "S",   # bandit: e o que faltava
+    "B",   # bugbear: pega classes de defeito reais (B023, B904)
+    "UP",  # pyupgrade: mantem a sintaxe alinhada ao Python minimo suportado
+]
+
+ignore = [
+    # S105/S106 decidem "isto e uma senha embutida" pelo NOME da variavel ou do
+    # argumento. Aqui isso acerta zero e erra 34 vezes: `NOME_DO_TOKEN`,
+    # `ADRI_API_SEM_TOKEN` e o parametro `refresh_token=` sao nomes de
+    # configuracao e de campo, nao segredos.
+    #
+    # Nao ha perda de cobertura: segredo de verdade no repositorio e trabalho
+    # do gitleaks, que a CI ja roda com verificacao de checksum, e que pegou o
+    # unico caso real que este projeto teve.
+    "S105",
+    "S106",
+
+    # E501 (linha longa) fica DESLIGADA, e e a unica excecao desta lista que e
+    # divida, nao decisao.
+    #
+    # O ruff sem configuracao nunca a aplicou: o `select` implicito dele e
+    # ["E4","E7","E9","F"], e E501 esta em E5. Entao ela nunca valeu neste
+    # repositorio, e ligar agora reprovaria 71 linhas herdadas.
+    #
+    # 99,5% do codigo ja cabe em 98 colunas -- a convencao existe e e seguida.
+    # As 71 excecoes (19 delas acima de 120) sao legado concentrado em
+    # config.py, database.py e app.py, e endireita-las e uma passada de
+    # formatacao: mexe em arquivo que este commit nao deveria tocar, e
+    # enterraria as correcoes de seguranca no meio do diff.
+    #
+    # Deixo o numero registrado para que a passada tenha alvo, em vez de virar
+    # "um dia a gente arruma".
+    "E501",
+
+    # UP038 quer `isinstance(x, A | B)` no lugar de `isinstance(x, (A, B))`. A
+    # forma com tupla e a idiomatica, e a com `|` constroi um objeto de uniao a
+    # cada chamada -- em `auditoria.registrar_evento`, que roda em toda escrita
+    # auditada, e trabalho a mais para ganhar estilo. O proprio ruff classifica
+    # a correcao como "unsafe".
+    "UP038",
+]
+
+[lint.per-file-ignores]
+# `assert` E o mecanismo do pytest. S101 aqui seria 958 avisos pedindo para
+# nao testar.
+"tests/*" = ["S101"]
+
+# Migrations sao geradas e revisadas como um bloco historico; a linha longa de
+# um `op.create_table` nao se quebra sem piorar a leitura.
+"backend/migrations/versions/*" = ["E501"]

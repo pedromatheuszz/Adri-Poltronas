@@ -164,7 +164,7 @@ def _versao_do_package_json() -> str:
             continue
         caminho = os.path.join(base, 'package.json')
         try:
-            with open(caminho, 'r', encoding='utf-8') as arquivo:
+            with open(caminho, encoding='utf-8') as arquivo:
                 versao = json.load(arquivo).get('version')
             if versao:
                 return str(versao)

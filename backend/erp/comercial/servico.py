@@ -17,7 +17,6 @@ from __future__ import annotations
 import datetime
 import logging
 import sqlite3
-from typing import Optional
 
 import database
 import validators
@@ -54,7 +53,7 @@ class ConflitoDeSituacao(Exception):
 # =============================================================================
 # Catalogo
 # =============================================================================
-def _validar_produto(dados: dict, ignorar_id: Optional[int] = None) -> dict:
+def _validar_produto(dados: dict, ignorar_id: int | None = None) -> dict:
     codigo = (dados.get("codigo") or "").strip()
     descricao = (dados.get("descricao") or "").strip()
     unidade = (dados.get("unidade") or "un").strip().lower()
@@ -128,7 +127,7 @@ def criar_produto(dados: dict) -> dict:
             registrar_evento(conexao, acao="comercial.produto.criado", entidade="produto",
                              entidade_id=produto_id, valores_novos=novo)
     except sqlite3.IntegrityError as erro:
-        raise _codigo_duplicado(erro, campos["codigo"])
+        raise _codigo_duplicado(erro, campos["codigo"]) from erro
     return _produto_para_tela(novo)
 
 
@@ -148,7 +147,7 @@ def atualizar_produto(produto_id: int, dados: dict) -> dict:
                              entidade_id=produto_id, valores_anteriores=anterior,
                              valores_novos=novo)
     except sqlite3.IntegrityError as erro:
-        raise _codigo_duplicado(erro, campos["codigo"])
+        raise _codigo_duplicado(erro, campos["codigo"]) from erro
     return _produto_para_tela(novo)
 
 
@@ -200,7 +199,7 @@ def _recalcular(conexao, pedido_id: int) -> dict:
     return repositorio.obter_pedido(conexao, pedido_id)
 
 
-def _pedido_para_tela(pedido: dict, itens: Optional[list] = None) -> dict:
+def _pedido_para_tela(pedido: dict, itens: list | None = None) -> dict:
     pedido = dict(pedido)
     for campo in ("total_bruto_centavos", "desconto_centavos",
                   "frete_centavos", "total_liquido_centavos"):
@@ -337,7 +336,7 @@ def _validar_cabecalho(conexao, dados: dict) -> dict:
         desconto = dinheiro.para_centavos(dados.get("desconto", 0))
         frete = dinheiro.para_centavos(dados.get("frete", 0))
     except dinheiro.ValorInvalido as erro:
-        raise ErroDeNegocio(str(erro))
+        raise ErroDeNegocio(str(erro)) from erro
     if desconto < 0 or frete < 0:
         raise ErroDeNegocio("Desconto e frete nao podem ser negativos.")
 
@@ -432,7 +431,7 @@ def adicionar_item(pedido_id: int, dados: dict) -> dict:
                      else int(produto["preco_venda_centavos"]))
             desconto = dinheiro.para_centavos(dados.get("desconto", 0))
         except dinheiro.ValorInvalido as erro:
-            raise ErroDeNegocio(str(erro))
+            raise ErroDeNegocio(str(erro)) from erro
 
         total = preco * quantidade - desconto
         if total < 0:
@@ -471,7 +470,7 @@ def remover_item(pedido_id: int, item_id: int) -> dict:
 
 
 # --- Transicoes --------------------------------------------------------------
-def _transicionar(conexao, pedido: dict, destino: str, extras: Optional[dict] = None) -> dict:
+def _transicionar(conexao, pedido: dict, destino: str, extras: dict | None = None) -> dict:
     """
     Move o pedido de situacao, recusando se outro ja tiver movido.
 
@@ -485,7 +484,7 @@ def _transicionar(conexao, pedido: dict, destino: str, extras: Optional[dict] = 
     try:
         estados.exigir_transicao(pedido["situacao"], destino, pedido["numero"])
     except estados.TransicaoInvalida as erro:
-        raise ConflitoDeSituacao(str(erro))
+        raise ConflitoDeSituacao(str(erro)) from erro
 
     alteradas = repositorio.mudar_situacao(
         conexao, pedido["id"], destino, extras, situacao_esperada=pedido["situacao"])
@@ -604,7 +603,7 @@ def faturar_pedido(pedido_id: int, dados: dict) -> dict:
         valores = dinheiro.ratear(total, parcelas)
         vencimentos = _vencimentos_mensais(primeiro, parcelas)
 
-        for indice, (centavos, vencimento) in enumerate(zip(valores, vencimentos), start=1):
+        for indice, (centavos, vencimento) in enumerate(zip(valores, vencimentos, strict=False), start=1):
             repositorio.inserir_parcela(conexao, {
                 "cliente_id": pedido["cliente_id"],
                 "cliente_nome": pedido["cliente_nome"],

@@ -685,7 +685,7 @@ def test_app_importa_pelo_caminho_de_pacote_do_main():
         "from backend.app import app;"
         "print(len(list(app.url_map.iter_rules())))"
     )
-    resultado = subprocess.run([sys.executable, '-c', codigo],
+    resultado = subprocess.run([sys.executable, '-c', codigo],  # noqa: S603 - argumentos fixos, montados no codigo e nao pela entrada
                                capture_output=True, text=True, cwd=raiz, timeout=120)
     assert resultado.returncode == 0, resultado.stderr[-2000:]
     assert int(resultado.stdout.strip().splitlines()[-1]) > 0
