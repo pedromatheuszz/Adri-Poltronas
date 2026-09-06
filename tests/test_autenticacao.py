@@ -190,3 +190,72 @@ def test_exportacao_com_sessao_funciona(com_sessao):
     resposta = com_sessao.get('/api/backup/sqlite', headers=CABECALHOS)
     assert resposta.status_code == 200
     assert len(resposta.data) > 1024
+
+
+# =============================================================================
+# Allowlist de contas (SEG-01, degrau 1)
+#
+# Estes exercitam o guarda em modo real, que e onde a regra vale. O
+# `test_autorizacao.py` cobre a funcao de decisao isolada; aqui interessa que
+# ela esteja LIGADA no caminho da requisicao -- foi exatamente essa a falha
+# original: a regra nao existia em lugar nenhum e a sessao valia por si.
+# =============================================================================
+def test_sessao_de_conta_autorizada_continua_funcionando(app_real, monkeypatch):
+    modulo_app, database = app_real
+    import config
+    monkeypatch.setattr(config, 'CONTAS_AUTORIZADAS', frozenset({'adri@exemplo.local'}))
+    database.salvar_sessao('token-de-teste', 'adri@exemplo.local')
+
+    with modulo_app.app.test_client() as cliente:
+        assert cliente.get('/api/clientes', headers=CABECALHOS).status_code == 200
+
+
+def test_sessao_de_conta_fora_da_allowlist_e_recusada(app_real, monkeypatch):
+    """
+    O cenario do colaborador: ele conecta a conta pessoal e, sem esta regra,
+    vira o mesmo que o dono -- faturar, restaurar backup e baixar o banco
+    completo tem a mesma permissao que listar clientes.
+    """
+    modulo_app, database = app_real
+    import config
+    monkeypatch.setattr(config, 'CONTAS_AUTORIZADAS', frozenset({'adri@exemplo.local'}))
+    database.salvar_sessao('token-de-teste', 'colaborador@gmail.com')
+
+    with modulo_app.app.test_client() as cliente:
+        resposta = cliente.get('/api/clientes', headers=CABECALHOS)
+
+    assert resposta.status_code == 403
+    # A sessao intrusa e derrubada: deixa-la de pe faria a tela seguir dizendo
+    # "Conectado" para quem o sistema acabou de recusar.
+    assert database.obter_sessao() is None
+
+
+def test_sessao_gravada_antes_da_allowlist_tambem_e_reavaliada(app_real, monkeypatch):
+    """
+    Nada reavalia a linha de `sessao` depois de gravada. Sem a checagem no
+    guarda, uma sessao criada antes de a allowlist existir -- ou antes de a
+    conta sair dela -- valeria para sempre, e a restricao so pegaria quem
+    fizesse login DEPOIS.
+    """
+    modulo_app, database = app_real
+    database.salvar_sessao('token-de-teste', 'antigo@exemplo.local')
+
+    import config
+    monkeypatch.setattr(config, 'CONTAS_AUTORIZADAS', frozenset({'adri@exemplo.local'}))
+
+    with modulo_app.app.test_client() as cliente:
+        assert cliente.get('/api/clientes', headers=CABECALHOS).status_code == 403
+
+
+def test_sem_allowlist_a_sessao_vale_como_antes(app_real, monkeypatch):
+    """
+    A garantia de compatibilidade: quem atualiza sem configurar nada nao pode
+    ser trancado fora do proprio aplicativo.
+    """
+    modulo_app, database = app_real
+    import config
+    monkeypatch.setattr(config, 'CONTAS_AUTORIZADAS', frozenset())
+    database.salvar_sessao('token-de-teste', 'quem-quer-que-seja@exemplo.local')
+
+    with modulo_app.app.test_client() as cliente:
+        assert cliente.get('/api/clientes', headers=CABECALHOS).status_code == 200

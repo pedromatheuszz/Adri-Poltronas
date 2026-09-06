@@ -107,6 +107,48 @@ ESCOPOS_MICROSOFT = "User.Read Files.ReadWrite offline_access"
 
 URL_TOKEN_MICROSOFT = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
 URL_AUTORIZACAO_MICROSOFT = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
+
+
+# ---------------------------------------------------------------------------
+# Quem pode destravar a base
+# ---------------------------------------------------------------------------
+# O fluxo OAuth usa o endpoint `/common`, que aceita QUALQUER conta Microsoft
+# -- pessoal ou de qualquer tenant. Ate a 1.5.0 o guarda de autenticacao
+# aceitava qualquer linha na tabela `sessao` com token nao vazio, sem olhar de
+# quem era a conta. Um colaborador que conectasse a conta pessoal dele passava
+# a ser, para todos os efeitos do sistema, o mesmo que o dono: faturar,
+# restaurar backup e baixar o banco completo tem exatamente a mesma permissao
+# que listar clientes.
+#
+# A explorabilidade sempre foi baixa, e vale registrar o motivo: quem chega a
+# `/api/auth/login` ja precisa do token de capacidade, que vive em %APPDATA%,
+# e quem le esse arquivo ja poderia abrir o SQLite direto. Quem protege de fato
+# e a capacidade. O risco real e operacional, nao remoto.
+#
+# VAZIO SIGNIFICA "QUALQUER CONTA", e a escolha e deliberada. Uma allowlist
+# ligada por padrao trancaria o dono fora do proprio aplicativo na primeira
+# atualizacao, com a unica saida sendo editar um arquivo de configuracao que
+# ele nao sabe que existe. Quem quer a restricao a declara.
+_CONTAS_AUTORIZADAS_BRUTO = os.environ.get('ADRI_CONTAS_AUTORIZADAS', '')
+
+CONTAS_AUTORIZADAS = frozenset(
+    parte.strip().casefold()
+    for parte in _CONTAS_AUTORIZADAS_BRUTO.replace(';', ',').split(',')
+    if parte.strip()
+)
+
+
+def conta_autorizada(conta: str) -> bool:
+    """
+    A conta pode usar o sistema?
+
+    `casefold` e nao `lower`: e-mail nao diferencia maiuscula de minuscula, e
+    `lower` erra em alfabetos que o operador pode usar no proprio nome. Sem
+    allowlist declarada, tudo passa -- ver o comentario acima.
+    """
+    if not CONTAS_AUTORIZADAS:
+        return True
+    return (conta or '').strip().casefold() in CONTAS_AUTORIZADAS
 # Credenciais de integracao. Vem do cofre cifrado quando ele as tem; do
 # ambiente ou do .env quando nao. Ver `segredos.py` para a precedencia e para
 # o limite honesto do que o DPAPI protege.

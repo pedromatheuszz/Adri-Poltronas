@@ -254,6 +254,54 @@ def migrar_do_env(caminho_env: str) -> list:
             arquivo.write("\n".join(novas) + "\n")
     except OSError as erro:
         log.warning("[SEGREDOS] Cofre gravado, mas o .env nao pode ser limpo: %s", erro)
+        # O `.env` continua com as chaves em claro, entao a copia ainda pode
+        # servir de referencia. Nao apagar aqui e deliberado.
+        return sorted(em_texto)
 
+    _descartar_copia_em_claro(caminho_env + ".bak", em_texto)
     log.info("[SEGREDOS] Migradas para o cofre: %s", ", ".join(sorted(em_texto)))
     return sorted(em_texto)
+
+
+def _descartar_copia_em_claro(caminho_bak: str, migradas: dict) -> None:
+    """
+    Apaga o `.env.bak` -- mas so depois de reler o cofre e conferir cada chave.
+
+    A copia existe para proteger contra uma falha DURANTE a reescrita do
+    `.env`. Cumprida essa funcao, ela vira o oposto do que o cofre faz: um
+    arquivo permanente, em texto puro, na mesma pasta do banco, contendo o
+    `MP_ACCESS_TOKEN` (que da acesso total a conta do vendedor no Mercado Pago
+    -- criar cobranca, ler movimentacao, estornar) e a `GEMINI_API_KEY`. O
+    trabalho de cifrar ficava metade desfeito, e para sempre.
+
+    A conferencia por releitura e o que torna seguro apagar. O risco oposto e
+    real: se o DPAPI gravar e nao conseguir decifrar de volta -- perfil de
+    usuario recriado, chave da maquina trocada --, apagar a copia perderia a
+    credencial. Entao releitura primeiro; qualquer divergencia mantem o
+    arquivo e registra o motivo.
+    """
+    global _cache
+    if not os.path.exists(caminho_bak):
+        return
+
+    # Forca a releitura do disco: o cache foi populado pelo `gravar()` e
+    # confirmaria o valor que temos em memoria, nao o que ficou no arquivo.
+    _cache = None
+    try:
+        divergentes = [nome for nome, valor in migradas.items() if obter(nome) != valor]
+    except Exception as erro:  # noqa: BLE001 - qualquer falha aqui e motivo de nao apagar
+        log.warning("[SEGREDOS] Cofre nao pode ser conferido (%s); "
+                    "mantendo %s por seguranca.", erro, os.path.basename(caminho_bak))
+        return
+
+    if divergentes:
+        log.warning("[SEGREDOS] Cofre nao devolveu %s como gravado; "
+                    "mantendo %s por seguranca.",
+                    ", ".join(sorted(divergentes)), os.path.basename(caminho_bak))
+        return
+
+    try:
+        os.remove(caminho_bak)
+        log.info("[SEGREDOS] Copia em texto claro descartada apos conferencia do cofre.")
+    except OSError as erro:
+        log.warning("[SEGREDOS] Nao foi possivel apagar %s: %s", caminho_bak, erro)

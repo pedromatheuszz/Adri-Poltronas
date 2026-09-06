@@ -456,7 +456,20 @@ def _verificar_autenticacao():
 
     sessao = database.obter_sessao()
     if sessao and sessao.get('token'):
-        g.erp_usuario_identificador = sessao.get('conta', '')
+        conta = sessao.get('conta', '')
+        # Conferida aqui TAMBEM, e nao so no /callback: uma sessao gravada
+        # antes de a allowlist existir -- ou antes de a conta sair dela --
+        # continuaria valendo para sempre, ja que nada reavalia a linha depois
+        # de gravada.
+        if not config.conta_autorizada(conta):
+            log.warning("[AUTH] Sessao de conta fora da allowlist: %s", conta)
+            security.log_evento_seguro(
+                "AUTH_CONTA_NAO_AUTORIZADA", f"Conta: {conta}", "warning")
+            database.excluir_sessao()
+            return jsonify({
+                "erro": "Esta conta nao tem permissao para usar o sistema."
+            }), 403
+        g.erp_usuario_identificador = conta
         return None
 
     # OPTIONS fica de fora porque e o preflight do proprio navegador: ele nao
@@ -673,6 +686,20 @@ def auth_callback():
             with urllib.request.urlopen(req_perfil) as resp_perfil:
                 dados_perfil = json.loads(resp_perfil.read().decode('utf-8'))
                 email_usuario = dados_perfil.get('userPrincipalName', 'Conta Conectada')
+
+            # A allowlist e conferida ANTES de gravar a sessao: uma conta nao
+            # autorizada nunca chega a existir na tabela. Recusar depois, no
+            # guarda de autenticacao, deixaria a linha gravada e o operador
+            # legitimo desconectado -- `salvar_sessao` substitui a sessao
+            # anterior.
+            if not config.conta_autorizada(email_usuario):
+                log.warning("[CALLBACK] Conta fora da allowlist recusada: %s", email_usuario)
+                security.log_evento_seguro(
+                    "OAUTH_CONTA_RECUSADA", f"Conta nao autorizada: {email_usuario}", "warning")
+                return render_template_string(
+                    config._CALLBACK_TEMPLATE, titulo="Conta nao autorizada", erro=True,
+                    mensagem=f"A conta {email_usuario} nao tem permissao para usar este sistema.",
+                    instrucao="Feche esta aba e entre com a conta autorizada."), 403
 
             # `refresh_token` so vem porque `offline_access` esta nos escopos.
             # E ele que evita mandar o operador refazer o login a cada hora.
