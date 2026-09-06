@@ -15,6 +15,8 @@ divergencia mais cara de achar depois.
 from __future__ import annotations
 
 import datetime
+import logging
+import sqlite3
 from typing import Optional
 
 import database
@@ -23,11 +25,18 @@ from erp.comercial import estados, repositorio
 from erp.core import dinheiro
 from erp.core.auditoria import registrar_evento
 
+log = logging.getLogger("adri.comercial")
+
 UNIDADES = ("un", "pc", "cj", "m", "m2", "h")
 FORMAS_DE_PAGAMENTO = ("Pix", "Boleto", "Dinheiro", "Cartao", "Outro")
 
 MAX_PARCELAS = 36
 LIMITE_ITENS_POR_PEDIDO = 200
+
+# Quantas vezes reemitir o numero do pedido quando outro cadastro leva o mesmo.
+# Tres cobre com folga o cenario real (dois cliques do mesmo operador); um
+# numero alto aqui so mascararia um problema diferente.
+TENTATIVAS_DE_NUMERACAO = 3
 
 
 class ErroDeNegocio(Exception):
@@ -92,30 +101,54 @@ def _produto_para_tela(produto: dict) -> dict:
     return produto
 
 
+def _codigo_duplicado(erro: sqlite3.IntegrityError, codigo: str) -> ErroDeNegocio:
+    """
+    Traduz a recusa do indice unico para o MESMO erro da checagem previa.
+
+    A checagem `codigo_em_uso` roda num SELECT fora de transacao, entao dois
+    cadastros simultaneos com o mesmo codigo passam os dois por ela. O indice
+    unico pega o segundo -- e sem esta traducao ele chegava ao operador como
+    500 com id de correlacao, quando a resposta certa e exatamente a mensagem
+    que ele teria recebido se tivesse chegado um segundo depois.
+    """
+    if "produtos.codigo" not in str(erro):
+        raise erro
+    return ErroDeNegocio(f"Ja existe um produto ativo com o codigo {codigo}.")
+
+
 def criar_produto(dados: dict) -> dict:
     campos = _validar_produto(dados)
-    with database.conectar() as conexao:
-        if repositorio.codigo_em_uso(conexao, campos["codigo"]):
-            raise ErroDeNegocio(f"Ja existe um produto ativo com o codigo {campos['codigo']}.")
-        produto_id = repositorio.inserir_produto(conexao, campos)
-        novo = repositorio.obter_produto(conexao, produto_id)
-        registrar_evento(conexao, acao="comercial.produto.criado", entidade="produto",
-                         entidade_id=produto_id, valores_novos=novo)
+    try:
+        with database.conectar() as conexao:
+            if repositorio.codigo_em_uso(conexao, campos["codigo"]):
+                raise ErroDeNegocio(
+                    f"Ja existe um produto ativo com o codigo {campos['codigo']}.")
+            produto_id = repositorio.inserir_produto(conexao, campos)
+            novo = repositorio.obter_produto(conexao, produto_id)
+            registrar_evento(conexao, acao="comercial.produto.criado", entidade="produto",
+                             entidade_id=produto_id, valores_novos=novo)
+    except sqlite3.IntegrityError as erro:
+        raise _codigo_duplicado(erro, campos["codigo"])
     return _produto_para_tela(novo)
 
 
 def atualizar_produto(produto_id: int, dados: dict) -> dict:
     campos = _validar_produto(dados, ignorar_id=produto_id)
-    with database.conectar() as conexao:
-        anterior = repositorio.obter_produto(conexao, produto_id)
-        if anterior is None:
-            raise NaoEncontrado("Produto nao encontrado.")
-        if repositorio.codigo_em_uso(conexao, campos["codigo"], ignorar_id=produto_id):
-            raise ErroDeNegocio(f"Ja existe um produto ativo com o codigo {campos['codigo']}.")
-        repositorio.atualizar_produto(conexao, produto_id, campos)
-        novo = repositorio.obter_produto(conexao, produto_id)
-        registrar_evento(conexao, acao="comercial.produto.alterado", entidade="produto",
-                         entidade_id=produto_id, valores_anteriores=anterior, valores_novos=novo)
+    try:
+        with database.conectar() as conexao:
+            anterior = repositorio.obter_produto(conexao, produto_id)
+            if anterior is None:
+                raise NaoEncontrado("Produto nao encontrado.")
+            if repositorio.codigo_em_uso(conexao, campos["codigo"], ignorar_id=produto_id):
+                raise ErroDeNegocio(
+                    f"Ja existe um produto ativo com o codigo {campos['codigo']}.")
+            repositorio.atualizar_produto(conexao, produto_id, campos)
+            novo = repositorio.obter_produto(conexao, produto_id)
+            registrar_evento(conexao, acao="comercial.produto.alterado", entidade="produto",
+                             entidade_id=produto_id, valores_anteriores=anterior,
+                             valores_novos=novo)
+    except sqlite3.IntegrityError as erro:
+        raise _codigo_duplicado(erro, campos["codigo"])
     return _produto_para_tela(novo)
 
 
@@ -237,15 +270,42 @@ def _validar_cabecalho(conexao, dados: dict) -> dict:
 
 
 def criar_pedido(dados: dict) -> dict:
-    with database.conectar() as conexao:
-        campos = _validar_cabecalho(conexao, dados)
-        campos["numero"] = repositorio.proximo_numero(conexao, str(datetime.date.today().year))
-        campos["data_emissao"] = _hoje()
-        pedido_id = repositorio.inserir_pedido(conexao, campos)
-        novo = repositorio.obter_pedido(conexao, pedido_id)
-        registrar_evento(conexao, acao="comercial.pedido.criado", entidade="pedido",
-                         entidade_id=pedido_id, valores_novos=novo)
-    return _pedido_para_tela(novo, [])
+    """
+    Cria o pedido, reemitindo o numero se alguem levar o mesmo primeiro.
+
+    `proximo_numero()` deriva do maior numero ja gravado, com um SELECT que
+    roda fora de transacao (o sqlite3 do Python so abre uma na primeira
+    escrita). Dois cadastros simultaneos liam o mesmo ultimo numero e tentavam
+    gravar o mesmo seguinte: o indice unico recusava a segunda e o handler
+    generico devolvia 500 com id de correlacao.
+
+    Um 500 e a resposta errada aqui. O operador nao fez nada de errado, e o
+    sistema sabe exatamente o que aconteceu -- basta pegar o numero seguinte.
+    O indice unico continua sendo a autoridade; o retry so aceita a resposta
+    dele em vez de morrer com ela.
+    """
+    exercicio = str(datetime.date.today().year)
+    for tentativa in range(TENTATIVAS_DE_NUMERACAO):
+        try:
+            with database.conectar() as conexao:
+                campos = _validar_cabecalho(conexao, dados)
+                campos["numero"] = repositorio.proximo_numero(conexao, exercicio)
+                campos["data_emissao"] = _hoje()
+                pedido_id = repositorio.inserir_pedido(conexao, campos)
+                novo = repositorio.obter_pedido(conexao, pedido_id)
+                registrar_evento(conexao, acao="comercial.pedido.criado", entidade="pedido",
+                                 entidade_id=pedido_id, valores_novos=novo)
+            return _pedido_para_tela(novo, [])
+        except sqlite3.IntegrityError as erro:
+            # So a colisao de numero e reversivel por retry. Qualquer outra
+            # violacao de integridade (FK para cliente inexistente, por
+            # exemplo) e um erro de verdade e precisa subir.
+            if "pedidos.numero" not in str(erro):
+                raise
+            log.warning("[PEDIDO] Numero disputado na tentativa %s: %s", tentativa + 1, erro)
+
+    raise ConflitoDeSituacao(
+        "Nao foi possivel reservar um numero de pedido. Tente novamente.")
 
 
 def atualizar_pedido(pedido_id: int, dados: dict) -> dict:
@@ -330,11 +390,28 @@ def remover_item(pedido_id: int, item_id: int) -> dict:
 
 # --- Transicoes --------------------------------------------------------------
 def _transicionar(conexao, pedido: dict, destino: str, extras: Optional[dict] = None) -> dict:
+    """
+    Move o pedido de situacao, recusando se outro ja tiver movido.
+
+    A checagem da maquina de estados vale sobre o que ESTA REQUISICAO leu; e a
+    leitura acontece fora de transacao, porque o sqlite3 do Python so abre uma
+    na primeira escrita. Passar `situacao_esperada` faz o proprio UPDATE
+    revalidar a premissa no momento da escrita: se ninguem mexeu, uma linha
+    muda; se outra requisicao chegou primeiro, zero -- e a segunda vira 409 em
+    vez de gravar por cima.
+    """
     try:
         estados.exigir_transicao(pedido["situacao"], destino, pedido["numero"])
     except estados.TransicaoInvalida as erro:
         raise ConflitoDeSituacao(str(erro))
-    repositorio.mudar_situacao(conexao, pedido["id"], destino, extras)
+
+    alteradas = repositorio.mudar_situacao(
+        conexao, pedido["id"], destino, extras, situacao_esperada=pedido["situacao"])
+    if alteradas == 0:
+        raise ConflitoDeSituacao(
+            f"O pedido {pedido['numero']} mudou de situacao durante a operacao. "
+            "Recarregue a tela e tente de novo."
+        )
     return repositorio.obter_pedido(conexao, pedido["id"])
 
 

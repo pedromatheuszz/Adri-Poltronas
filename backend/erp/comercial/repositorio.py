@@ -202,14 +202,52 @@ def atualizar_totais(conexao, pedido_id: int, bruto: int, liquido: int) -> None:
     )
 
 
-def mudar_situacao(conexao, pedido_id: int, situacao: str, extras: Optional[dict] = None) -> None:
+# Colunas que uma transicao pode carimbar junto com a situacao.
+#
+# Sao as unicas tres, e a lista existe porque este e o unico ponto do backend
+# em que um NOME DE COLUNA vira texto de query. Hoje as chaves vem de literais
+# do servico e sao seguras; bastaria alguem repassar `request.json` adiante
+# para virar injecao. A allowlist fecha o assunto antes que isso aconteca --
+# mesmo padrao que `database.atualizar_pagamento()` ja adota.
+COLUNAS_DE_TRANSICAO = frozenset({"faturado_em", "cancelado_em", "motivo_cancelamento"})
+
+
+def mudar_situacao(conexao, pedido_id: int, situacao: str,
+                   extras: Optional[dict] = None,
+                   situacao_esperada: Optional[str] = None) -> int:
+    """
+    Grava a nova situacao e devolve quantas linhas mudaram.
+
+    Com `situacao_esperada`, o proprio UPDATE vira o lock: `WHERE situacao = ?`
+    so casa se ninguem tiver mudado o pedido entre a leitura e a escrita.
+
+    Isso importa porque o sqlite3 do Python so abre transacao na PRIMEIRA
+    ESCRITA. O servico le a situacao com um SELECT que roda fora de qualquer
+    transacao; duas requisicoes concorrentes (o Flask roda com threaded=True)
+    liam 'aprovado' antes de qualquer BEGIN, as duas passavam pela maquina de
+    estados, o SQLite serializava as escritas e a segunda gravava tambem --
+    sem reler nada. Um duplo clique no faturamento virava seis parcelas.
+
+    Devolver 0 e a resposta certa para "outro chegou primeiro"; quem chama
+    traduz para 409.
+    """
     campos = ["situacao = ?", "atualizado_em = datetime('now', 'localtime')"]
     parametros: list[Any] = [situacao]
     for coluna, valor in (extras or {}).items():
+        if coluna not in COLUNAS_DE_TRANSICAO:
+            raise ValueError(f"Coluna nao permitida numa transicao: {coluna!r}")
         campos.append(f"{coluna} = ?")
         parametros.append(valor)
     parametros.append(pedido_id)
-    conexao.execute(f"UPDATE pedidos SET {', '.join(campos)} WHERE id = ?", parametros)
+
+    condicao = "id = ?"
+    if situacao_esperada is not None:
+        condicao += " AND situacao = ?"
+        parametros.append(situacao_esperada)
+
+    cursor = conexao.execute(
+        f"UPDATE pedidos SET {', '.join(campos)} WHERE {condicao}", parametros)
+    return cursor.rowcount
 
 
 # --- Itens -------------------------------------------------------------------

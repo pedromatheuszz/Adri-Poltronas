@@ -438,22 +438,43 @@ function _atualizarAvisoFaturamento() {
         ' a receber na aba Pagamentos. O pedido passa a faturado e nao aceita mais alteracao.';
 }
 
+// Reentrancia do faturamento.
+//
+// O submit nao travava nada: um duplo clique, ou um Enter repetido enquanto o
+// POST viajava, disparava dois faturamentos do mesmo pedido. O backend passou a
+// recusar o segundo (o UPDATE da transicao e condicional a situacao atual), mas
+// deixar o operador ver um erro 409 por ter clicado duas vezes seria trocar uma
+// falha silenciosa por uma confusa. Aqui o segundo clique simplesmente nao sai.
+var _faturamentoEmVoo = false;
+
 async function faturar(evento) {
     evento.preventDefault();
+    if (_faturamentoEmVoo) return;
+
     var pedidoId = document.getElementById('fatPedidoId').value;
     var corpo = {
         parcelas: parseInt(document.getElementById('fatParcelas').value, 10) || 1,
         primeiro_vencimento: document.getElementById('fatPrimeiroVencimento').value,
         forma_pagamento: document.getElementById('fatFormaPagamento').value
     };
+    var botao = document.querySelector('#formFaturamento button[type="submit"]');
+    var rotulo = botao ? botao.textContent : '';
+
+    _faturamentoEmVoo = true;
+    if (botao) { botao.disabled = true; botao.textContent = 'Faturando...'; }
     try {
         var pedido = await _pedirApi('/api/pedidos/' + pedidoId + '/faturamento', _json(corpo));
         fecharModal('modalFaturamento');
-        exibirToast((pedido.parcelas || []).length + ' parcela(s) gerada(s) em Pagamentos.');
+        exibirToast((pedido.parcelas || []).length + ' parcela(s) gerada(s) no pedido.');
         carregarPedidos();
         await abrirFormularioPedido(pedidoId);
     } catch (erro) {
         exibirToast(erro.message, 'error');
+    } finally {
+        // `finally` e nao o fim do `try`: se a rede cair no meio, o botao
+        // precisa voltar a funcionar para o operador tentar de novo.
+        _faturamentoEmVoo = false;
+        if (botao) { botao.disabled = false; botao.textContent = rotulo; }
     }
 }
 
