@@ -1,0 +1,30 @@
+# Achados do gitleaks que ja foram tratados e nao devem mais reprovar o CI.
+#
+# COMO USAR ESTE ARQUIVO
+# Uma linha por achado, no formato `commit:arquivo:regra:linha` -- a
+# "impressao digital" que o proprio gitleaks imprime quando encontra algo.
+#
+# E o unico jeito de fechar um achado que vive no HISTORICO: o gitleaks varre
+# os commits, entao apagar o segredo num commit posterior nao o remove de onde
+# ele esta. A alternativa seria reescrever o historico, o que invalida clones
+# e exige force-push numa branch protegida.
+#
+# A REGRA QUE FAZ ISTO NAO SER UM TAPA-BURACO
+# So entra aqui segredo que ja foi REVOGADO, e a linha diz quando e por quem.
+# Silenciar um segredo ainda vivo transforma um alarme verdadeiro em cegueira
+# permanente -- e o proximo segredo a cair no mesmo arquivo passaria batido,
+# porque o job estaria acostumado a ficar verde.
+#
+# Achado novo, em commit novo, continua reprovando. Isto nao desliga o job.
+
+# Chave da API do Gemini commitada em `.env.example` no commit d6f56ce
+# ("Add Gemini API key to .env.example"), em 05/09/2026.
+#
+# A chave foi REVOGADA em 05/09/2026 no Google AI Studio, confirmado pelo
+# dono do repositorio. O valor saiu do arquivo em 77da8f8, e o modelo passou a
+# trazer um aviso no topo dizendo que valor real nao mora la.
+#
+# O repositorio e privado, entao a exposicao ficou restrita a quem tem acesso
+# a ele -- mas a chave estava num arquivo-MODELO, que e justamente o que se
+# copia e compartilha, e teria ido junto se o repositorio virasse publico.
+d6f56ce52540c52e0d525cb8f80ba467354a1f2f:.env.example:generic-api-key:26

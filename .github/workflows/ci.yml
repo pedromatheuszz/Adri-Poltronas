@@ -246,8 +246,12 @@ jobs:
         }
         tar -xzf gitleaks.tar.gz gitleaks
         chmod +x gitleaks
-        # `--redact` para o log do CI nunca imprimir o segredo encontrado --
-        # o log e publico neste repositorio.
+        # `--redact` para o log do CI nunca imprimir o segredo encontrado.
+        #
+        # O repositorio e privado hoje, entao o log nao e publico -- mas
+        # visibilidade e uma chave que alguem vira num clique, e um log
+        # arquivado nao se reescreve depois. Redigir custa nada e nao depende
+        # de a configuracao continuar como esta.
         ./gitleaks detect --source . --no-banner --redact --verbose
         rm -f gitleaks gitleaks.tar.gz
 
