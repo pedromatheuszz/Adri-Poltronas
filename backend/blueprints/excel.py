@@ -71,8 +71,7 @@ def enviar_excel_onedrive():
     nome_personalizado = dados_requisicao.get('nome_arquivo', '').strip()
     if not ids_selecionados:
         return jsonify({"erro": "Nenhum cliente selecionado."}), 400
-    todos_clientes = database.listar_clientes()
-    clientes = [c for c in todos_clientes if c['id'] in ids_selecionados]
+    clientes = database.listar_clientes_por_ids(ids_selecionados)
     if not clientes:
         return jsonify({"erro": "Clientes nao encontrados."}), 404
     nome_arquivo = nome_arquivo_seguro(nome_personalizado)

@@ -13,9 +13,12 @@ quebrava o app de verdade sem quebrar os testes: bastava um entrypoint importar
 o segundo carregamento do mesmo arquivo, agora sob outro nome, estourava
 ImportError no meio da inicializacao.
 """
+import logging
 from datetime import datetime
 
 import validators
+
+_log = logging.getLogger("adri.notificacoes")
 
 
 # Teto por categoria de notificacao.
@@ -48,10 +51,54 @@ def _dias_desde(data_hora):
         return None
 
 
+def expurgar_lidas_orfas(conexao) -> int:
+    """
+    Remove marcas de "lida" que nao correspondem mais a notificacao nenhuma.
+
+    A tabela `notificacoes_lidas` so crescia. Cada entrega e cada cliente que o
+    operador dispensasse deixava uma linha para sempre -- inclusive depois de a
+    entrega ser concluida ou o cliente ser inativado, quando a notificacao
+    correspondente ja nao e gerada e a marca perdeu qualquer funcao.
+
+    O criterio e a existencia do FATO, nao a idade da marca. Um prazo em dias
+    seria arbitrario e traria o defeito oposto: uma entrega ainda atrasada e
+    ainda dispensada voltaria a aparecer sozinha ao vencer o prazo, e o
+    operador nao entenderia por que.
+
+    As chaves tem a forma `<tipo>:<id>`, montadas em `obter_notificacoes`.
+    Sobra a marca quando o registro nao existe mais, ou quando a entrega ja
+    esta encerrada.
+    """
+    cursor = conexao.execute(
+        f"""DELETE FROM notificacoes_lidas
+             WHERE (
+                    chave LIKE 'entrega_%'
+                AND CAST(substr(chave, instr(chave, ':') + 1) AS INTEGER) NOT IN (
+                        SELECT id FROM entregas_agendadas
+                         WHERE status NOT IN {_STATUS_ENCERRADOS})
+             )
+                OR (
+                    chave LIKE 'cliente_inativo:%'
+                AND CAST(substr(chave, instr(chave, ':') + 1) AS INTEGER) NOT IN (
+                        SELECT id FROM clientes WHERE ativo = 1)
+             )"""
+    )
+    return cursor.rowcount
+
+
 def obter_notificacoes(conectar):
     """Gera lista inteligente de notificacoes do sistema."""
     notifs = []
     with conectar() as conexao:
+        # O expurgo acontece aqui porque e o unico ponto que roda com
+        # regularidade e ja tem a conexao aberta -- e porque e exatamente o
+        # momento em que a lista de notificacoes vigentes esta sendo
+        # recalculada. Uma rotina propria precisaria de agendador.
+        removidas = expurgar_lidas_orfas(conexao)
+        if removidas:
+            _log.info("[NOTIFICACOES] %s marcas de lida sem notificacao removidas.",
+                      removidas)
+
         # 1. Entregas agendadas para hoje
         entregas_hoje = conexao.execute(
             "SELECT * FROM entregas_agendadas WHERE date(data_entrega) = date('now', 'localtime') "

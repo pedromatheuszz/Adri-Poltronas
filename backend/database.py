@@ -205,6 +205,44 @@ def obter_cliente_por_id(id_cliente):
         return dict(linha)
 
 
+# Quantos ids cabem num IN. O SQLite aceita 999 parametros por padrao (32766
+# nas versoes recentes), e a exportacao vem de uma selecao feita a mao na tela
+# -- ninguem marca mil clientes de uma vez. Cortar aqui evita que uma chamada
+# construida em outro lugar derrube a consulta com "too many SQL variables".
+MAX_IDS_POR_CONSULTA = 900
+
+
+def listar_clientes_por_ids(ids):
+    """
+    Clientes ativos entre os ids informados, na ordem em que aparecem na lista.
+
+    A exportacao carregava a BASE INTEIRA e filtrava em Python para ficar com N
+    linhas -- custo proporcional ao total de clientes para exportar tres. Aqui o
+    filtro vai ao banco, que e onde ha indice.
+
+    A ordem da lista e preservada porque a planilha sai na ordem em que o
+    operador selecionou; `ORDER BY id` reordenaria sem motivo.
+    """
+    numeros = []
+    for bruto in (ids or []):
+        try:
+            numeros.append(int(bruto))
+        except (TypeError, ValueError):
+            continue
+    if not numeros:
+        return []
+
+    marcadores = ','.join('?' * len(numeros[:MAX_IDS_POR_CONSULTA]))
+    with conectar() as conexao:
+        linhas = conexao.execute(
+            f'SELECT * FROM clientes WHERE ativo=1 AND id IN ({marcadores})',
+            numeros[:MAX_IDS_POR_CONSULTA],
+        ).fetchall()
+
+    por_id = {linha['id']: dict(linha) for linha in linhas}
+    return [por_id[i] for i in numeros if i in por_id]
+
+
 def atualizar_cliente(id_cliente, nome, cep, rua, bairro, cidade, entrega_retirada, observacoes='') -> int:
     """
     Atualiza um cliente. Devolve 1 se atualizou, 0 se o id nao existe.

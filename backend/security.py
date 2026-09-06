@@ -301,6 +301,29 @@ _MIME_TYPES_PERMITIDOS = {
 }
 
 
+def _medir_sem_ler(arquivo) -> int:
+    """
+    Tamanho do arquivo pelo ponteiro, sem materializar o conteudo.
+
+    Media-lo com `len(arquivo.read())` carregava os 10 MB inteiros em memoria
+    so para descobrir quantos bytes eram -- e o parser logo em seguida lia tudo
+    de novo. Duas copias completas do arquivo antes de qualquer validacao de
+    conteudo.
+
+    `seek(0, SEEK_END)` faz o mesmo trabalho sem alocar nada. O `finally`
+    devolve o ponteiro ao inicio: sem isso o parser leria a partir do fim e
+    encontraria um arquivo vazio.
+    """
+    if not hasattr(arquivo, 'seek') or not hasattr(arquivo, 'tell'):
+        # Duble de teste sem ponteiro. Cai para a leitura, que ai e barata.
+        return len(arquivo.read()) if hasattr(arquivo, 'read') else 0
+    try:
+        arquivo.seek(0, os.SEEK_END)
+        return arquivo.tell()
+    finally:
+        arquivo.seek(0)
+
+
 def validar_upload(arquivo, max_size: int = _TAMANHO_MAXIMO_UPLOAD) -> tuple:
     """
     Valida um arquivo uploadado. Retorna (valido: bool, erro: str ou None).
@@ -308,9 +331,7 @@ def validar_upload(arquivo, max_size: int = _TAMANHO_MAXIMO_UPLOAD) -> tuple:
     if arquivo is None:
         return False, "Nenhum arquivo fornecido."
 
-    tamanho = len(arquivo.read()) if hasattr(arquivo, 'read') else 0
-    if hasattr(arquivo, 'seek'):
-        arquivo.seek(0)
+    tamanho = _medir_sem_ler(arquivo)
 
     if tamanho > max_size:
         return False, f"Arquivo excede o tamanho maximo de {max_size // (1024*1024)}MB."

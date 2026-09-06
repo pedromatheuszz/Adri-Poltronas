@@ -571,3 +571,65 @@ def test_o_env_do_alembic_declara_a_intencao():
         fonte = arquivo.read()
 
     assert 'disable_existing_loggers=False' in fonte
+
+
+# -----------------------------------------------------------------------------
+# PERF-06 - `notificacoes_lidas` so crescia.
+#
+# Cada entrega e cada cliente que o operador dispensasse deixava uma linha para
+# sempre -- inclusive depois de a entrega ser concluida ou o cliente inativado,
+# quando a notificacao ja nem e gerada e a marca perdeu qualquer funcao.
+#
+# O criterio de expurgo e a existencia do FATO, e nao a idade da marca. Um
+# prazo em dias traria o defeito oposto: uma entrega ainda atrasada e ainda
+# dispensada voltaria a aparecer sozinha ao vencer o prazo, sem o operador
+# entender por que. Estes testes fixam as duas metades.
+# -----------------------------------------------------------------------------
+def test_marca_de_lida_some_quando_a_entrega_e_concluida(client):
+    cliente_id = _criar_cliente_com_entrega(client, '2020-01-05')
+    with database.conectar() as conexao:
+        entrega_id = conexao.execute(
+            'SELECT id FROM entregas_agendadas WHERE cliente_id=?', (cliente_id,)
+        ).fetchone()[0]
+
+    database.marcar_notificacoes_lidas([f'entrega_atrasada:{entrega_id}'])
+    database.atualizar_status_entrega(entrega_id, 'Concluida')
+
+    database.obter_notificacoes()
+
+    with database.conectar() as conexao:
+        restantes = [linha[0] for linha in
+                     conexao.execute('SELECT chave FROM notificacoes_lidas')]
+    assert f'entrega_atrasada:{entrega_id}' not in restantes
+
+
+def test_marca_de_lida_sobrevive_enquanto_a_notificacao_vale(client):
+    """A metade que importa mais: dispensar nao pode ser desfeito sozinho."""
+    cliente_id = _criar_cliente_com_entrega(client, '2020-01-05')
+    with database.conectar() as conexao:
+        entrega_id = conexao.execute(
+            'SELECT id FROM entregas_agendadas WHERE cliente_id=?', (cliente_id,)
+        ).fetchone()[0]
+
+    chave = f'entrega_atrasada:{entrega_id}'
+    database.marcar_notificacoes_lidas([chave])
+
+    notificacoes = database.obter_notificacoes()
+
+    atrasada = [n for n in notificacoes if n['chave'] == chave]
+    assert atrasada, "a entrega continua atrasada; a notificacao tem de existir"
+    assert atrasada[0]['lida'] is True, "a marca de lida foi expurgada indevidamente"
+
+
+def test_marca_orfa_de_registro_inexistente_e_removida(client):
+    """Chave apontando para id que nao existe mais nao tem como voltar a valer."""
+    _criar_cliente_com_entrega(client, '2020-01-05')
+    database.marcar_notificacoes_lidas(['entrega_hoje:99999', 'cliente_inativo:88888'])
+
+    database.obter_notificacoes()
+
+    with database.conectar() as conexao:
+        restantes = [linha[0] for linha in
+                     conexao.execute('SELECT chave FROM notificacoes_lidas')]
+    assert 'entrega_hoje:99999' not in restantes
+    assert 'cliente_inativo:88888' not in restantes
