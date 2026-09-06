@@ -312,6 +312,34 @@ def parcelas_do_pedido(conexao, pedido_id: int) -> list[dict]:
     )
 
 
+def obter_parcela(conexao, pedido_id: int, parcela: int) -> Optional[dict]:
+    return _dict(
+        conexao.execute(
+            "SELECT * FROM pagamentos WHERE pedido_id = ? AND parcela = ?",
+            (pedido_id, parcela),
+        ).fetchone()
+    )
+
+
+def mudar_status_da_parcela(conexao, pedido_id: int, parcela: int, status: str,
+                            data_pagamento: str, status_esperado: str) -> int:
+    """
+    Baixa (ou desfaz a baixa de) uma parcela, devolvendo quantas linhas mudaram.
+
+    `status_esperado` no WHERE pela mesma razao de `mudar_situacao`: a leitura
+    que decidiu se a baixa era valida rodou fora de transacao, e dois cliques
+    no botao de receber nao podem gravar dois eventos de auditoria para uma
+    baixa so.
+    """
+    cursor = conexao.execute(
+        """UPDATE pagamentos
+              SET status = ?, data_pagamento = ?
+            WHERE pedido_id = ? AND parcela = ? AND status = ?""",
+        (status, data_pagamento, pedido_id, parcela, status_esperado),
+    )
+    return cursor.rowcount
+
+
 def entregas_do_pedido(conexao, pedido_id: int) -> list[dict]:
     return _dicts(
         conexao.execute(

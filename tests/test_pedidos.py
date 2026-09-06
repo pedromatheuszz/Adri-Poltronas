@@ -6,6 +6,7 @@ entregas ficavam pendurados direto no cliente. O pedido e a espinha que liga
 as duas coisas -- e o faturamento, que emite as parcelas a receber, e o ponto
 onde um erro custa dinheiro.
 """
+import datetime
 import json
 import os
 import sys
@@ -287,7 +288,10 @@ def test_soma_das_parcelas_e_exatamente_o_total(client, cliente_id, produto_id):
     explicito, o cliente e cobrado a mais ou a menos que o pedido.
     """
     resposta = _faturar(client, cliente_id, produto_id, parcelas=3).get_json()
-    soma_centavos = sum(round(p['valor'] * 100) for p in resposta['parcelas'])
+    # Somado em CENTAVOS, nunca a partir do `valor` REAL: e exatamente a
+    # conversao para float que desfazia o rateio exato, e somar o float aqui
+    # tornaria o teste cumplice do defeito que ele existe para pegar.
+    soma_centavos = sum(p['valor']['centavos'] for p in resposta['parcelas'])
 
     assert soma_centavos == resposta['total_liquido_centavos'] == 185000
 
@@ -326,6 +330,120 @@ def test_faturamento_invalido_e_recusado(client, cliente_id, produto_id, invalid
     resposta = _faturar(client, cliente_id, produto_id, **invalido)
     assert resposta.status_code == 400
     assert esperado in resposta.get_json()['erro'].lower()
+
+
+# =============================================================================
+# Recebiveis: o outro lado do faturamento
+# =============================================================================
+# Ate a 1.5.0 esta secao nao podia existir. O faturamento emitia as parcelas, a
+# aba que as mostrava foi removida junto com o Asaas, e o pedido virava terminal
+# -- entao o dinheiro ficava registrado a receber sem lugar nenhum no aplicativo
+# para ver, conferir ou dar baixa. O ciclo order-to-cash nao fechava.
+def _patch(cliente, rota, corpo=None):
+    return cliente.patch(rota, headers=CABECALHOS, data=json.dumps(corpo or {}))
+
+
+def test_o_pedido_devolve_as_parcelas_que_emitiu(client, cliente_id, produto_id):
+    """A tela le as parcelas daqui: e o unico lugar que as expoe."""
+    pedido_id = _faturar(client, cliente_id, produto_id, parcelas=3).get_json()['id']
+
+    pedido = client.get(f'/api/pedidos/{pedido_id}').get_json()
+
+    assert len(pedido['parcelas']) == 3
+    assert all(p['status'] == 'Pendente' for p in pedido['parcelas'])
+    # `valor` chega no formato canonico da API, com centavos E texto: sem os
+    # centavos a tela refaz parsing de moeda, sem o texto cada tela reimplementa
+    # a formatacao e elas divergem.
+    assert pedido['parcelas'][0]['valor']['centavos'] > 0
+    assert pedido['parcelas'][0]['valor']['formatado'].startswith('R$')
+
+
+def test_dar_baixa_marca_a_parcela_como_recebida(client, cliente_id, produto_id):
+    pedido_id = _faturar(client, cliente_id, produto_id, parcelas=2).get_json()['id']
+
+    resposta = _patch(client, f'/api/pedidos/{pedido_id}/parcelas/1',
+                      {'status': 'Recebido', 'data_pagamento': '2026-10-06'})
+
+    assert resposta.status_code == 200
+    assert resposta.get_json()['status'] == 'Recebido'
+    assert resposta.get_json()['data_pagamento'] == '2026-10-06'
+
+    parcelas = client.get(f'/api/pedidos/{pedido_id}').get_json()['parcelas']
+    assert [p['status'] for p in parcelas] == ['Recebido', 'Pendente']
+
+
+def test_baixa_sem_data_usa_hoje(client, cliente_id, produto_id):
+    """
+    O caso esmagadoramente mais comum e marcar no momento em que se recebe.
+    Exigir a data acrescentaria um clique a operacao mais frequente.
+    """
+    pedido_id = _faturar(client, cliente_id, produto_id).get_json()['id']
+
+    recebida = _patch(client, f'/api/pedidos/{pedido_id}/parcelas/1',
+                      {'status': 'Recebido'}).get_json()
+
+    assert recebida['data_pagamento'] == datetime.date.today().isoformat()
+
+
+def test_desfazer_a_baixa_limpa_a_data_de_pagamento(client, cliente_id, produto_id):
+    """
+    Uma parcela 'Pendente' com data de pagamento preenchida e a contradicao que
+    faz relatorio mentir: ela aparece em aberto e como recebida ao mesmo tempo.
+    """
+    pedido_id = _faturar(client, cliente_id, produto_id).get_json()['id']
+    _patch(client, f'/api/pedidos/{pedido_id}/parcelas/1', {'status': 'Recebido'})
+
+    voltou = _patch(client, f'/api/pedidos/{pedido_id}/parcelas/1',
+                    {'status': 'Pendente'}).get_json()
+
+    assert voltou['status'] == 'Pendente'
+    assert voltou['data_pagamento'] == ''
+
+
+def test_baixa_repetida_e_recusada_com_409(client, cliente_id, produto_id):
+    """Dois cliques em 'Receber' nao podem gravar dois eventos de auditoria."""
+    pedido_id = _faturar(client, cliente_id, produto_id).get_json()['id']
+    assert _patch(client, f'/api/pedidos/{pedido_id}/parcelas/1',
+                  {'status': 'Recebido'}).status_code == 200
+    assert _patch(client, f'/api/pedidos/{pedido_id}/parcelas/1',
+                  {'status': 'Recebido'}).status_code == 409
+
+
+def test_atraso_e_derivado_do_vencimento_e_nao_gravado(client, cliente_id, produto_id):
+    """
+    'Atrasado' nao e status declarado: seria preciso uma rotina passando
+    meia-noite para reescrever linhas, e ate ela rodar a tela mentiria. O status
+    gravado diz o que o operador declarou; `em_atraso` diz o que o calendario diz.
+    """
+    pedido_id = _faturar(client, cliente_id, produto_id,
+                         primeiro_vencimento='2020-01-10').get_json()['id']
+
+    parcela = client.get(f'/api/pedidos/{pedido_id}').get_json()['parcelas'][0]
+
+    assert parcela['status'] == 'Pendente'
+    assert parcela['em_atraso'] is True
+
+    # Recebida deixa de estar em atraso, mesmo com o vencimento no passado.
+    _patch(client, f'/api/pedidos/{pedido_id}/parcelas/1', {'status': 'Recebido'})
+    parcela = client.get(f'/api/pedidos/{pedido_id}').get_json()['parcelas'][0]
+    assert parcela['em_atraso'] is False
+
+
+@pytest.mark.parametrize('corpo, status', [
+    ({'status': 'Atrasado'}, 400),   # derivado, nao declaravel
+    ({'status': 'Bitcoin'}, 400),
+    ({}, 400),
+    ({'status': 'Recebido', 'data_pagamento': '2026-13-45'}, 400),
+])
+def test_baixa_invalida_e_recusada(client, cliente_id, produto_id, corpo, status):
+    pedido_id = _faturar(client, cliente_id, produto_id).get_json()['id']
+    assert _patch(client, f'/api/pedidos/{pedido_id}/parcelas/1', corpo).status_code == status
+
+
+def test_baixa_em_parcela_inexistente_e_404(client, cliente_id, produto_id):
+    pedido_id = _faturar(client, cliente_id, produto_id).get_json()['id']
+    assert _patch(client, f'/api/pedidos/{pedido_id}/parcelas/9',
+                  {'status': 'Recebido'}).status_code == 404
 
 
 

@@ -228,15 +228,97 @@ def listar_pedidos(situacao: str = "", busca: str = "") -> list[dict]:
                 repositorio.listar_pedidos(conexao, situacao, busca)]
 
 
+def _parcela_para_tela(parcela: dict) -> dict:
+    """
+    Acrescenta o que a tela precisa e o banco nao guarda.
+
+    `em_atraso` e DERIVADO do vencimento, nunca gravado. Gravar 'Atrasado'
+    exigiria uma rotina passando meia-noite para reescrever linhas, e uma
+    parcela vencida ontem apareceria como em dia ate essa rotina rodar. O
+    status gravado responde "o que o operador declarou"; `em_atraso` responde
+    "o que o calendario diz", e as duas perguntas sao diferentes.
+    """
+    saida = dict(parcela)
+    saida["valor"] = dinheiro.serializar(int(parcela.get("valor_centavos") or 0))
+    saida["em_atraso"] = bool(
+        parcela.get("status") == "Pendente"
+        and parcela.get("data_vencimento")
+        and str(parcela["data_vencimento"]) < _hoje()
+    )
+    return saida
+
+
 def obter_pedido(pedido_id: int) -> dict:
     with database.conectar() as conexao:
         pedido = repositorio.obter_pedido_com_itens(conexao, pedido_id)
         if pedido is None:
             raise NaoEncontrado("Pedido nao encontrado.")
         completo = _pedido_para_tela(pedido, pedido["itens"])
-        completo["parcelas"] = repositorio.parcelas_do_pedido(conexao, pedido_id)
+        completo["parcelas"] = [
+            _parcela_para_tela(p) for p in repositorio.parcelas_do_pedido(conexao, pedido_id)]
         completo["entregas"] = repositorio.entregas_do_pedido(conexao, pedido_id)
     return completo
+
+
+# Status que o operador pode declarar numa parcela.
+#
+# 'Atrasado' fica de fora de proposito: ele e derivado do vencimento
+# (`em_atraso`), nao declarado. Deixar o operador marcar 'Atrasado' criaria dois
+# donos para a mesma verdade, e nenhum deles confiavel.
+STATUS_DE_PARCELA = ("Recebido", "Pendente", "Cancelado")
+
+
+def baixar_parcela(pedido_id: int, parcela: int, dados: dict) -> dict:
+    """
+    Dá baixa numa parcela do pedido, ou desfaz uma baixa.
+
+    Esta funcao e o outro lado do faturamento. Ate a 1.5.0 o faturamento
+    emitia as parcelas e nao havia nada no aplicativo que as lesse, muito menos
+    que as recebesse: o ciclo terminava com dinheiro registrado a receber e sem
+    caminho de volta. O pedido, por desenho, vira terminal ao ser faturado --
+    entao o recebimento nao tinha onde acontecer.
+    """
+    numero = validators.inteiro_positivo(parcela)
+    if numero is None:
+        raise ErroDeNegocio("Numero de parcela invalido.")
+
+    status = (dados.get("status") or "").strip()
+    if status not in STATUS_DE_PARCELA:
+        raise ErroDeNegocio(
+            f"Status deve ser um de: {', '.join(STATUS_DE_PARCELA)}.")
+
+    data_pagamento = (dados.get("data_pagamento") or "").strip()
+    if status == "Recebido":
+        # Sem data informada, o recebimento e hoje: e o caso esmagadoramente
+        # mais comum (o operador marca no momento em que recebe) e exigir o
+        # campo so acrescentaria um clique a operacao mais frequente.
+        data_pagamento = data_pagamento or _hoje()
+        if not validators.data_valida(data_pagamento):
+            raise ErroDeNegocio("Data de pagamento invalida.")
+    else:
+        # Desfazer a baixa tem de limpar a data. Uma parcela 'Pendente' com
+        # data de pagamento preenchida e a contradicao que faz relatorio mentir.
+        data_pagamento = ""
+
+    with database.conectar() as conexao:
+        atual = repositorio.obter_parcela(conexao, pedido_id, numero)
+        if atual is None:
+            raise NaoEncontrado("Parcela nao encontrada.")
+        if atual["status"] == status:
+            raise ConflitoDeSituacao(f"A parcela {numero} ja esta '{status}'.")
+
+        alteradas = repositorio.mudar_status_da_parcela(
+            conexao, pedido_id, numero, status, data_pagamento,
+            status_esperado=atual["status"])
+        if alteradas == 0:
+            raise ConflitoDeSituacao(
+                f"A parcela {numero} mudou durante a operacao. Recarregue a tela.")
+
+        nova = repositorio.obter_parcela(conexao, pedido_id, numero)
+        registrar_evento(conexao, acao="comercial.parcela.baixa", entidade="pagamento",
+                         entidade_id=int(nova["id"]), valores_anteriores=atual,
+                         valores_novos=nova)
+    return _parcela_para_tela(nova)
 
 
 def _validar_cabecalho(conexao, dados: dict) -> dict:
@@ -530,5 +612,7 @@ def faturar_pedido(pedido_id: int, dados: dict) -> dict:
         emitidas = repositorio.parcelas_do_pedido(conexao, pedido_id)
 
     resultado = _pedido_para_tela(atualizado)
-    resultado["parcelas"] = emitidas
+    # Mesmo formato que `obter_pedido` devolve. Duas formas para o mesmo campo
+    # em dois endpoints e a inconsistencia que a tela paga depois.
+    resultado["parcelas"] = [_parcela_para_tela(p) for p in emitidas]
     return resultado

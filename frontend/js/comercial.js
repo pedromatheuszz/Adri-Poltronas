@@ -255,6 +255,7 @@ async function abrirFormularioPedido(pedidoId) {
         // alteracao. A regra vem do backend, em `editavel`.
         _travarFormularioPedido(!pedido.editavel);
         _renderizarItens(pedido);
+        _renderizarParcelas(pedido);
         _renderizarAcoesPedido(pedido);
         abrirModal('modalPedido');
     } catch (erro) {
@@ -301,6 +302,87 @@ function _renderizarItens(pedido) {
         '<option value="">Selecione...</option>' + produtos.map(function (p) {
             return '<option value="' + p.id + '">' + escaparHtml(p.codigo + ' - ' + p.descricao) + '</option>';
         }).join('');
+}
+
+var _ROTULO_PARCELA = {
+    Recebido: 'Recebida',
+    Pendente: 'Pendente',
+    Cancelado: 'Cancelada'
+};
+
+/**
+ * Parcelas a receber, dentro do proprio pedido.
+ *
+ * O bloco so aparece quando existem parcelas -- ou seja, depois do
+ * faturamento. Antes disso ele nao teria o que dizer.
+ *
+ * `em_atraso` vem calculado do backend e NAO e o status gravado: o status diz
+ * o que o operador declarou, `em_atraso` diz o que o calendario diz. Marcar
+ * 'Atrasado' no banco exigiria uma rotina passando meia-noite, e ate ela rodar
+ * a tela mentiria.
+ */
+function _renderizarParcelas(pedido) {
+    var bloco = document.getElementById('pedidoBlocoParcelas');
+    var corpo = document.getElementById('tabelaParcelasPedido');
+    var resumo = document.getElementById('pedidoResumoParcelas');
+    if (!bloco || !corpo) return;
+
+    var parcelas = pedido.parcelas || [];
+    bloco.hidden = !parcelas.length;
+    if (!parcelas.length) return;
+
+    corpo.innerHTML = parcelas.map(function (p) {
+        var situacao = escaparHtml(_ROTULO_PARCELA[p.status] || p.status || '');
+        if (p.em_atraso) situacao += ' <span class="badge badge-perigo">em atraso</span>';
+
+        var acao = '';
+        if (p.status === 'Pendente') {
+            acao = '<button type="button" class="btn btn-sucesso btn-sm" ' +
+                   'data-parcela-receber="' + p.parcela + '">Receber</button>';
+        } else if (p.status === 'Recebido') {
+            acao = '<button type="button" class="btn btn-secundario btn-sm" ' +
+                   'data-parcela-desfazer="' + p.parcela + '">Desfazer</button>';
+        }
+
+        var quando = p.status === 'Recebido' && p.data_pagamento
+            ? '<br><small>em ' + escaparHtml(_dataBR(p.data_pagamento)) + '</small>'
+            : '';
+
+        return '<tr>' +
+            '<td class="centro">' + escaparHtml(String(p.parcela)) + '/' +
+                escaparHtml(String(p.total_parcelas)) + '</td>' +
+            '<td>' + escaparHtml(_dataBR(p.data_vencimento)) + '</td>' +
+            '<td class="direita">' + _brl(p.valor) + '</td>' +
+            '<td>' + situacao + quando + '</td>' +
+            '<td class="col-acoes">' + acao + '</td></tr>';
+    }).join('');
+
+    var recebido = 0, aberto = 0;
+    parcelas.forEach(function (p) {
+        var centavos = p.valor_centavos || 0;
+        if (p.status === 'Recebido') recebido += centavos;
+        else if (p.status !== 'Cancelado') aberto += centavos;
+    });
+    // `formatarReal` e nao `_brl`: `_brl` espera o objeto {centavos, formatado}
+    // que a API manda, e aqui a soma foi feita na tela.
+    resumo.innerHTML =
+        '<div><dt>Recebido</dt><dd>' + formatarReal(recebido / 100) + '</dd></div>' +
+        '<div class="pedido-total-final"><dt>Em aberto</dt><dd>' +
+            formatarReal(aberto / 100) + '</dd></div>';
+}
+
+async function _mudarStatusDaParcela(parcela, status) {
+    var pedidoId = document.getElementById('pedId').value;
+    if (!pedidoId) return;
+    try {
+        await _pedirApi('/api/pedidos/' + pedidoId + '/parcelas/' + parcela,
+                        Object.assign(_json({ status: status }), { method: 'PATCH' }));
+        exibirToast('Parcela ' + parcela + ' atualizada.');
+        await abrirFormularioPedido(pedidoId);
+        carregarPedidos();
+    } catch (erro) {
+        exibirToast(erro.message, 'error');
+    }
 }
 
 /**
@@ -435,7 +517,8 @@ function _atualizarAvisoFaturamento() {
     var parcelas = parseInt(document.getElementById('fatParcelas').value, 10) || 1;
     document.getElementById('faturamentoEfeito').textContent =
         'Vai gerar ' + parcelas + (parcelas === 1 ? ' parcela' : ' parcelas') +
-        ' a receber na aba Pagamentos. O pedido passa a faturado e nao aceita mais alteracao.';
+        ' a receber, listadas no proprio pedido. O pedido passa a faturado e ' +
+        'nao aceita mais alteracao de itens.';
 }
 
 // Reentrancia do faturamento.
@@ -694,6 +777,10 @@ function registrarEventosComerciais() {
             abrirFormularioEntrega(_pedidoAberto);
         } else if (alvo.dataset.entrega) {
             mudarSituacaoEntrega(parseInt(alvo.dataset.entrega, 10), alvo.dataset.para);
+        } else if (alvo.dataset.parcelaReceber) {
+            _mudarStatusDaParcela(parseInt(alvo.dataset.parcelaReceber, 10), 'Recebido');
+        } else if (alvo.dataset.parcelaDesfazer) {
+            _mudarStatusDaParcela(parseInt(alvo.dataset.parcelaDesfazer, 10), 'Pendente');
         }
     });
 }
