@@ -114,6 +114,32 @@ def test_toda_acao_declarativa_do_html_existe_no_javascript():
     )
 
 
+def test_todo_comando_do_html_esta_na_lista_branca():
+    """
+    A lista branca e o que impede HTML injetado de chamar qualquer funcao do
+    app -- e e tambem a forma mais facil de um botao novo nascer morto.
+
+    Um `data-comando` fora dela nao levanta erro: o despachante escreve um aviso
+    no console e devolve. Na tela, o clique simplesmente nao faz nada, que e o
+    tipo de defeito que passa por revisao e por teste de backend.
+    """
+    fontes = _fontes_da_interface()
+    html = fontes['backend/templates/index.html']
+    js = fontes['frontend/js/app.js']
+
+    bloco = re.search(r'var COMANDOS_PERMITIDOS = \[(.*?)\]', js, re.DOTALL)
+    assert bloco, "a lista branca de comandos sumiu de app.js"
+    permitidos = set(re.findall(r"'([^']+)'", bloco.group(1)))
+
+    usados = set(re.findall(r'data-comando="([A-Za-z_$][\w$]*)"', html))
+    fora = usados - permitidos
+
+    assert not fora, (
+        f"data-comando usado no HTML e ausente da lista branca -- o clique nao "
+        f"faz nada e so aparece um aviso no console: {sorted(fora)}"
+    )
+
+
 def test_as_parcelas_do_faturamento_tem_onde_ser_mostradas():
     """
     A regressao especifica do BUG-02.

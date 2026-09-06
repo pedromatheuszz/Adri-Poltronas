@@ -5,6 +5,121 @@ Versionamento [semântico](https://semver.org/lang/pt-BR/).
 
 ---
 
+## [1.5.1-beta] — 2026-09-06
+
+Correções da auditoria técnica da 1.5.0 (41 achados: 2 altos, 18 médios,
+17 baixos, 4 informativos). Nenhuma funcionalidade nova além do destino das
+parcelas, que fecha um ciclo que a 1.5.0 deixou pela metade.
+
+### Corrigido — alta severidade
+
+- **Uma queda de rede apagava a sessão e trancava o operador fora do banco.**
+  `renovar_token()` já distinguia "a Microsoft recusou" de "não consegui falar
+  com a Microsoft", mas devolvia `None` nos dois casos, e o chamador apagava a
+  sessão em ambos. Roteador reiniciando, Wi-Fi ainda não conectado ou máquina
+  saindo de suspensão bastavam: a partir daí toda rota `/api/` respondia 401 e
+  a única saída era refazer o login OAuth no navegador. Um ERP que anuncia
+  funcionar offline virava um aplicativo que não abre. Agora só uma recusa
+  explícita apaga a sessão; timeout e resposta ilegível (o portal cativo de
+  Wi-Fi público, que responde 200 com HTML) preservam.
+
+- **Faturar gerava dinheiro a receber que nenhuma tela mostrava.** A 1.5.0
+  removeu a aba Pagamentos e não removeu o faturamento: as parcelas eram
+  criadas, `faturado` é estado terminal, e não havia onde ver, conferir ou dar
+  baixa. Dois textos da interface ainda mandavam procurar "a aba Pagamentos".
+  As parcelas passam a viver **dentro do próprio pedido**, com baixa manual via
+  `PATCH /api/pedidos/<id>/parcelas/<n>`.
+
+### Corrigido — integridade e concorrência
+
+- **Duplo clique no faturamento emitia dois conjuntos de parcelas.** O
+  `sqlite3` do Python só abre transação na primeira escrita, então a leitura da
+  situação acontecia fora de qualquer transação; com `threaded=True`, dois
+  cliques viravam duas threads que liam `aprovado` e gravavam as duas. Um
+  pedido de R$ 100,00 em 3x virava seis lançamentos somando R$ 200,00. A
+  transição agora é condicional (`WHERE situacao = ?`), o que vale para todas
+  as transições, e o botão trava durante o envio.
+
+- **Corrida na numeração de pedido virava 500.** Dois cadastros simultâneos
+  liam o mesmo último número; o índice único recusava o segundo e o handler
+  genérico devolvia erro opaco. Agora reemite o número seguinte. A corrida
+  equivalente no código de produto passa a devolver a mesma mensagem da
+  checagem prévia, como 400.
+
+- **Excluir cliente não checava vínculo nenhum**, deixando pedido em aberto e
+  parcela pendente órfãos de um cliente invisível — e o pedido passava a
+  recusar edição com um 404 que não tinha nada a ver com ele.
+
+- **Entrega podia apontar para pedido de outro cliente**, ou para um pedido em
+  rascunho ou cancelado.
+
+- **Cancelar pedido não cancelava as entregas dele**, que seguiam gerando
+  "ENTREGA ATRASADA" para um pedido morto.
+
+### Corrigido — segurança e privacidade
+
+- **Allowlist de contas** (`ADRI_CONTAS_AUTORIZADAS`). Vazia, o comportamento é
+  o histórico: qualquer conta Microsoft entra. Preenchida, fecha o cenário do
+  colaborador que conecta a conta pessoal e passa a poder tudo.
+
+- **A migração do cofre deixava a chave em texto claro ao lado.** O `.env.bak`
+  ficava para sempre, com o `MP_ACCESS_TOKEN` legível, na mesma pasta do banco.
+  Agora é descartado — mas só depois de reler o cofre e conferir cada chave.
+
+- **Consentimento explícito para o mapa.** Abrir a aba enviava o endereço
+  completo de todos os clientes ao Nominatim/OpenStreetMap. O aviso existia; o
+  que faltava era poder recusar e poder apagar as coordenadas guardadas.
+
+- `.capacidade` entrou no `.gitignore`; `ci.yml` declara `permissions: contents: read`;
+  a cópia do banco para download usa `tempfile.mkstemp()`.
+
+### Removido
+
+- **Cerca de 60% de `security.py`**: CSRF de uso único, gerenciador de sessão,
+  sanitizadores, `validar_sql_safe`, assinatura HMAC, detecção de anomalia e
+  detecção de força bruta. Nada disso era chamado por rota nenhuma. O ritual do
+  CSRF existia completo nas duas pontas para uma validação que nunca acontecia
+  — quem protege é a checagem de `Origin`/`Referer` —, e
+  `esta_bloqueado_bruteforce()` sempre devolvia `False` porque o contador nunca
+  era incrementado.
+
+- **Cinco variáveis de "segurança avançada" do `.env.example`** que nenhuma
+  linha do backend lia. Quem preenchesse a allowlist de IP acreditava ter
+  restringido o acesso, e não havia restringido nada.
+
+- **Resíduos da saída do Asaas**: o módulo `erp/financeiro/` inteiro (que
+  consultava uma coluna apagada do schema), o `hiddenimport` inexistente no
+  `.spec`, a fixture órfã de teste, sete funções de `database.py` sem chamador
+  e os comentários que descreviam a máquina de cobrança removida.
+
+### Desempenho
+
+- A importação de planilha materializava o arquivo três vezes e só conferia o
+  teto de linhas depois do parse completo. Agora mede sem ler, usa
+  `read_only=True` no openpyxl e corta durante a leitura.
+- A exportação carregava a base inteira para filtrar N clientes.
+- `notificacoes_lidas` nunca era expurgada.
+
+### Documentação
+
+- README, `SECURITY.md`, `API_STANDARD.md` e `PRIVACIDADE.md` descreviam o
+  produto de duas versões atrás — abas, integrações e rotas removidas na 1.5.0.
+  O `PRIVACIDADE.md` era o mais grave: declarava o gateway como destino de dado
+  pessoal e listava uma tabela que a migration já havia apagado.
+
+### Testes
+
+- `test_concorrencia.py`, `test_contrato_da_interface.py`, `test_autorizacao.py`
+  e `test_configuracao.py` são novos. O primeiro roda threads de verdade com
+  barreira de largada; o segundo lê a interface e a documentação como texto e
+  falha quando elas apontam para algo que não existe — a classe de defeito que
+  nenhum teste de backend pegaria.
+- `conftest.py` gera uma `FERNET_KEY` efêmera: a suíte deixa de exigir Windows
+  e para de tocar na chave DPAPI real do desenvolvedor.
+- `ruff.toml` liga as regras `S`, `B` e `UP`. Sem configuração, o ruff nunca
+  aplicou a regra de SQL — uma consulta concatenando entrada do usuário passava
+  pelo pipeline sem reclamação.
+
 ## [1.5.0-beta] — 2026-09-05
 
 Remoção do Asaas e das áreas Financeiro e Análise. É uma **regressão

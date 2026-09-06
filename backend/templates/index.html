@@ -19,8 +19,8 @@
           href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 
     <!-- Ordem obrigatoria: tokens.css declara as variaveis que style.css usa. -->
-    <link rel="stylesheet" href="/css/tokens.css?v=v86">
-    <link rel="stylesheet" href="/css/style.css?v=v86">
+    <link rel="stylesheet" href="/css/tokens.css?v=v87">
+    <link rel="stylesheet" href="/css/style.css?v=v87">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
           integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H"
           crossorigin="anonymous" referrerpolicy="no-referrer" />
@@ -695,6 +695,37 @@
                         externos. Os resultados ficam guardados neste computador.
                     </p>
 
+                    <!-- Consentimento antes da primeira consulta.
+                         O aviso acima ja existia e e claro, mas era so aviso: a
+                         consulta acontecia de qualquer forma ao abrir a aba. O
+                         endereco completo de TODOS os clientes ativos saia para
+                         um servico fora do pais sem que houvesse como recusar.
+                         Agora o mapa espera. -->
+                    <div id="mapaConsentimento" class="mapa-consentimento" hidden>
+                        <p>
+                            O mapa precisa enviar o endereco dos clientes (rua, bairro,
+                            cidade e CEP) ao Nominatim/OpenStreetMap para descobrir as
+                            coordenadas. Sao servidores fora do Brasil, e o envio so
+                            acontece se voce autorizar.
+                        </p>
+                        <p class="mapa-consentimento-detalhe">
+                            As coordenadas ficam guardadas neste computador, entao a
+                            consulta acontece uma vez por endereco. Voce pode revogar e
+                            apagar o que foi guardado a qualquer momento.
+                        </p>
+                        <div class="mapa-consentimento-acoes">
+                            <button type="button" class="btn btn-primario"
+                                    data-comando="autorizarMapa">Autorizar e carregar o mapa</button>
+                        </div>
+                    </div>
+
+                    <div id="mapaControles" class="mapa-controles" hidden>
+                        <button type="button" class="btn btn-secundario btn-sm"
+                                data-comando="limparCacheDoMapa">Apagar coordenadas guardadas</button>
+                        <button type="button" class="btn btn-secundario btn-sm"
+                                data-comando="revogarMapa">Revogar autorizacao</button>
+                    </div>
+
                     <div id="mapaClientes" class="mapa-container" role="application"
                          aria-label="Mapa com a localizacao dos clientes"></div>
                 </section>
@@ -1129,10 +1160,10 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"
             integrity="sha384-e6nUZLBkQ86NJ6TVVKAeSaK8jWa3NhkYWZFomE39AvDbQWeie9PlQqM3pmYW5d1g"
             crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-    <script src="/js/offline.js?v=v86"></script>
-    <script src="/js/app.js?v=v86"></script>
+    <script src="/js/offline.js?v=v87"></script>
+    <script src="/js/app.js?v=v87"></script>
     <!-- Modulo comercial: Produtos, Pedidos e Agenda de Entregas.
          Arquivo separado porque app.js ja passa de 2.000 linhas. -->
-    <script src="/js/comercial.js?v=v86"></script>
+    <script src="/js/comercial.js?v=v87"></script>
 </body>
 </html>

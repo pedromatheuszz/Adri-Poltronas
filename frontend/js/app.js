@@ -638,11 +638,16 @@ function trocarAba(aba) {
     if (aba === 'pedidos') { carregarPedidos(); carregarProdutos(); }
     if (aba === 'produtos') { carregarProdutos(); }
     if (aba === 'entregas') { carregarEntregas(); }
-    if (aba === 'mapa') { setTimeout(function() { initMapa(); carregarMapaClientes(); }, 100); }
+    if (aba === 'mapa') {
+        // Sem autorizacao o mapa nao consulta nada: quem decide se o endereco
+        // dos clientes sai desta maquina e o operador, nao a troca de aba.
+        setTimeout(function() {
+            if (!_mostrarEstadoDoMapa()) return;
+            initMapa();
+            carregarMapaClientes();
+        }, 100);
+    }
     if (aba === 'clientes') { atualizarAvisoDePendenciasComErro(); }
-    // `pagamentos` e `relatorios` nao carregam nada: as duas areas estao
-    // desativadas nesta versao e a secao ja traz o aviso escrito no HTML.
-    // Pedir dado a elas so renderia 503 no console.
 }
 
 var chartInstances = {};
@@ -2284,6 +2289,76 @@ function guardarGeocache() {
     }
 }
 
+
+// -----------------------------------------------------------------------------
+// Consentimento do mapa
+//
+// Abrir a aba Mapa envia o endereco COMPLETO de cada cliente ativo -- rua,
+// bairro, cidade e CEP -- ao Nominatim/OpenStreetMap, um por um. E transferencia
+// de dado pessoal a um terceiro fora do pais.
+//
+// O aviso na tela ja existia e era claro. O que faltava era poder RECUSAR: o
+// envio acontecia ao abrir a aba, e nao havia como olhar o mapa sem ele nem
+// como apagar o que ja tinha sido guardado. Nao ha nada de ilegal em usar o
+// Nominatim; o que faltava era a escolha.
+// -----------------------------------------------------------------------------
+var CHAVE_CONSENTIMENTO_MAPA = 'adri-mapa-consentimento';
+
+function mapaAutorizado() {
+    try {
+        return localStorage.getItem(CHAVE_CONSENTIMENTO_MAPA) === 'sim';
+    } catch (e) {
+        // Sem storage nao da para lembrar da resposta, e perguntar de novo a
+        // cada abertura e melhor do que assumir um "sim" que ninguem deu.
+        return false;
+    }
+}
+
+function _mostrarEstadoDoMapa() {
+    var autorizado = mapaAutorizado();
+    var pedido = document.getElementById('mapaConsentimento');
+    var controles = document.getElementById('mapaControles');
+    var tela = document.getElementById('mapaClientes');
+    if (pedido) pedido.hidden = autorizado;
+    if (controles) controles.hidden = !autorizado;
+    if (tela) tela.hidden = !autorizado;
+    return autorizado;
+}
+
+function autorizarMapa() {
+    try {
+        localStorage.setItem(CHAVE_CONSENTIMENTO_MAPA, 'sim');
+    } catch (e) {
+        // Vale para esta sessao mesmo sem conseguir gravar.
+        console.warn('[mapa] consentimento nao persistido:', e);
+    }
+    _mostrarEstadoDoMapa();
+    initMapa();
+    carregarMapaClientes();
+}
+
+function revogarMapa() {
+    try {
+        localStorage.removeItem(CHAVE_CONSENTIMENTO_MAPA);
+    } catch (e) { /* nada a fazer */ }
+    // Revogar sem apagar o que ja foi buscado deixaria as coordenadas de todos
+    // os clientes guardadas numa maquina onde o operador acabou de dizer que
+    // nao quer isso.
+    limparCacheDoMapa({ silencioso: true });
+    _mostrarEstadoDoMapa();
+    exibirToast('Autorizacao revogada e coordenadas apagadas.');
+}
+
+function limparCacheDoMapa(opcoes) {
+    _geocacheCoords = {};
+    try {
+        localStorage.removeItem(CHAVE_GEOCACHE);
+    } catch (e) { /* nada a fazer */ }
+    if (!(opcoes && opcoes.silencioso)) {
+        exibirToast('Coordenadas guardadas apagadas.');
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Aparencia do mapa
 //
@@ -2508,6 +2583,7 @@ var COMANDOS_PERMITIDOS = [
     'alternarSidebar',
     'aplicarFiltros',
     'atualizarNotificacoes',
+    'autorizarMapa',
     'conectarMicrosoft',
     'copiarPixDaLicenca',
     'enviarParaExcel',
@@ -2516,7 +2592,9 @@ var COMANDOS_PERMITIDOS = [
     'fecharModal',
     'fecharNotificacoes',
     'gerarPixDaLicenca',
+    'limparCacheDoMapa',
     'limparFiltros',
+    'revogarMapa',
     'sugerirBairro',
     'toggleFiltro',
     'toggleModoSelecao',

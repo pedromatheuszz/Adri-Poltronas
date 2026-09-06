@@ -462,6 +462,32 @@ h1, h2, h3, h4 {
 }
 .aviso-dados-externos svg { flex-shrink: 0; margin-top: 2px; }
 
+/* Pedido de consentimento do mapa.
+   O aviso acima explica o que acontece; este bloco e o que da a escolha. Fica
+   no lugar do mapa ate a autorizacao, e nao ao lado dele: um aviso que se pode
+   ignorar rolando a pagina nao e uma escolha. */
+.mapa-consentimento {
+    padding: var(--esp-5);
+    border: 1px solid var(--cor-borda);
+    border-radius: var(--raio-md);
+    background: var(--cor-superficie-2);
+    text-align: center;
+}
+.mapa-consentimento p { margin: 0 auto var(--esp-3); max-width: 62ch; }
+.mapa-consentimento-detalhe {
+    color: var(--cor-texto-2);
+    font-size: var(--texto-md);
+}
+.mapa-consentimento-acoes { margin-top: var(--esp-4); }
+
+.mapa-controles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--esp-2);
+    justify-content: flex-end;
+    margin-bottom: var(--esp-3);
+}
+
 
 /* =============================================================================
    5. BOTOES
