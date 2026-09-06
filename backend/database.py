@@ -12,7 +12,6 @@ from notificacoes_db import MAX_NOTIFICACOES_POR_TIPO  # noqa: F401
 log_db = logging.getLogger("adri.db")
 
 
-
 def obter_caminho_banco() -> str:
     override = os.environ.get("ADRI_DB_PATH")
     if override:
@@ -520,87 +519,6 @@ def salvar_pagamento(cliente_id, cliente_nome, valor, descricao, data_vencimento
         return pagamento_id
 
 
-def atualizar_pagamento(pagamento_id, **kwargs):
-    """Atualiza campos de um pagamento existente."""
-    campos_permitidos = {
-        'status', 'data_pagamento', 'descricao',
-        'valor', 'valor_centavos', 'data_vencimento', 'tipo_pagamento',
-        'cliente_nome',
-    }
-    campos = {k: v for k, v in kwargs.items() if k in campos_permitidos and v is not None}
-    if not campos:
-        return 0
-
-    # As duas colunas de dinheiro andam juntas. Deixar `valor` mudar sozinho
-    # faria `valor_centavos` guardar o numero antigo -- e a divergencia seria
-    # silenciosa ate alguem comparar os dois em um relatorio.
-    if 'valor' in campos and 'valor_centavos' not in campos:
-        campos['valor_centavos'] = dinheiro.para_centavos(campos['valor'])
-    elif 'valor_centavos' in campos and 'valor' not in campos:
-        campos['valor'] = round(int(campos['valor_centavos']) / 100, 2)
-    sets = ', '.join(f'{k}=?' for k in campos)
-    vals = list(campos.values()) + [pagamento_id]
-    with conectar() as conexao:
-        antigo = conexao.execute(
-            'SELECT * FROM pagamentos WHERE id=?', (pagamento_id,)
-        ).fetchone()
-        if not antigo:
-            return 0
-        conexao.execute(f'UPDATE pagamentos SET {sets} WHERE id=?', vals)
-        linhas = conexao.execute('SELECT changes()').fetchone()[0]
-        if 'status' in campos and campos['status'] == 'Recebido':
-            pagamento = conexao.execute('SELECT * FROM pagamentos WHERE id=?', (pagamento_id,)).fetchone()
-            if pagamento:
-                conexao.execute(
-                    'INSERT INTO historico (cliente_id, cliente_nome, acao, detalhes) VALUES (?, ?, ?, ?)',
-                    (pagamento['cliente_id'], pagamento['cliente_nome'], 'PAGAMENTO',
-                     f'Pagamento confirmado: R$ {pagamento["valor"]:.2f}'),
-                )
-        if linhas:
-            novo = conexao.execute(
-                'SELECT * FROM pagamentos WHERE id=?', (pagamento_id,)
-            ).fetchone()
-            registrar_evento(
-                conexao,
-                acao="financeiro.recebivel.atualizado",
-                entidade="pagamento",
-                entidade_id=pagamento_id,
-                valores_anteriores=antigo,
-                valores_novos=novo,
-            )
-        return linhas
-
-
-def registrar_observacao_de_pagamento(pagamento_id: int, observacao: str) -> None:
-    """
-    Anexa uma nota ao historico e a auditoria do pagamento.
-
-    Usado quando uma decisao humana contraria o que o sistema apuraria
-    sozinho -- confirmar na mao uma cobranca que o gateway ainda mostra em
-    aberto, por exemplo. Sem o registro, o numero fica certo na tela e
-    inexplicavel depois.
-    """
-    with conectar() as conexao:
-        pagamento = conexao.execute(
-            'SELECT * FROM pagamentos WHERE id=?', (pagamento_id,)
-        ).fetchone()
-        if not pagamento:
-            return
-        conexao.execute(
-            'INSERT INTO historico (cliente_id, cliente_nome, acao, detalhes) '
-            'VALUES (?, ?, ?, ?)',
-            (pagamento['cliente_id'], pagamento['cliente_nome'], 'PAGAMENTO',
-             observacao[:500]),
-        )
-        registrar_evento(
-            conexao,
-            acao="financeiro.recebivel.observacao_manual",
-            entidade="pagamento",
-            entidade_id=pagamento_id,
-            valores_novos={"observacao": observacao[:500]},
-        )
-
-
 # Status locais que ainda representam cobranca ABERTA, e portanto cancelavel.
 #
 # 'Atrasado' estava de fora, e nao devia: vencer nao quita nem cancela nada --
@@ -609,57 +527,6 @@ def registrar_observacao_de_pagamento(pagamento_id: int, observacao: str) -> Non
 # precisam ser encerradas.
 STATUS_CANCELAVEIS = ("Pendente", "Atrasado")
 
-
-def excluir_pagamento(pagamento_id) -> int:
-    """
-    Cancela uma cobranca aberta marcando-a como 'Cancelado'.
-
-    Nao apaga a linha, e a mudanca e deliberada. Registro financeiro apagado
-    e registro que nao existe: some do extrato, some da conferencia com o
-    Asaas (que continua conhecendo aquela cobranca pelo `asaas_payment_id`) e
-    some da propria trilha de auditoria, que passa a ter um evento de
-    cancelamento apontando para um id sem destino.
-
-    'Cancelado' ja era um status do dominio -- as metricas do dashboard e os
-    filtros da tela ja o tratavam. O que faltava era o caminho de cancelamento
-    usa-lo.
-
-    O nome da funcao fica como esta por ser o contrato que a rota DELETE e os
-    chamadores conhecem; o docstring e o que descreve o comportamento.
-    """
-    with conectar() as conexao:
-        pagamento = conexao.execute('SELECT * FROM pagamentos WHERE id=?', (pagamento_id,)).fetchone()
-        marcadores = ",".join("?" for _ in STATUS_CANCELAVEIS)
-        cursor = conexao.execute(
-            f"UPDATE pagamentos SET status='Cancelado' "
-            f"WHERE id=? AND status IN ({marcadores})",
-            (pagamento_id, *STATUS_CANCELAVEIS),
-        )
-        if pagamento and cursor.rowcount > 0:
-            conexao.execute(
-                'INSERT INTO historico (cliente_id, cliente_nome, acao, detalhes) VALUES (?, ?, ?, ?)',
-                (pagamento['cliente_id'], pagamento['cliente_nome'], 'PAGAMENTO',
-                 f'Cobranca cancelada: R$ {pagamento["valor"]:.2f}'),
-            )
-            novo = conexao.execute(
-                'SELECT * FROM pagamentos WHERE id=?', (pagamento_id,)
-            ).fetchone()
-            registrar_evento(
-                conexao,
-                acao="financeiro.recebivel.cancelado",
-                entidade="pagamento",
-                entidade_id=pagamento_id,
-                valores_anteriores=pagamento,
-                valores_novos=novo,
-            )
-        return cursor.rowcount
-
-
-def obter_pagamento_por_id(pagamento_id):
-    """Retorna um pagamento pelo ID."""
-    with conectar() as conexao:
-        linha = conexao.execute('SELECT * FROM pagamentos WHERE id=?', (pagamento_id,)).fetchone()
-        return dict(linha) if linha else None
 
 # Cobrancas que ainda representam dinheiro a entrar. 'Atrasado' continua
 # sendo um valor a receber: vencer nao quita nem cancela a cobranca. Os
@@ -726,96 +593,6 @@ def obter_metricas_pagamentos():
     }
 
 
-
-# A data efetiva de um recebimento e a de pagamento; quando ela nao foi
-# preenchida, cai para a criacao da cobranca. `date()` normaliza os dois
-# formatos que convivem na coluna: 'AAAA-MM-DD' (confirmacao manual) e
-# 'AAAA-MM-DD HH:MM:SS' (webhook do Asaas).
-_DATA_RECEBIMENTO = "date(COALESCE(NULLIF(data_pagamento, ''), criado_em))"
-
-
-def obter_metricas_financeiras(meses_historico=6):
-    """
-    Indicadores financeiros do dashboard: faturamento do mes corrente
-    comparado ao anterior, valores a receber e em atraso, ticket medio e a
-    serie mensal de receita.
-    """
-    with conectar() as conexao:
-        def receita_do_mes(deslocamento):
-            """Soma recebida no mes com `deslocamento` meses a partir do atual."""
-            return conexao.execute(
-                f"SELECT {_SOMA_EM_CENTAVOS} FROM pagamentos "
-                f"WHERE status = 'Recebido' AND strftime('%Y-%m', {_DATA_RECEBIMENTO}) = "
-                f"strftime('%Y-%m', date('now', 'localtime', ?))",
-                (f'{deslocamento} months',),
-            ).fetchone()[0] or 0
-
-        faturamento_mes = receita_do_mes(0)
-        faturamento_anterior = receita_do_mes(-1)
-
-        qtd_mes = conexao.execute(
-            f"SELECT COUNT(*) FROM pagamentos WHERE status = 'Recebido' "
-            f"AND strftime('%Y-%m', {_DATA_RECEBIMENTO}) = strftime('%Y-%m', date('now', 'localtime'))"
-        ).fetchone()[0] or 0
-
-        a_receber = conexao.execute(
-            f"SELECT {_SOMA_EM_CENTAVOS} FROM pagamentos "
-            f"WHERE status IN {_STATUS_A_RECEBER}"
-        ).fetchone()[0] or 0
-
-        em_atraso = conexao.execute(
-            f"SELECT {_SOMA_EM_CENTAVOS} FROM pagamentos "
-            "WHERE status IN ('Pendente', 'Atrasado') "
-            "AND data_vencimento != '' AND date(data_vencimento) < date('now', 'localtime')"
-        ).fetchone()[0] or 0
-
-        qtd_atraso = conexao.execute(
-            "SELECT COUNT(*) FROM pagamentos "
-            "WHERE status IN ('Pendente', 'Atrasado') "
-            "AND data_vencimento != '' AND date(data_vencimento) < date('now', 'localtime')"
-        ).fetchone()[0] or 0
-
-        # Serie mensal: consulta uma vez e preenche os meses sem receita com
-        # zero, para o grafico nao pular periodos.
-        linhas = conexao.execute(
-            f"SELECT strftime('%Y-%m', {_DATA_RECEBIMENTO}) AS mes, "
-            f"{_SOMA_EM_CENTAVOS} AS total "
-            f"FROM pagamentos WHERE status = 'Recebido' "
-            f"AND {_DATA_RECEBIMENTO} >= date('now', 'localtime', ?) "
-            f"GROUP BY mes",
-            (f'-{meses_historico - 1} months',),
-        ).fetchall()
-        por_mes = {linha['mes']: linha['total'] or 0 for linha in linhas}
-
-        meses = conexao.execute(
-            "WITH RECURSIVE seq(n) AS (SELECT 0 UNION ALL SELECT n + 1 FROM seq WHERE n < ?) "
-            "SELECT strftime('%Y-%m', date('now', 'localtime', '-' || (? - n) || ' months')) AS mes FROM seq",
-            (meses_historico - 1, meses_historico - 1),
-        ).fetchall()
-        serie = [{'mes': m['mes'], 'total': _reais(por_mes.get(m['mes'], 0))} for m in meses]
-
-    # A variacao e uma razao entre dois totais: calcula-la em centavos evita
-    # que o arredondamento para reais entre no denominador.
-    variacao = None
-    if faturamento_anterior:
-        variacao = round(((faturamento_mes - faturamento_anterior) / faturamento_anterior) * 100, 1)
-    elif faturamento_mes:
-        variacao = 100.0
-
-    return {
-        'faturamento_mes': _reais(faturamento_mes),
-        'faturamento_mes_anterior': _reais(faturamento_anterior),
-        'variacao_percentual': variacao,
-        'qtd_recebimentos_mes': qtd_mes,
-        # Divide em centavos e converte uma vez so.
-        'ticket_medio_mes': _reais(faturamento_mes // qtd_mes) if qtd_mes else 0,
-        'a_receber': _reais(a_receber),
-        'em_atraso': _reais(em_atraso),
-        'qtd_em_atraso': qtd_atraso,
-        'serie_mensal': serie,
-    }
-
-
 def obter_dados_grafico_por_tipo():
     """Retorna contagem de clientes por tipo (Entrega/Retirada) para gráfico de pizza."""
     with conectar() as conexao:
@@ -866,50 +643,6 @@ def obter_clientes_para_mapa():
             "cidade": row["cidade"] or '',
             "tipo": row["entrega_retirada"]
         } for row in linhas]
-
-
-def listar_clientes_filtrados(tipo='', cidade='', data_inicio='', data_fim=''):
-    """Retorna clientes filtrados por tipo, cidade e período para relatórios."""
-    query = 'SELECT * FROM clientes WHERE ativo=1'
-    params = []
-    if tipo:
-        query += ' AND entrega_retirada=?'
-        params.append(tipo)
-    if cidade:
-        query += ' AND cidade LIKE ?'
-        params.append(f'%{cidade}%')
-    if data_inicio:
-        query += ' AND criado_em >= ?'
-        params.append(data_inicio)
-    if data_fim:
-        query += ' AND criado_em <= ?'
-        params.append(data_fim + ' 23:59:59')
-    query += ' ORDER BY id DESC'
-    with conectar() as conexao:
-        linhas = conexao.execute(query, params).fetchall()
-    return [{
-        "id": row["id"], "nome": row["nome"], "cep": row["cep"],
-        "rua": row["rua"] or '', "bairro": row["bairro"] or '',
-        "cidade": row["cidade"] or '', "entrega_retirada": row["entrega_retirada"],
-        "observacoes": row["observacoes"] or '',
-        "criado_em": row["criado_em"] or '', "atualizado_em": row["atualizado_em"] or '',
-    } for row in linhas]
-
-
-def obter_perfis_regiao():
-    """Retorna contagem de clientes por cidade para relatório de performance."""
-    with conectar() as conexao:
-        linhas = conexao.execute(
-            "SELECT cidade, COUNT(*) as total, "
-            "SUM(CASE WHEN entrega_retirada='Entrega' THEN 1 ELSE 0 END) as entregas, "
-            "SUM(CASE WHEN entrega_retirada='Retirada' THEN 1 ELSE 0 END) as retiradas "
-            "FROM clientes WHERE ativo=1 AND cidade IS NOT NULL AND cidade != '' "
-            "GROUP BY cidade ORDER BY total DESC"
-        ).fetchall()
-    return [{
-        "cidade": row["cidade"], "total": row["total"],
-        "entregas": row["entregas"], "retiradas": row["retiradas"]
-    } for row in linhas]
 
 
 def obter_ultimos_clientes(limite=5):

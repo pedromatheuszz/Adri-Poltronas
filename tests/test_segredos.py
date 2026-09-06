@@ -218,7 +218,7 @@ def test_env_inexistente_nao_quebra(cofre_isolado):
 
 def test_valor_comentado_nao_e_migrado(cofre_isolado):
     """Uma linha comentada e uma chave que o operador desativou de proposito."""
-    caminho = _escrever_env(cofre_isolado, "# MP_ACCESS_TOKEN=antiga\nASAAS_SANDBOX=true\n")
+    caminho = _escrever_env(cofre_isolado, "# MP_ACCESS_TOKEN=antiga\nADRI_BACKUP_EXTRA=D:/copias\n")
 
     assert segredos.migrar_do_env(caminho) == []
 

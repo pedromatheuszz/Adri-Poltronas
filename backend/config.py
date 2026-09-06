@@ -111,7 +111,6 @@ URL_AUTORIZACAO_MICROSOFT = "https://login.microsoftonline.com/common/oauth2/v2.
 # ambiente ou do .env quando nao. Ver `segredos.py` para a precedencia e para
 # o limite honesto do que o DPAPI protege.
 GEMINI_API_KEY = segredos.obter('GEMINI_API_KEY')
-# Token que o Asaas envia no header `asaas-access-token` dos webhooks.
 
 # Versao do aplicativo. Lida do package.json para nao existirem duas verdades:
 # o instalador, o titulo da janela e a sonda de identidade precisam concordar,

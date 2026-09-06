@@ -3,10 +3,11 @@ Cofre das credenciais de integracao.
 
 O problema
 ----------
-`ASAAS_API_KEY` e `GEMINI_API_KEY` viviam em texto puro em
+`MP_ACCESS_TOKEN` e `GEMINI_API_KEY` viviam em texto puro em
 `%APPDATA%\\AdriPoltronas\\.env`. Qualquer processo rodando como o mesmo
-usuario -- e qualquer pessoa que abrisse a pasta -- lia as chaves. A do Asaas,
-em producao, movimenta dinheiro de verdade.
+usuario -- e qualquer pessoa que abrisse a pasta -- lia as chaves. A do
+Mercado Pago da acesso total a conta do vendedor: criar cobranca, ler
+movimentacao, estornar.
 
 Os tokens da Microsoft ja eram cifrados com DPAPI desde a 1.0. As chaves de
 integracao ficaram de fora, e nao havia motivo tecnico: e a mesma
@@ -134,8 +135,9 @@ def _valores_vindos_do_env() -> set:
     """
     Nomes que o `.env` colocou em `os.environ`.
 
-    Sem esta distincao nao daria para saber se `ASAAS_API_KEY` veio do arquivo
-    (e portanto perde para o cofre) ou foi injetada de fora (e portanto vence).
+    Sem esta distincao nao daria para saber se `MP_ACCESS_TOKEN` veio do
+    arquivo (e portanto perde para o cofre) ou foi injetada de fora (e portanto
+    vence).
     """
     return _origem_env
 

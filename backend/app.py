@@ -431,8 +431,6 @@ def _erro_http(e):
 #   /api/health -- e a sonda de identidade. O Electron e o app Qt perguntam a
 #          ela QUEM esta na porta antes de adotar o backend, e isso acontece
 #          muito antes de qualquer login. Nao devolve dado de negocio.
-#   /api/pagamentos/webhook -- chega do Asaas, de fora, e tem autenticacao
-#          propria (ASAAS_WEBHOOK_TOKEN).
 #   /, /manifest.json, /sw.js -- e a casca da PWA, que precisa carregar para
 #          o operador ter onde clicar em "Conectar".
 ROTAS_SEM_AUTH = frozenset({

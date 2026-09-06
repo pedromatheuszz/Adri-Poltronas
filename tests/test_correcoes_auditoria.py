@@ -179,27 +179,17 @@ def test_validar_sessao_segura_nao_levanta_nameerror():
 
 
 # -----------------------------------------------------------------------------
-# Item 3 - DELETE /api/pagamentos/<id> chamava o Asaas ANTES de checar se a
-# cobranca era cancelavel. Num pagamento ja recebido a cobranca era cancelada
-# no gateway e o registro local permanecia intacto: divergencia permanente.
+# Item 3 - saiu na 1.5.0, junto com o gateway de cobranca.
+#
+# Era sobre DELETE /api/pagamentos/<id> chamar o Asaas antes de checar se a
+# cobranca era cancelavel. A rota, o modulo `asaas.py` e a fixture que espiava
+# as chamadas foram removidos com a integracao.
+#
+# A fixture ficou para tras na 1.5.0 e vale registrar o porque de ninguem ter
+# notado: nenhum teste a requisitava, entao o `import asaas` dentro dela nunca
+# executava. Uma fixture orfa nao falha -- ela espera. Teria quebrado no dia em
+# que alguem a usasse, com um ImportError sem relacao aparente com o teste novo.
 # -----------------------------------------------------------------------------
-@pytest.fixture
-def asaas_espiao(monkeypatch):
-    """Registra as chamadas ao Asaas sem tocar na rede."""
-    import asaas
-    chamadas = []
-
-    def _cancelar(asaas_payment_id):
-        chamadas.append(asaas_payment_id)
-        return dict(_cancelar.resposta)
-
-    _cancelar.resposta = {"deleted": True}
-    monkeypatch.setattr(asaas, 'esta_configurado', lambda: True)
-    monkeypatch.setattr(asaas, 'cancelar_pagamento', _cancelar)
-    return chamadas, _cancelar
-
-
-
 
 
 

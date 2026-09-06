@@ -1,2 +1,0 @@
-"""Processos financeiros do ERP."""
-

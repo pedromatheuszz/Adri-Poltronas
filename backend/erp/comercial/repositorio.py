@@ -369,9 +369,14 @@ def inserir_parcela(conexao, dados: dict) -> int:
     """
     Uma parcela a receber e uma linha em `pagamentos`.
 
-    Reusar a tabela existente, em vez de criar `titulos`, mantem em pe toda a
-    maquina de cobranca que ja funciona: Pix, boleto, webhook do Asaas e a
-    tela de Pagamentos.
+    Reusar a tabela existente, em vez de criar `titulos`, preservou o dado ja
+    gravado dos pedidos faturados nas versoes anteriores. A tabela nasceu
+    servindo ao gateway de cobranca, removido na 1.5.0; o que restou dela e o
+    que o ERP precisa hoje -- valor, vencimento, status e vinculo com o pedido.
+
+    As parcelas sao lidas e recebidas dentro do proprio pedido
+    (`servico.baixar_parcela`), que e o unico caminho de escrita depois da
+    emissao.
 
     O valor chega em CENTAVOS e e gravado em centavos. Ate a versao 1.1 ele
     passava por `round(centavos / 100, 2)` aqui, e o rateio exato feito pelo

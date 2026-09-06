@@ -47,8 +47,9 @@ function criarJanela(): BrowserWindow {
   // Só exibe quando ha conteudo pintado.
   nova.once('ready-to-show', () => nova.show());
 
-  // Links externos (boleto do Asaas, arquivo no OneDrive) abrem no navegador
-  // do sistema; dentro do app eles virariam uma janela sem barra de endereco.
+  // Links externos (arquivo no OneDrive, cobranca da licenca) abrem no
+  // navegador do sistema; dentro do app eles virariam uma janela sem barra de
+  // endereco.
   nova.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('https://')) void shell.openExternal(url);
     return { action: 'deny' };
@@ -70,8 +71,8 @@ function criarJanela(): BrowserWindow {
  *
  * Precisa rodar antes do primeiro `loadURL`: o Flask recusa com 403 tudo que
  * chegue sem o cabecalho, inclusive a pagina inicial. O filtro limita a
- * injecao a origem local -- o token nao pode vazar para o Asaas, o ViaCEP ou
- * qualquer outro destino que a pagina consulte.
+ * injecao a origem local -- o token nao pode vazar para o Mercado Pago, o ViaCEP
+ * ou qualquer outro destino que a pagina consulte.
  */
 function injetarCapacidade(token: string): void {
   // O filtro por padrao de URL do webRequest segue a sintaxe de match pattern
@@ -82,8 +83,8 @@ function injetarCapacidade(token: string): void {
     { urls: ['<all_urls>'] },
     (detalhes, prosseguir) => {
       if (!detalhes.url.startsWith(URL_APP)) {
-        // Nunca para fora: o token nao pode vazar para o Asaas, o ViaCEP ou
-        // qualquer outro destino que a pagina consulte.
+        // Nunca para fora: o token nao pode vazar para o Mercado Pago, o
+        // ViaCEP ou qualquer outro destino que a pagina consulte.
         prosseguir({ requestHeaders: detalhes.requestHeaders });
         return;
       }

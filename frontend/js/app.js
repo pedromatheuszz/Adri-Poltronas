@@ -145,7 +145,7 @@ window.fetch = function(url, options) {
 //
 // O pagamento e verificado PERGUNTANDO ao Mercado Pago, e nao esperando
 // webhook: o backend escuta em loopback e um servidor da internet nao alcanca
-// este endereco. Mesma inversao ja usada para o Asaas em reconciliacao.py.
+// este endereco -- nao ha para onde o Mercado Pago chamar de volta.
 // -----------------------------------------------------------------------------
 var _licencaVencida = false;
 var _intervaloDaLicenca = null;
@@ -291,8 +291,8 @@ function _desenharCobrancaDaLicenca(dados) {
     var caixa = document.getElementById('licencaCobranca');
     if (!caixa) return;
 
-    // Mesmo cuidado da cobranca do Asaas: o base64 do QR passa por
-    // `base64Seguro` antes de virar `src`, e o payload por `escaparHtml`.
+    // O base64 do QR passa por `base64Seguro` antes de virar `src`, e o
+    // payload por `escaparHtml`: os dois vem de resposta HTTP externa.
     var qr = base64Seguro(dados.pix_qr_code);
     var payload = dados.pix_payload || '';
 
