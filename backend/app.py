@@ -5,7 +5,6 @@ from logging.handlers import RotatingFileHandler
 import uuid
 import json
 import sys
-import time
 from flask import (
     Flask,
     g,
@@ -132,54 +131,25 @@ app.config.update(
 # dicionario de config sugerindo um modo que ninguem le.
 
 # ---------------------------------------------------------------------------
-# CSRF TOKEN global para a sessao
+# O TOKEN CSRF SAIU NA 1.5.1
+#
+# Havia aqui um cache que gerava um token e o devolvia no header X-CSRF-Token
+# a cada resposta. O frontend guardava em cookie e reenviava. E o backend nunca
+# validava, em lugar nenhum -- as duas pontas executavam o ritual completo de
+# uma protecao inexistente.
+#
+# Quem protege as rotas que alteram estado e `_bloquear_requisicao_de_origem_
+# externa`, pela checagem de Origin/Referer, e sempre foi.
+#
+# Ligar a validacao de verdade nao era alternativa: a chave do cache era o
+# cookie `adri_session`, que este app nunca emite (havia UMA entrada, de chave
+# vazia, para todo mundo), e `security.validar_csrf_token` era de uso unico
+# enquanto o cache reservava o mesmo token por uma hora -- a segunda requisicao
+# seria recusada como replay.
+#
+# Se um dia fizer sentido ter CSRF de verdade aqui, ele nasce inteiro: emissao
+# por sessao real, validacao no `before_request`, e teste que falhe sem ela.
 # ---------------------------------------------------------------------------
-VALIDADE_CSRF_SEGUNDOS = 3600
-MAX_TOKENS_CSRF_EM_CACHE = 1000
-
-_csrf_token_cache = {}
-
-
-def _obter_csrf_token() -> str:
-    """
-    Retorna ou gera o token enviado no header X-CSRF-Token.
-
-    ATENCAO -- o backend NAO valida este token em lugar nenhum. Quem
-    protege as rotas que alteram estado e a checagem de Origin/Referer em
-    _bloquear_requisicao_de_origem_externa(), como descreve o
-    API_STANDARD.md. O header existe porque o frontend faz a outra metade
-    do ritual (guarda em cookie e reenvia), e some-lo quebraria essa ponta.
-
-    Duas consequencias de nao ser um token de verdade, para nao induzir a
-    erro quem for mexer aqui:
-      - a chave do cache e o cookie `adri_session`, que este app nunca
-        emite. Na pratica ha uma unica entrada, de chave '', para todos.
-      - security.validar_csrf_token() e de uso unico (marca `usado`),
-        enquanto este cache reserve o MESMO token por uma hora. Ligar uma
-        coisa na outra hoje recusaria a segunda requisicao como replay.
-    """
-    session_id = request.cookies.get('adri_session', '')
-    if session_id in _csrf_token_cache:
-        token_info = _csrf_token_cache[session_id]
-        if time.time() - token_info['gerado_em'] < VALIDADE_CSRF_SEGUNDOS:
-            return token_info['token']
-    token = security.gerar_csrf_token()
-    _csrf_token_cache[session_id] = {'token': token, 'gerado_em': time.time()}
-    if len(_csrf_token_cache) > MAX_TOKENS_CSRF_EM_CACHE:
-        limpar_csrf_cache()
-    return token
-
-
-def limpar_csrf_cache():
-    """Remove do cache os tokens CSRF ja expirados."""
-    agora = time.time()
-    # As entradas vivas sao copiadas ANTES do clear(). Reconstruir lendo do
-    # proprio dicionario ja esvaziado levantava KeyError e derrubava a
-    # requisicao que tivesse a infelicidade de estourar o limite do cache.
-    vivos = {chave: dados for chave, dados in _csrf_token_cache.items()
-             if agora - dados['gerado_em'] < VALIDADE_CSRF_SEGUNDOS}
-    _csrf_token_cache.clear()
-    _csrf_token_cache.update(vivos)
 
 
 # ---------------------------------------------------------------------------
@@ -526,16 +496,13 @@ def _aplicar_seguranca_requisicao():
     if resposta_auth is not None:
         return resposta_auth
 
-    ip_remoto = get_remote_address()
-    # ATENCAO -- esta checagem esta inerte: nenhum ponto do backend chama
-    # security.registrar_tentativa_login(), entao o contador nunca sai do
-    # zero e isto sempre devolve False. Nao existe login com senha aqui (a
-    # autenticacao e OAuth da Microsoft), entao nao ha o que contar hoje.
-    # Fica no lugar para o dia em que houver -- mas nao conte com ele como
-    # protecao ativa.
-    if security.esta_bloqueado_bruteforce(ip_remoto):
-        log.warning("[BRUTE-FORCE] IP bloqueado: %s", ip_remoto)
-        return jsonify({"erro": "Acesso temporariamente bloqueado por seguranca."}), 429
+    # A checagem de forca bruta que existia aqui saiu na 1.5.1. Ela estava
+    # inerte: nenhum ponto do backend chamava `registrar_tentativa_login`,
+    # entao o contador nunca saia do zero e a funcao sempre devolvia False.
+    # Nao ha login com senha neste app -- a autenticacao e o OAuth da
+    # Microsoft --, entao nao havia o que contar. Um guarda que sempre deixa
+    # passar nao e defesa em profundidade: e uma linha que faz o leitor
+    # acreditar numa protecao a mais do que existe.
 
     ua = request.headers.get('User-Agent', '')
     if ua and any(b in ua.lower() for b in ['sqlmap', 'nikto', 'nmap', 'masscan', 'zgrab']):
@@ -636,11 +603,6 @@ def _aplicar_cabecalhos_de_seguranca(resposta):
         resposta.headers.setdefault('X-Correlation-ID', correlation_id)
     return resposta
 
-
-@app.after_request
-def _adicionar_csrf_token_header(resposta):
-    resposta.headers.setdefault('X-CSRF-Token', _obter_csrf_token())
-    return resposta
 
 
 # ---------------------------------------------------------------------------

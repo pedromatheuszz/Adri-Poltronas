@@ -155,27 +155,17 @@ def test_csp_recusa_script_inline(client):
     assert "'unsafe-inline'" in style_src
 
 
-def test_limpar_csrf_cache_preserva_tokens_vivos():
-    """Reconstruir o cache lendo do dicionario ja esvaziado levantava KeyError."""
-    import app as app_module_local
-    cache = app_module_local._csrf_token_cache
-    cache.clear()
-    cache['vivo'] = {'token': 'a', 'gerado_em': __import__('time').time()}
-    cache['expirado'] = {'token': 'b', 'gerado_em': 0}
-
-    app_module_local.limpar_csrf_cache()
-
-    assert 'vivo' in cache
-    assert 'expirado' not in cache
-    cache.clear()
-
-
-def test_validar_sessao_segura_nao_levanta_nameerror():
-    """`_SESSION_TIMEOUT` era usado sem existir; a constante e `_SESSAO_TIMEOUT`."""
-    import security
-    sessao_id = security.criar_sessao_segura("conta@exemplo.com", "token-qualquer")
-    assert security.validar_sessao_segura(sessao_id) is not None
-    security.destruir_sessao_segura(sessao_id)
+# Dois testes desta secao sairam na 1.5.1, com o codigo que eles cobriam.
+#
+# `test_limpar_csrf_cache_preserva_tokens_vivos` protegia um KeyError real no
+# cache de tokens CSRF, e `test_validar_sessao_segura_nao_levanta_nameerror`
+# protegia um NameError real no gerenciador de sessao em memoria. Os dois
+# defeitos eram verdadeiros e as correcoes estavam certas -- mas nem o cache nem
+# o gerenciador eram chamados por rota nenhuma.
+#
+# Era a forma mais discreta do problema que SEG-03 descreve: teste de qualidade,
+# cobrindo codigo que producao nunca executa, inflando a cobertura e sugerindo
+# que aquelas defesas estavam de pe.
 
 
 # -----------------------------------------------------------------------------
