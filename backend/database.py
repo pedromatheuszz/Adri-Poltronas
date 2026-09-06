@@ -258,14 +258,66 @@ def atualizar_cliente(id_cliente, nome, cep, rua, bairro, cidade, entrega_retira
         return 1
 
 
+class ClienteTemVinculos(Exception):
+    """
+    Exclusao recusada porque o cliente tem pedido em aberto ou valor a receber.
+
+    O blueprint traduz para 409: o pedido e valido, o cliente existe -- o que
+    nao serve e o estado em que ele esta.
+    """
+
+
+def _vinculos_que_impedem_exclusao(conexao, id_cliente) -> tuple:
+    """
+    Conta o que ficaria orfao se o cliente fosse inativado agora.
+
+    Pedido faturado e cancelado NAO contam: o primeiro ja produziu as parcelas
+    (que sao contadas a parte) e o segundo nao espera mais nada. O que trava e
+    trabalho em andamento -- rascunho, aberto, aprovado -- e dinheiro a receber.
+    """
+    abertos = conexao.execute(
+        "SELECT COUNT(*) FROM pedidos WHERE cliente_id = ? "
+        "AND situacao NOT IN ('cancelado', 'faturado')", (id_cliente,)
+    ).fetchone()[0]
+    a_receber = conexao.execute(
+        "SELECT COUNT(*) FROM pagamentos WHERE cliente_id = ? AND status = 'Pendente'",
+        (id_cliente,)
+    ).fetchone()[0]
+    return abertos, a_receber
+
+
 def excluir_cliente(id_cliente) -> int:
-    """Inativa o cliente sem apagar seu historico ou vinculos empresariais."""
+    """
+    Inativa o cliente sem apagar seu historico ou vinculos empresariais.
+
+    Recusa quando ha pedido em aberto ou parcela a receber. Antes disso a
+    inativacao passava sempre, e o resultado era um limbo: o cliente sumia de
+    todas as listas, mas o pedido faturado continuava aparecendo com o nome
+    dele (que e snapshot em `pedidos.cliente_nome`) e as parcelas seguiam
+    pendentes, invisiveis. Pior, tentar editar aquele pedido depois falhava com
+    404 "Cliente nao encontrado", porque a validacao do cabecalho exige cliente
+    ativo -- o pedido existia, era listado, e nao aceitava alteracao por um
+    motivo que nao tinha nada a ver com ele.
+    """
     with conectar() as conexao:
         antigo = conexao.execute(
             'SELECT * FROM clientes WHERE id=? AND ativo=1', (id_cliente,)
         ).fetchone()
         if not antigo:
             return 0
+
+        abertos, a_receber = _vinculos_que_impedem_exclusao(conexao, id_cliente)
+        if abertos or a_receber:
+            partes = []
+            if abertos:
+                partes.append(f"{abertos} pedido(s) em aberto")
+            if a_receber:
+                partes.append(f"{a_receber} parcela(s) a receber")
+            raise ClienteTemVinculos(
+                f"{antigo['nome']} tem {' e '.join(partes)}. "
+                "Conclua ou cancele antes de excluir."
+            )
+
         cursor = conexao.execute(
             "UPDATE clientes SET ativo=0, excluido_em=datetime('now', 'localtime'), "
             "atualizado_em=datetime('now', 'localtime') WHERE id=? AND ativo=1",

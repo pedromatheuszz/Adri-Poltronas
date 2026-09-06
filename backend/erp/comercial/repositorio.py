@@ -340,6 +340,22 @@ def mudar_status_da_parcela(conexao, pedido_id: int, parcela: int, status: str,
     return cursor.rowcount
 
 
+def cancelar_entregas_do_pedido(conexao, pedido_id: int) -> int:
+    """
+    Cancela as entregas ainda vivas do pedido, devolvendo quantas.
+
+    'Concluida' fica de fora: uma entrega que ja aconteceu aconteceu, e
+    reescrever isso apagaria um fato do historico operacional. Cancelar um
+    pedido nao desfaz o passado, so encerra o que ainda estava previsto.
+    """
+    cursor = conexao.execute(
+        "UPDATE entregas_agendadas SET status = 'Cancelada' "
+        "WHERE pedido_id = ? AND status IN ('Pendente', 'Em andamento')",
+        (pedido_id,),
+    )
+    return cursor.rowcount
+
+
 def entregas_do_pedido(conexao, pedido_id: int) -> list[dict]:
     return _dicts(
         conexao.execute(

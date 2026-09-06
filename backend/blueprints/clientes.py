@@ -196,7 +196,12 @@ def atualizar_cliente(id_cliente):
 @clientes_bp.route('/<int:id_cliente>', methods=['DELETE'])
 @idempotente
 def excluir_cliente(id_cliente):
-    linhas = database.excluir_cliente(id_cliente)
+    try:
+        linhas = database.excluir_cliente(id_cliente)
+    except database.ClienteTemVinculos as erro:
+        # 409 e nao 400: os dados da requisicao estao corretos; o que impede e
+        # o estado atual do cliente, e ele muda sem o operador reenviar nada.
+        return jsonify({"erro": str(erro)}), 409
     if linhas == 0:
         return jsonify({"erro": "Cliente nao encontrado."}), 404
     return jsonify({"mensagem": "Cliente excluido!"}), 200

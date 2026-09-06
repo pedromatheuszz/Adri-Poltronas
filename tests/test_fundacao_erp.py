@@ -36,6 +36,13 @@ def test_exclusao_de_cliente_e_logica_e_preserva_vinculos(banco_fallback):
     pagamento_id = database.salvar_pagamento(
         cliente_id, "Cliente", 120.50, "Sinal", "2030-01-01"
     )
+    # A parcela precisa estar liquidada para a exclusao ser permitida -- ver
+    # `test_exclusao_e_recusada_com_parcela_a_receber`. O que este teste afirma
+    # e outra coisa: que a exclusao PERMITIDA e logica e nao leva o vinculo
+    # junto. Deixa-la pendente misturaria as duas perguntas num teste so.
+    with database.conectar() as conexao:
+        conexao.execute("UPDATE pagamentos SET status='Recebido' WHERE id=?",
+                        (pagamento_id,))
 
     assert database.excluir_cliente(cliente_id) == 1
     assert database.listar_clientes() == []
@@ -58,6 +65,65 @@ def test_exclusao_de_cliente_e_logica_e_preserva_vinculos(banco_fallback):
     assert cliente["excluido_em"]
     assert pagamento["id"] == pagamento_id
     assert auditoria["acao"] == "crm.cliente.inativado"
+
+
+# =============================================================================
+# Exclusao de cliente com vinculos vivos
+# =============================================================================
+# Antes destes testes a inativacao passava sempre. O cliente sumia das listas e
+# deixava para tras um limbo: o pedido faturado continuava listado com o nome
+# dele (snapshot em `pedidos.cliente_nome`), as parcelas seguiam pendentes e
+# invisiveis, e editar aquele pedido falhava com 404 "Cliente nao encontrado"
+# -- porque a validacao do cabecalho exige cliente ativo. O pedido existia, era
+# listado, e nao aceitava alteracao por um motivo que nao era dele.
+def test_exclusao_e_recusada_com_parcela_a_receber(banco_fallback):
+    cliente_id = database.salvar_cliente(
+        "Devedora", "11000-000", "Rua A", "Centro", "Santos", "Entrega")
+    database.salvar_pagamento(cliente_id, "Devedora", 120.50, "Sinal", "2030-01-01")
+
+    with pytest.raises(database.ClienteTemVinculos) as capturado:
+        database.excluir_cliente(cliente_id)
+
+    # A mensagem tem de dizer O QUE impede -- "nao foi possivel excluir" manda
+    # o operador adivinhar.
+    assert "1 parcela(s) a receber" in str(capturado.value)
+    assert database.obter_cliente_por_id(cliente_id) is not None
+
+
+def test_exclusao_e_recusada_com_pedido_em_aberto(banco_fallback):
+    cliente_id = database.salvar_cliente(
+        "Em obras", "11000-000", "Rua A", "Centro", "Santos", "Entrega")
+    with database.conectar() as conexao:
+        conexao.execute(
+            "INSERT INTO pedidos (numero, cliente_id, cliente_nome, data_emissao, situacao) "
+            "VALUES ('PED-2026-000001', ?, 'Em obras', '2026-01-01', 'aprovado')",
+            (cliente_id,))
+
+    with pytest.raises(database.ClienteTemVinculos) as capturado:
+        database.excluir_cliente(cliente_id)
+
+    assert "1 pedido(s) em aberto" in str(capturado.value)
+
+
+def test_pedido_cancelado_ou_faturado_nao_impede_a_exclusao(banco_fallback):
+    """
+    O cancelado nao espera mais nada; o faturado ja produziu as parcelas, que
+    sao contadas a parte. Travar por causa deles tornaria qualquer cliente
+    antigo permanentemente inexcluivel.
+    """
+    cliente_id = database.salvar_cliente(
+        "Historica", "11000-000", "Rua A", "Centro", "Santos", "Entrega")
+    with database.conectar() as conexao:
+        conexao.execute(
+            "INSERT INTO pedidos (numero, cliente_id, cliente_nome, data_emissao, situacao) "
+            "VALUES ('PED-2026-000001', ?, 'Historica', '2026-01-01', 'cancelado')",
+            (cliente_id,))
+        conexao.execute(
+            "INSERT INTO pedidos (numero, cliente_id, cliente_nome, data_emissao, situacao) "
+            "VALUES ('PED-2026-000002', ?, 'Historica', '2026-01-01', 'faturado')",
+            (cliente_id,))
+
+    assert database.excluir_cliente(cliente_id) == 1
 
 
 def test_foreign_keys_sao_aplicadas_em_toda_conexao(banco_fallback):

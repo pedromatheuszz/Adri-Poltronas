@@ -446,6 +446,103 @@ def test_baixa_em_parcela_inexistente_e_404(client, cliente_id, produto_id):
                   {'status': 'Recebido'}).status_code == 404
 
 
+# =============================================================================
+# Vinculo pedido <-> entrega
+# =============================================================================
+def _pedido_aprovado(client, cliente_id, produto_id):
+    pedido = _post(client, '/api/pedidos', {'cliente_id': cliente_id}).get_json()
+    _post(client, f"/api/pedidos/{pedido['id']}/itens",
+          {'produto_id': produto_id, 'quantidade': 1})
+    _post(client, f"/api/pedidos/{pedido['id']}/abertura")
+    _post(client, f"/api/pedidos/{pedido['id']}/aprovacao")
+    return pedido['id']
+
+
+def _agendar(client, cliente_id, pedido_id=None, data='2026-11-20'):
+    corpo = {'cliente_id': cliente_id, 'data_entrega': data,
+             'hora_entrega': '09:00', 'descricao': 'Entrega'}
+    if pedido_id is not None:
+        corpo['pedido_id'] = pedido_id
+    return _post(client, '/api/entregas', corpo)
+
+
+def test_entrega_nao_pode_apontar_para_pedido_de_outro_cliente(client, cliente_id, produto_id):
+    """
+    `validar_entrega` so conferia que `pedido_id` e inteiro positivo, e a FK so
+    garante que o pedido existe. O mesmo blueprint ja tinha o cuidado de buscar
+    o NOME do cliente no cadastro em vez de aceita-lo do corpo -- o rigor
+    existia para o cliente e faltava para o pedido.
+    """
+    pedido_de_a = _pedido_aprovado(client, cliente_id, produto_id)
+    outro = database.salvar_cliente(
+        'Cliente B', '89200-111', 'Rua B, 20', 'Centro', 'Joinville', 'Entrega')
+
+    resposta = _agendar(client, outro, pedido_de_a)
+
+    assert resposta.status_code == 409
+    assert 'outro cliente' in resposta.get_json()['erro'].lower()
+
+
+def test_entrega_nao_pode_apontar_para_pedido_em_rascunho(client, cliente_id, produto_id):
+    rascunho = _post(client, '/api/pedidos', {'cliente_id': cliente_id}).get_json()['id']
+
+    resposta = _agendar(client, cliente_id, rascunho)
+
+    assert resposta.status_code == 409
+    assert 'nao aceita entrega' in resposta.get_json()['erro'].lower()
+
+
+def test_entrega_vinculada_a_pedido_valido_e_aceita(client, cliente_id, produto_id):
+    """A guarda nao pode bloquear o caminho legitimo."""
+    pedido_id = _pedido_aprovado(client, cliente_id, produto_id)
+
+    assert _agendar(client, cliente_id, pedido_id).status_code == 201
+
+
+def test_entrega_sem_pedido_continua_livre(client, cliente_id):
+    """Agendar sem pedido e um caso de uso real -- visita, retirada avulsa."""
+    assert _agendar(client, cliente_id).status_code == 201
+
+
+def test_cancelar_pedido_cancela_as_entregas_vinculadas(client, cliente_id, produto_id):
+    """
+    O cancelamento so mudava a situacao do pedido. As entregas seguiam
+    'Pendente' na agenda e continuavam gerando notificacao "ENTREGA ATRASADA"
+    para um pedido que ninguem ia mais entregar -- alerta que nao corresponde a
+    nada e o que ensina o operador a ignorar alertas.
+    """
+    pedido_id = _pedido_aprovado(client, cliente_id, produto_id)
+    _agendar(client, cliente_id, pedido_id)
+
+    resposta = _post(client, f'/api/pedidos/{pedido_id}/cancelamento',
+                     {'motivo': 'cliente desistiu'})
+
+    assert resposta.status_code == 200
+    assert resposta.get_json()['entregas_canceladas'] == 1
+
+    entregas = client.get('/api/entregas').get_json()
+    vinculadas = [e for e in entregas if e.get('pedido_id') == pedido_id]
+    assert [e['status'] for e in vinculadas] == ['Cancelada']
+
+
+def test_cancelar_pedido_nao_reescreve_entrega_ja_concluida(client, cliente_id, produto_id):
+    """
+    Uma entrega que aconteceu, aconteceu. Cancelar o pedido encerra o que ainda
+    estava previsto; nao apaga um fato do historico operacional.
+    """
+    pedido_id = _pedido_aprovado(client, cliente_id, produto_id)
+    entrega_id = _agendar(client, cliente_id, pedido_id).get_json()['id']
+    client.put(f'/api/entregas/{entrega_id}/status', headers=CABECALHOS,
+               data=json.dumps({'status': 'Concluida'}))
+
+    resposta = _post(client, f'/api/pedidos/{pedido_id}/cancelamento', {'motivo': 'x'})
+
+    assert resposta.get_json()['entregas_canceladas'] == 0
+    entregas = client.get('/api/entregas').get_json()
+    concluida = [e for e in entregas if e['id'] == entrega_id][0]
+    assert concluida['status'] == 'Concluida'
+
+
 
 
 # =============================================================================

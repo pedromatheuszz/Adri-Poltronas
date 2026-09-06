@@ -520,16 +520,31 @@ def aprovar_pedido(pedido_id: int) -> dict:
 
 
 def cancelar_pedido(pedido_id: int, motivo: str = "") -> dict:
+    """
+    Cancela o pedido E as entregas que so existiam por causa dele.
+
+    O cancelamento so mudava a situacao do pedido. As entregas vinculadas
+    continuavam 'Pendente' na agenda e seguiam gerando notificacao
+    "ENTREGA ATRASADA" para um pedido que ninguem ia mais entregar -- alerta
+    que nao corresponde a nada e o que ensina o operador a ignorar alertas.
+
+    Tudo na mesma transacao: pedido cancelado com entrega viva e o mesmo tipo
+    de meia-verdade que o faturamento evita ao emitir as parcelas de uma vez.
+    """
     with database.conectar() as conexao:
         pedido = _exigir_pedido(conexao, pedido_id)
         atualizado = _transicionar(conexao, pedido, estados.CANCELADO, {
             "cancelado_em": datetime.datetime.now().isoformat(timespec="seconds"),
             "motivo_cancelamento": (motivo or "").strip()[:500],
         })
+        entregas_canceladas = repositorio.cancelar_entregas_do_pedido(conexao, pedido_id)
         registrar_evento(conexao, acao="comercial.pedido.cancelado", entidade="pedido",
                          entidade_id=pedido_id, valores_anteriores=pedido,
-                         valores_novos=atualizado)
-    return _pedido_para_tela(atualizado)
+                         valores_novos=atualizado,
+                         contexto_extra={"entregas_canceladas": entregas_canceladas})
+    resultado = _pedido_para_tela(atualizado)
+    resultado["entregas_canceladas"] = entregas_canceladas
+    return resultado
 
 
 def _vencimentos_mensais(primeiro: str, parcelas: int) -> list[str]:
