@@ -651,9 +651,15 @@ function renderizarAgenda(entregas) {
                 '<div class="tabela-acoes">' + pedido + acoes + '</div>' +
                 '</li>';
         }).join('');
+        // `rotulo.titulo` e `_dataBR(dia)` passam por `escaparHtml` como todo o
+        // resto do arquivo. Eram a unica excecao a regra: 'Hoje'/'Amanha' sao
+        // literais e a data vem validada como AAAA-MM-DD, entao exploracao e
+        // implausivel -- mas uma linha herdada de versao anterior pode conter
+        // outra coisa, e uma excecao a uma regra consistente e o lugar onde o
+        // proximo defeito se instala sem ninguem notar.
         return '<section class="card agenda-dia ' + rotulo.classe + '">' +
-            '<h3 class="agenda-dia-titulo">' + rotulo.titulo +
-            (rotulo.comData ? '<small>' + _dataBR(dia) + '</small>' : '') +
+            '<h3 class="agenda-dia-titulo">' + escaparHtml(rotulo.titulo) +
+            (rotulo.comData ? '<small>' + escaparHtml(_dataBR(dia)) + '</small>' : '') +
             '<small class="agenda-contagem">' + porDia[dia].length +
             (porDia[dia].length === 1 ? ' entrega' : ' entregas') + '</small></h3>' +
             '<ul class="agenda-lista">' + linhas + '</ul></section>';

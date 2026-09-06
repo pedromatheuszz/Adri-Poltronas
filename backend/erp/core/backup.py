@@ -316,13 +316,25 @@ def copia_para_download(caminho_banco: str) -> Optional[str]:
     o que estiver no `-wal` -- o operador baixava um arquivo que parecia um
     backup e podia nao abrir. Aqui vale a mesma regra do backup automatico:
     `Connection.backup()`, com `integrity_check` antes de entregar.
+
+    O nome vem do `mkstemp`, e nao do relogio. Derivado do horario ele era
+    adivinhavel -- `adri_poltronas_download_AAAAMMDD_HHMMSS.db` -- e o arquivo
+    e o banco INTEIRO, com nome, endereco e dados financeiros de todos os
+    clientes. O blueprint apaga logo depois de ler, mas ha uma janela, e nela
+    outro processo do mesmo usuario podia abrir o arquivo sabendo o nome de
+    antemao. O `mkstemp` sorteia o sufixo e cria com permissao restrita ao
+    dono, fechando a janela sem custo nenhum.
     """
     if not os.path.exists(caminho_banco):
         return None
-    destino = os.path.join(
-        tempfile.gettempdir(),
-        f"{PREFIXO}_download_{time.strftime('%Y%m%d_%H%M%S')}.db",
-    )
+
+    # O descritor e fechado de imediato: quem escreve no arquivo e o
+    # `sqlite3.connect` abaixo, que precisa abrir o caminho por conta propria.
+    # O que o mkstemp entrega e o nome imprevisivel e o arquivo ja existente,
+    # o que impede outro processo de vencer a corrida criando-o antes.
+    descritor, destino = tempfile.mkstemp(prefix=f"{PREFIXO}_download_", suffix=".db")
+    os.close(descritor)
+
     origem = None
     copia = None
     try:

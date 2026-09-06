@@ -108,3 +108,14 @@ backup/
 # Cofre das credenciais de integracao (cifrado, mas nao entra aqui).
 .segredos
 .env.bak
+
+# Token de acesso a API local, gerado pelo Electron.
+#
+# Normalmente vive em %APPDATA% e nunca chega perto do repositorio. Mas
+# `obter_caminho_banco()` cai para a raiz do projeto sempre que APPDATA nao
+# esta definida -- todo ambiente nao-Windows, inclusive rodar a suite de testes
+# fora do Windows. Uma execucao de pytest a partir da raiz deixa aqui um
+# `.capacidade` de 64 caracteres hexadecimais, ao lado de um
+# `adri_poltronas.db` que o `*.db` acima corretamente ignora. Um `git add .`
+# distraido commitaria o token.
+.capacidade

@@ -376,10 +376,23 @@ def health():
 # ---------------------------------------------------------------------------
 @app.errorhandler(Exception)
 def _erro_generico(e):
-    correlation_id = uuid.uuid4().hex[:12]
-    log.exception("Erro nao tratado [%s]: %s", correlation_id, e)
     if request.path.startswith('/api/'):
+        # Aqui a excecao MORRE: o operador recebe um 500 sem detalhe interno e
+        # o id de correlacao e a unica ponte entre a tela e o log. Por isso o
+        # traceback tem de ser registrado neste ponto, com o id junto.
+        correlation_id = uuid.uuid4().hex[:12]
+        log.exception("Erro nao tratado [%s]: %s", correlation_id, e)
         return jsonify({"erro": "Erro interno do servidor.", "id": correlation_id}), 500
+
+    # Fora de /api/ a excecao SEGUE, para o Flask renderizar a pagina de erro
+    # HTML. E o Flask registra o traceback dela por conta propria, no
+    # `app.logger`.
+    #
+    # Registrar aqui tambem gravava o MESMO traceback duas vezes em `app.log`,
+    # com ids de correlacao diferentes e nenhum deles exibido a ninguem -- o
+    # que faz o arquivo parecer contar dois incidentes onde houve um. Uma linha
+    # curta basta para dizer que a excecao passou por aqui.
+    log.warning("Excecao fora de /api/ em %s: %s", request.path, type(e).__name__)
     raise e
 
 
