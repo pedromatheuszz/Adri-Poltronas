@@ -303,6 +303,15 @@ class ClienteTemVinculos(Exception):
     """
 
 
+# Status de parcela que representam dinheiro ainda a entrar.
+#
+# O codigo atual NUNCA grava 'Atrasado': o atraso e derivado do vencimento
+# (`em_atraso`), nao declarado -- gravar seria manter duas verdades sobre o
+# mesmo fato. 'Atrasado' entra aqui so para cobrir linha gravada por versao
+# anterior: uma parcela vencida e mais devida, nao menos.
+STATUS_A_RECEBER = ('Pendente', 'Atrasado')
+
+
 def _vinculos_que_impedem_exclusao(conexao, id_cliente) -> tuple:
     """
     Conta o que ficaria orfao se o cliente fosse inativado agora.
@@ -310,16 +319,34 @@ def _vinculos_que_impedem_exclusao(conexao, id_cliente) -> tuple:
     Pedido faturado e cancelado NAO contam: o primeiro ja produziu as parcelas
     (que sao contadas a parte) e o segundo nao espera mais nada. O que trava e
     trabalho em andamento -- rascunho, aberto, aprovado -- e dinheiro a receber.
+
+    Devolve `(abertos, a_receber, orfas)`. As orfas sao contadas separado
+    porque o operador NAO consegue resolve-las pela interface: as parcelas sao
+    lidas e baixadas dentro do pedido que as emitiu, entao uma parcela sem
+    `pedido_id` nao aparece em tela nenhuma. Nenhum caminho de escrita atual
+    produz uma dessas -- `inserir_parcela` exige o pedido e e o unico INSERT em
+    `pagamentos` do backend --, mas bancos anteriores a 1.5.0 tem linhas assim,
+    criadas pelo cadastro avulso de pagamento que existia entao.
+
+    Sem essa separacao o cliente ficava permanentemente inexcluivel e a
+    mensagem mandava "conclua ou cancele" algo que ele nao tinha como achar.
     """
+    marcadores = ", ".join("?" * len(STATUS_A_RECEBER))
     abertos = conexao.execute(
         "SELECT COUNT(*) FROM pedidos WHERE cliente_id = ? "
         "AND situacao NOT IN ('cancelado', 'faturado')", (id_cliente,)
     ).fetchone()[0]
     a_receber = conexao.execute(
-        "SELECT COUNT(*) FROM pagamentos WHERE cliente_id = ? AND status = 'Pendente'",
-        (id_cliente,)
+        f"SELECT COUNT(*) FROM pagamentos WHERE cliente_id = ? "  # noqa: S608 - marcadores sao '?', o valor vai parametrizado
+        f"AND status IN ({marcadores}) AND pedido_id IS NOT NULL",
+        (id_cliente, *STATUS_A_RECEBER)
     ).fetchone()[0]
-    return abertos, a_receber
+    orfas = conexao.execute(
+        f"SELECT COUNT(*) FROM pagamentos WHERE cliente_id = ? "  # noqa: S608 - marcadores sao '?', o valor vai parametrizado
+        f"AND status IN ({marcadores}) AND pedido_id IS NULL",
+        (id_cliente, *STATUS_A_RECEBER)
+    ).fetchone()[0]
+    return abertos, a_receber, orfas
 
 
 def excluir_cliente(id_cliente) -> int:
@@ -342,17 +369,26 @@ def excluir_cliente(id_cliente) -> int:
         if not antigo:
             return 0
 
-        abertos, a_receber = _vinculos_que_impedem_exclusao(conexao, id_cliente)
-        if abertos or a_receber:
+        abertos, a_receber, orfas = _vinculos_que_impedem_exclusao(conexao, id_cliente)
+        if abertos or a_receber or orfas:
             partes = []
             if abertos:
                 partes.append(f"{abertos} pedido(s) em aberto")
             if a_receber:
                 partes.append(f"{a_receber} parcela(s) a receber")
-            raise ClienteTemVinculos(
-                f"{antigo['nome']} tem {' e '.join(partes)}. "
-                "Conclua ou cancele antes de excluir."
-            )
+            if orfas:
+                partes.append(f"{orfas} parcela(s) antiga(s) sem pedido")
+            mensagem = f"{antigo['nome']} tem {' e '.join(partes)}. "
+            if abertos or a_receber:
+                mensagem += "Conclua ou cancele antes de excluir."
+            if orfas:
+                # Sem esta frase o operador procura para sempre uma tela que
+                # nao existe: parcela sem pedido nao aparece em lugar nenhum.
+                mensagem = mensagem.rstrip() + (
+                    " As parcelas sem pedido vieram de uma versao anterior e nao"
+                    " aparecem na interface; peca suporte para encerra-las."
+                )
+            raise ClienteTemVinculos(mensagem.strip())
 
         cursor = conexao.execute(
             "UPDATE clientes SET ativo=0, excluido_em=datetime('now', 'localtime'), "

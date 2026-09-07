@@ -56,6 +56,39 @@ parcelas, que fecha um ciclo que a 1.5.0 deixou pela metade.
 - **Cancelar pedido não cancelava as entregas dele**, que seguiam gerando
   "ENTREGA ATRASADA" para um pedido morto.
 
+### Corrigido — o schema que as instalações novas recebem
+
+- **Os `DEFAULT` de `status` e `tipo_pagamento` gravavam o valor entre aspas.**
+  A migration inicial declarou `server_default="'Pendente'"`; para o
+  SQLAlchemy uma `str` ali é um *valor a ser aspeado*, não SQL cru — quem quer
+  SQL cru usa `sa.text(...)`. O DDL saiu `DEFAULT '''Pendente'''` e o SQLite
+  passou a gravar a string `'Pendente'`, com apóstrofos dentro.
+
+  Nenhum erro era levantado: os filtros simplesmente não encontravam nada. Em
+  toda instalação nova, `cancelar_pedido` não cancelava entrega alguma e a
+  trava de exclusão de cliente não enxergava parcela pendente — ou seja, duas
+  correções desta mesma versão nasciam inertes exatamente onde precisavam
+  valer. A migration `b7f21c9e4a05` corrige o `DEFAULT` e desaspeia as linhas
+  já gravadas. O banco de produção não tem o problema (veio do caminho legado),
+  e por isso a correção é condicional.
+
+  A causa de nada ter pego isso: a suíte montava o banco por `criar_tabela()`
+  → `schema_fallback`, que estava correto. O caminho das *migrations* — o de
+  toda instalação real — não era exercitado por teste funcional nenhum.
+  `tests/test_migrations_schema.py` fecha a lacuna, inclusive com um teste que
+  falha se os dois schemas voltarem a divergir num `DEFAULT`.
+
+- **Parcela antiga sem pedido tornava o cliente inexcluível para sempre.** As
+  parcelas são lidas e baixadas *dentro* do pedido que as emitiu, então uma
+  linha sem `pedido_id` não aparece em tela nenhuma — e a mensagem mandava
+  "conclua ou cancele" algo que o operador não tinha como achar. Nenhum
+  caminho de escrita atual produz uma dessas (`inserir_parcela` exige o pedido
+  e é o único `INSERT` em `pagamentos`), mas bancos anteriores à 1.5.0 têm. A
+  trava agora conta essas linhas à parte e diz explicitamente que a interface
+  não as resolve. `'Atrasado'` também passou a contar: o código nunca grava
+  esse status — o atraso é derivado do vencimento —, mas versões anteriores
+  gravavam, e uma parcela vencida é mais devida, não menos.
+
 ### Corrigido — segurança e privacidade
 
 - **Allowlist de contas** (`ADRI_CONTAS_AUTORIZADAS`). Vazia, o comportamento é

@@ -129,3 +129,6 @@ backup/
 # `adri_poltronas.db` que o `*.db` acima corretamente ignora. Um `git add .`
 # distraido commitaria o token.
 .capacidade
+
+# Config local de ferramenta (a de preview gera um stub com porta errada).
+.claude/launch.json

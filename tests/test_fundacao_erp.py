@@ -74,7 +74,14 @@ def test_exclusao_de_cliente_e_logica_e_preserva_vinculos(banco_fallback, semear
 def test_exclusao_e_recusada_com_parcela_a_receber(banco_fallback, semear_parcela):
     cliente_id = database.salvar_cliente(
         "Devedora", "11000-000", "Rua A", "Centro", "Santos", "Entrega")
-    semear_parcela(cliente_id, "Devedora")
+    # Com `pedido_id`: e assim que toda parcela nasce hoje, pelo faturamento.
+    # A parcela SEM pedido e outro caso, coberto em test_migrations_schema.py.
+    with database.conectar() as conexao:
+        conexao.execute(
+            "INSERT INTO pedidos (numero, cliente_id, cliente_nome, data_emissao, situacao) "
+            "VALUES ('PED-2026-000009', ?, 'Devedora', '2026-01-01', 'faturado')",
+            (cliente_id,))
+    semear_parcela(cliente_id, "Devedora", pedido_id=1)
 
     with pytest.raises(database.ClienteTemVinculos) as capturado:
         database.excluir_cliente(cliente_id)
@@ -240,7 +247,7 @@ def test_migrations_reconstroem_schema_integral_em_banco_novo(tmp_path, monkeypa
     # Cabeca da cadeia de migrations. Atualizar junto ao acrescentar uma
     # revisao nova -- e o que garante que ela entrou na cadeia, e nao ficou
     # pendurada fora dela.
-    assert revisao == "e5c94a17b3d8"
+    assert revisao == "b7f21c9e4a05"
     # O modulo comercial: sem estas tres, pagamento e entrega continuam
     # pendurados no cliente, sem saber a que venda pertencem.
     assert {"produtos", "pedidos", "pedido_itens"} <= tabelas
