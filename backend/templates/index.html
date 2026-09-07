@@ -21,9 +21,8 @@
     <!-- Ordem obrigatoria: tokens.css declara as variaveis que style.css usa. -->
     <link rel="stylesheet" href="/css/tokens.css?v=v87">
     <link rel="stylesheet" href="/css/style.css?v=v87">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-          integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H"
-          crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <!-- Leaflet 1.9.4, servido pelo proprio backend. Ver frontend/vendor/README.md. -->
+    <link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
 </head>
 <body>
     <div class="app-shell" id="appShell">
@@ -1154,12 +1153,11 @@
         </div>
     </dialog>
 
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-            integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH"
-            crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"
-            integrity="sha384-e6nUZLBkQ86NJ6TVVKAeSaK8jWa3NhkYWZFomE39AvDbQWeie9PlQqM3pmYW5d1g"
-            crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <!-- Sem SRI e sem crossorigin: os arquivos sao da mesma origem agora, e
+         `integrity` em recurso proprio so adicionaria um jeito de o app
+         parar de funcionar depois de uma atualizacao legitima. -->
+    <script src="/vendor/leaflet/leaflet.js"></script>
+    <script src="/vendor/chartjs/chart.umd.min.js"></script>
     <script src="/js/offline.js?v=v87"></script>
     <script src="/js/app.js?v=v87"></script>
     <!-- Modulo comercial: Produtos, Pedidos e Agenda de Entregas.

@@ -5,7 +5,7 @@
 // IMPORTANTE: incremente CACHE_NAME sempre que o HTML, o CSS ou o JS mudarem.
 // O handler de `activate` apaga todo cache cujo nome nao esteja nesta lista, e
 // e isso que expurga a versao anterior da maquina do usuario.
-const CACHE_NAME = 'adri-poltronas-v19';
+const CACHE_NAME = 'adri-poltronas-v20';
 
 // Assets proprios: precache obrigatorio. Sao servidos pelo backend local,
 // entao addAll() so falha aqui se algo estiver de fato errado no bundle.
@@ -16,38 +16,17 @@ const PRECACHE_ASSETS = [
   '/js/app.js',
   '/js/comercial.js',
   '/js/offline.js',
-  '/manifest.json'
+  '/manifest.json',
+  // Leaflet e Chart.js, agora servidos pelo backend local. Entram no
+  // precache OBRIGATORIO justamente porque deixaram de depender da rede:
+  // se um deles faltar, o bundle esta quebrado e o install deve falhar.
+  '/vendor/leaflet/leaflet.css',
+  '/vendor/leaflet/leaflet.js',
+  '/vendor/leaflet/images/marker-icon.png',
+  '/vendor/leaflet/images/marker-icon-2x.png',
+  '/vendor/leaflet/images/marker-shadow.png',
+  '/vendor/chartjs/chart.umd.min.js'
 ];
-
-// Bibliotecas de CDN: precache pelo melhor esforco, FORA do addAll().
-//
-// cache.addAll() e atomico -- uma URL que falha rejeita a promise inteira e
-// derruba o install. Com as URLs de CDN na lista obrigatoria, abrir o app uma
-// primeira vez sem internet deixava o PWA sem nenhum asset cacheado, inclusive
-// os locais. Aqui cada uma e tentada isoladamente e a falha e tolerada.
-//
-// Estas entradas servem apenas ao modo offline: como o handler de fetch nao
-// intercepta outra origem, elas nao sao lidas no fluxo normal.
-const PRECACHE_EXTERNOS = [
-  'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
-  'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js',
-  'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js'
-];
-
-
-async function precachearExternos(cache) {
-  await Promise.allSettled(
-    PRECACHE_EXTERNOS.map(function(url) {
-      return fetch(url, { mode: 'cors' })
-        .then(function(resposta) {
-          if (resposta.ok) return cache.put(url, resposta);
-        })
-        .catch(function() {
-          console.warn('[SW] Precache externo indisponivel:', url);
-        })
-    })
-  );
-}
 
 // =============================================================================
 // Install - Precache de assets estáticos
@@ -59,7 +38,6 @@ self.addEventListener('install', function(event) {
       .then(async function(cache) {
         console.log('[SW] Precaching assets');
         await cache.addAll(PRECACHE_ASSETS);
-        await precachearExternos(cache);
       })
       .then(function() {
         return self.skipWaiting();

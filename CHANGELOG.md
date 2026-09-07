@@ -70,6 +70,14 @@ parcelas, que fecha um ciclo que a 1.5.0 deixou pela metade.
   completo de todos os clientes ao Nominatim/OpenStreetMap. O aviso existia; o
   que faltava era poder recusar e poder apagar as coordenadas guardadas.
 
+- **Leaflet e Chart.js deixaram de vir de CDN.** Num aplicativo desktop, isso
+  significava mapa e gráficos em branco na primeira abertura sem internet — o
+  Service Worker só ajudava a partir da segunda — e, pior, uma CSP que
+  autorizava `unpkg.com` e `cdn.jsdelivr.net` a **executar código** dentro de
+  um programa que trata nome, endereço e valores a receber dos clientes. As
+  duas passaram para `frontend/vendor/`, conferidas byte a byte contra os
+  hashes SRI que já estavam no HTML, e `script-src` voltou a ser só `'self'`.
+
 - `.capacidade` entrou no `.gitignore`; `ci.yml` declara `permissions: contents: read`;
   a cópia do banco para download usa `tempfile.mkstemp()`.
 
@@ -89,8 +97,16 @@ parcelas, que fecha um ciclo que a 1.5.0 deixou pela metade.
 
 - **Resíduos da saída do Asaas**: o módulo `erp/financeiro/` inteiro (que
   consultava uma coluna apagada do schema), o `hiddenimport` inexistente no
-  `.spec`, a fixture órfã de teste, sete funções de `database.py` sem chamador
-  e os comentários que descreviam a máquina de cobrança removida.
+  `.spec`, a fixture órfã de teste e os comentários que descreviam a máquina
+  de cobrança removida.
+
+- **Dez funções de `database.py` sem chamador em produção**, mais os três
+  auxiliares que só elas usavam. O arquivo caiu de 988 para 681 linhas, e a
+  cobertura global subiu de 82% para 84% — o código morto era testado, e era
+  ele que puxava o número para baixo. As últimas três (`listar_pagamentos`,
+  `salvar_pagamento`, `obter_metricas_pagamentos`) tinham sido preservadas
+  para uma eventual tela de contas a receber; com a decisão de manter o
+  escopo atual, saíram também.
 
 ### Desempenho
 

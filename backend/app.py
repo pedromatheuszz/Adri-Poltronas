@@ -197,12 +197,20 @@ def _csp_header() -> str:
     permite defacement e vazamento por seletor, nao execucao de codigo -- e a
     troca, aqui, e consciente.
     """
+    # `script-src 'self'` sem excecao: o Leaflet e o Chart.js passaram a ser
+    # servidos pelo proprio backend (frontend/vendor/). Enquanto vinham de CDN,
+    # a politica precisava confiar em unpkg.com e cdn.jsdelivr.net -- dois
+    # dominios de terceiro autorizados a executar codigo dentro do app, num
+    # programa que trata nome, endereco e valores a receber dos clientes.
     return "; ".join([
         "default-src 'self'",
-        "script-src 'self' https://unpkg.com https://cdn.jsdelivr.net",
-        "style-src 'self' 'unsafe-inline' https://unpkg.com https://fonts.googleapis.com",
+        "script-src 'self'",
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
         "font-src 'self' https://fonts.gstatic.com",
-        "img-src 'self' data: blob: https://*.tile.openstreetmap.org https://unpkg.com",
+        # openstreetmap.org continua liberado: sao os ladrilhos do mapa, que por
+        # natureza vem da rede. As IMAGENS do Leaflet (marcador, sombra) agora
+        # sao locais e cabem em 'self'.
+        "img-src 'self' data: blob: https://*.tile.openstreetmap.org",
         "connect-src 'self' https://viacep.com.br https://nominatim.openstreetmap.org https://generativelanguage.googleapis.com https://login.microsoftonline.com",
         "frame-ancestors 'none'",
         "base-uri 'self'",

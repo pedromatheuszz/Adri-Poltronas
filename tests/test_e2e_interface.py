@@ -249,17 +249,18 @@ def navegador():
 
 
 def _preparar_contexto(navegador):
-    """Contexto novo, com os CDNs neutralizados."""
+    """Contexto novo, com a rede de terceiros cortada."""
     contexto = navegador.new_context()
 
-    # Leaflet e Chart.js vem de CDN. Numa maquina sem internet -- ou num
-    # runner de CI com saida restrita -- esperar por eles trava o teste em
-    # algo que nao e o objeto do teste.
-    def _script_vazio(rota):
-        rota.fulfill(status=200, content_type="application/javascript", body="")
-
-    contexto.route("**unpkg.com/**", _script_vazio)
-    contexto.route("**cdn.jsdelivr.net/**", _script_vazio)
+    # Ate a 1.5.0 era preciso neutralizar os CDNs aqui: o Leaflet e o Chart.js
+    # vinham de fora, e num runner sem saida para a internet o teste travava
+    # esperando por algo que nao era o objeto dele. Os stubs sairam junto com a
+    # dependencia -- as duas bibliotecas agora sao servidas pelo proprio
+    # backend, entao o navegador carrega as de verdade e o e2e exercita o que
+    # o usuario realmente recebe.
+    #
+    # Os ladrilhos do mapa continuam cortados: vem da rede por natureza, e
+    # desenhar o mapa nao e o que nenhum destes testes verifica.
     contexto.route("**tile.openstreetmap.org/**", lambda rota: rota.abort())
     return contexto
 
@@ -312,15 +313,15 @@ def pagina(navegador, servidor):
     erros = []
     pagina.on("pageerror", lambda erro: erros.append(str(erro)))
 
-    # Leaflet e Chart.js vem de CDN. Numa maquina sem internet -- ou num
-    # runner de CI com saida restrita -- esperar por eles trava o teste em
-    # algo que nao e o objeto do teste. Sao respondidos com um script vazio:
-    # o que se exercita aqui e o codigo do aplicativo.
-    def _script_vazio(rota):
-        rota.fulfill(status=200, content_type="application/javascript", body="")
-
-    contexto.route("**unpkg.com/**", _script_vazio)
-    contexto.route("**cdn.jsdelivr.net/**", _script_vazio)
+    # Ate a 1.5.0 era preciso neutralizar os CDNs aqui: o Leaflet e o Chart.js
+    # vinham de fora, e num runner sem saida para a internet o teste travava
+    # esperando por algo que nao era o objeto dele. Os stubs sairam junto com a
+    # dependencia -- as duas bibliotecas agora sao servidas pelo proprio
+    # backend, entao o navegador carrega as de verdade e o e2e exercita o que
+    # o usuario realmente recebe.
+    #
+    # Os ladrilhos do mapa continuam cortados: vem da rede por natureza, e
+    # desenhar o mapa nao e o que nenhum destes testes verifica.
     contexto.route("**tile.openstreetmap.org/**", lambda rota: rota.abort())
 
     # `load`, e nao `networkidle`: o Service Worker mantem trafego de fundo, e

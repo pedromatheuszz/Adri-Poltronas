@@ -257,3 +257,66 @@ def test_a_versao_documentada_acompanha_o_package_json():
     assert declarada == versao, (
         f"README diz {declarada!r} e o package.json diz {versao!r}"
     )
+
+
+# =============================================================================
+# Nenhuma dependencia de CDN em tempo de execucao
+# =============================================================================
+# Ate a 1.5.0 o Leaflet e o Chart.js vinham de unpkg.com e cdn.jsdelivr.net.
+# Para um aplicativo DESKTOP isso significava mapa e graficos quebrados na
+# primeira abertura sem internet, e -- pior -- uma CSP que autorizava dois
+# dominios de terceiro a executar codigo dentro de um programa que trata nome,
+# endereco e valores a receber dos clientes.
+#
+# As bibliotecas passaram para frontend/vendor/. Estes testes existem para que
+# a proxima pessoa que precisar de uma biblioteca nova nao volte a colar uma
+# tag de CDN por reflexo: e o caminho mais facil, e o repositorio precisa
+# recusa-lo por escrito.
+CDNS_PROIBIDOS = ('unpkg.com', 'cdn.jsdelivr.net', 'cdnjs.cloudflare.com')
+
+
+def test_o_html_nao_carrega_script_nem_estilo_de_cdn():
+    html = _ler(INDEX)
+    encontrados = [cdn for cdn in CDNS_PROIBIDOS if cdn in html]
+    assert not encontrados, (
+        f"{encontrados} voltou ao index.html. Bibliotecas novas vao para "
+        "frontend/vendor/ -- ver frontend/vendor/README.md."
+    )
+
+
+def test_a_csp_nao_autoriza_terceiro_a_executar_script():
+    """
+    `script-src` e a linha que decide quem pode rodar codigo aqui dentro.
+
+    Fontes de letra (fonts.googleapis) e ladrilhos de mapa (openstreetmap) sao
+    outra conversa: nao executam nada. O que este teste tranca e `script-src`.
+    """
+    app_py = _ler(os.path.join(RAIZ, 'backend', 'app.py'))
+    linha = next(x for x in app_py.splitlines() if '"script-src' in x)
+    assert linha.strip().rstrip(',') == '"script-src \'self\'"', (
+        f"script-src deixou de ser somente 'self': {linha.strip()}"
+    )
+
+
+def test_os_arquivos_vendorizados_estao_no_lugar_que_o_html_aponta():
+    """
+    O HTML aponta para /vendor/...; o Flask serve `frontend/` como raiz
+    estatica. Um caminho errado aqui so apareceria como mapa em branco em
+    tempo de execucao -- tarde demais.
+    """
+    html = _ler(INDEX)
+    for caminho in re.findall(r'(?:src|href)="(/vendor/[^"]+)"', html):
+        destino = os.path.join(RAIZ, 'frontend', caminho.lstrip('/'))
+        assert os.path.isfile(destino), f"{caminho} referenciado e ausente"
+
+
+def test_o_service_worker_precacheia_o_que_o_html_carrega():
+    """
+    Se o SW nao guardar as bibliotecas, a promessa de funcionar offline vale
+    so para o CSS e o JS proprios -- e o mapa continua em branco sem rede,
+    que era exatamente o defeito que a vendorizacao veio corrigir.
+    """
+    html = _ler(INDEX)
+    sw = _ler(os.path.join(RAIZ, 'frontend', 'sw.js'))
+    for caminho in re.findall(r'(?:src|href)="(/vendor/[^"]+)"', html):
+        assert f"'{caminho}'" in sw, f"{caminho} nao esta no precache do sw.js"
