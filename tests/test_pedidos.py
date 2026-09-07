@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'backend'))
 
 import app as app_module  # noqa: E402
 import database  # noqa: E402
+from erp.comercial import repositorio  # noqa: E402
 
 ORIGEM = 'http://localhost'
 CABECALHOS = {'Origin': ORIGEM, 'Content-Type': 'application/json'}
@@ -39,6 +40,18 @@ def client():
 
 def _post(cliente, rota, corpo=None):
     return cliente.post(rota, headers=CABECALHOS, data=json.dumps(corpo or {}))
+
+
+def _parcelas(pedido_id):
+    """
+    Le as parcelas pelo mesmo caminho que a producao usa.
+
+    Antes isto passava por `database.listar_pagamentos()`, que nao tinha
+    chamador nenhum em producao. Ler pelo repositorio do comercial faz o teste
+    exercitar a consulta que a tela do pedido realmente executa.
+    """
+    with database.conectar() as conexao:
+        return repositorio.parcelas_do_pedido(conexao, pedido_id)
 
 
 @pytest.fixture
@@ -238,7 +251,7 @@ def test_faturar_duas_vezes_e_recusado(client, cliente_id, produto_id):
 
     assert _post(client, f'/api/pedidos/{pedido_id}/faturamento', corpo).status_code == 200
     assert _post(client, f'/api/pedidos/{pedido_id}/faturamento', corpo).status_code == 409
-    assert len(database.listar_pagamentos(cliente_id=cliente_id)) == 1
+    assert len(_parcelas(pedido_id)) == 1
 
 
 def test_item_nao_muda_apos_aprovacao(client, cliente_id, produto_id):
@@ -316,7 +329,7 @@ def test_vencimento_no_dia_31_cai_para_o_fim_do_mes_curto(client, cliente_id, pr
 def test_parcela_referencia_o_pedido_de_origem(client, cliente_id, produto_id):
     resposta = _faturar(client, cliente_id, produto_id, parcelas=1).get_json()
 
-    parcela = database.listar_pagamentos(cliente_id=cliente_id)[0]
+    parcela = _parcelas(resposta['id'])[0]
     assert parcela['pedido_id'] == resposta['id']
     assert resposta['numero'] in parcela['descricao']
 

@@ -29,20 +29,15 @@ def banco_fallback(tmp_path, monkeypatch):
     return caminho
 
 
-def test_exclusao_de_cliente_e_logica_e_preserva_vinculos(banco_fallback):
+def test_exclusao_de_cliente_e_logica_e_preserva_vinculos(banco_fallback, semear_parcela):
     cliente_id = database.salvar_cliente(
         "Cliente", "11000-000", "Rua A", "Centro", "Santos", "Entrega"
-    )
-    pagamento_id = database.salvar_pagamento(
-        cliente_id, "Cliente", 120.50, "Sinal", "2030-01-01"
     )
     # A parcela precisa estar liquidada para a exclusao ser permitida -- ver
     # `test_exclusao_e_recusada_com_parcela_a_receber`. O que este teste afirma
     # e outra coisa: que a exclusao PERMITIDA e logica e nao leva o vinculo
     # junto. Deixa-la pendente misturaria as duas perguntas num teste so.
-    with database.conectar() as conexao:
-        conexao.execute("UPDATE pagamentos SET status='Recebido' WHERE id=?",
-                        (pagamento_id,))
+    pagamento_id = semear_parcela(cliente_id, "Cliente", status="Recebido")
 
     assert database.excluir_cliente(cliente_id) == 1
     assert database.listar_clientes() == []
@@ -76,10 +71,10 @@ def test_exclusao_de_cliente_e_logica_e_preserva_vinculos(banco_fallback):
 # invisiveis, e editar aquele pedido falhava com 404 "Cliente nao encontrado"
 # -- porque a validacao do cabecalho exige cliente ativo. O pedido existia, era
 # listado, e nao aceitava alteracao por um motivo que nao era dele.
-def test_exclusao_e_recusada_com_parcela_a_receber(banco_fallback):
+def test_exclusao_e_recusada_com_parcela_a_receber(banco_fallback, semear_parcela):
     cliente_id = database.salvar_cliente(
         "Devedora", "11000-000", "Rua A", "Centro", "Santos", "Entrega")
-    database.salvar_pagamento(cliente_id, "Devedora", 120.50, "Sinal", "2030-01-01")
+    semear_parcela(cliente_id, "Devedora")
 
     with pytest.raises(database.ClienteTemVinculos) as capturado:
         database.excluir_cliente(cliente_id)
@@ -126,14 +121,14 @@ def test_pedido_cancelado_ou_faturado_nao_impede_a_exclusao(banco_fallback):
     assert database.excluir_cliente(cliente_id) == 1
 
 
-def test_foreign_keys_sao_aplicadas_em_toda_conexao(banco_fallback):
+def test_foreign_keys_sao_aplicadas_em_toda_conexao(banco_fallback, semear_parcela):
     with database.conectar() as conexao:
         assert conexao.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 
+    # Sem o PRAGMA por conexao as FKs do schema seriam decorativas: este
+    # INSERT aponta para um cliente que nao existe e precisa ser recusado.
     with pytest.raises(sqlite3.IntegrityError):
-        database.salvar_pagamento(
-            99999, "Inexistente", 10.0, "Registro invalido", "2030-01-01"
-        )
+        semear_parcela(99999, "Inexistente")
 
 
 def test_falha_na_auditoria_reverte_a_operacao(banco_fallback, monkeypatch):

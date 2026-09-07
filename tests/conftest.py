@@ -54,3 +54,39 @@ def chave_fernet_da_suite():
     security._fernet_key_cache = anterior
     if not definida_de_fora:
         os.environ.pop('FERNET_KEY', None)
+
+
+@pytest.fixture
+def semear_parcela():
+    """
+    Insere uma parcela a receber direto no banco, para preparar cenario.
+
+    Em producao quem cria linha em `pagamentos` e o faturamento de pedido
+    (`erp.comercial.repositorio.inserir_parcela`), e so ele. Antes existia um
+    `database.salvar_pagamento()` de uso geral que os testes chamavam para
+    montar cenario -- mas ele nao tinha chamador nenhum em producao desde a
+    remocao do financeiro na 1.5.0, e foi apagado junto com o resto do modulo
+    morto.
+
+    O preparo, porem, continua sendo necessario: varios testes precisam de uma
+    parcela pendente sem querer exercitar um pedido inteiro so para chegar la.
+    Um INSERT explicito diz o que e -- montagem de estado, nao uso de API --
+    em vez de manter viva uma funcao de producao que ninguem chama.
+    """
+    import database
+
+    def _semear(cliente_id, cliente_nome="Cliente", valor_centavos=12050,
+                descricao="Sinal", data_vencimento="2030-01-01",
+                status="Pendente", pedido_id=None):
+        with database.conectar() as conexao:
+            cursor = conexao.execute(
+                """INSERT INTO pagamentos
+                       (cliente_id, cliente_nome, valor, valor_centavos, descricao,
+                        data_vencimento, tipo_pagamento, status, pedido_id)
+                   VALUES (?, ?, ?, ?, ?, ?, 'Pix', ?, ?)""",
+                (cliente_id, cliente_nome, valor_centavos / 100, valor_centavos,
+                 descricao, data_vencimento, status, pedido_id),
+            )
+            return cursor.lastrowid
+
+    return _semear

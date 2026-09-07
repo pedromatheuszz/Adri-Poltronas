@@ -390,16 +390,6 @@ def test_chaves_invalidas_sao_ignoradas(client):
     assert json.loads(resposta.data)['quantidade'] == 0
 
 
-# -----------------------------------------------------------------------------
-# Dashboard financeiro
-# -----------------------------------------------------------------------------
-def _receber(cliente_id, valor, data_pagamento, vencimento=None):
-    pagamento_id = database.salvar_pagamento(
-        cliente_id, 'Cliente Teste', valor, 'Locacao', vencimento or data_pagamento[:10])
-    with database.conectar() as conexao:
-        conexao.execute("UPDATE pagamentos SET status='Recebido', data_pagamento=? WHERE id=?",
-                        (data_pagamento, pagamento_id))
-    return pagamento_id
 
 
 
