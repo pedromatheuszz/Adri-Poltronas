@@ -70,6 +70,48 @@ function _json(corpo) {
 }
 
 
+// --- Uma escrita de cada vez, por registro ------------------------------------
+// Nenhum botao de escrita travava nada: um duplo clique, ou um Enter repetido
+// enquanto a requisicao viajava, disparava duas.
+//
+// O backend passou a recusar a segunda -- as transicoes viraram UPDATE
+// condicional a situacao atual, e a baixa de parcela idem. Isso fecha a
+// duplicidade no banco, que era o risco caro. Mas resolve so metade: sem
+// travar aqui, o operador leva um 409 vermelho por ter clicado duas vezes.
+// Trocar uma falha silenciosa por uma confusa nao e progresso.
+//
+// A chave carrega o ID do registro, e nao so o nome da acao: travar "aprovar"
+// inteiro impediria aprovar dois pedidos DIFERENTES em sequencia rapida, o que
+// e uso legitimo. Faturamento e transicao compartilham a chave do pedido de
+// proposito -- as duas mexem na mesma situacao, e disparar uma enquanto a
+// outra viaja e a mesma corrida com outro nome.
+var _escritasEmVoo = new Set();
+
+function _emVoo(chave) {
+    return _escritasEmVoo.has(chave);
+}
+
+function _travar(chave) {
+    _escritasEmVoo.add(chave);
+}
+
+function _destravar(chave) {
+    _escritasEmVoo.delete(chave);
+}
+
+async function _umaDeCadaVez(chave, tarefa) {
+    if (_emVoo(chave)) return;
+    _travar(chave);
+    try {
+        return await tarefa();
+    } finally {
+        // `finally`, e nao o fim do `try`: se a rede cair no meio, a acao
+        // precisa voltar a ser possivel para o operador tentar de novo.
+        _destravar(chave);
+    }
+}
+
+
 // =============================================================================
 // Produtos
 // =============================================================================
@@ -374,15 +416,17 @@ function _renderizarParcelas(pedido) {
 async function _mudarStatusDaParcela(parcela, status) {
     var pedidoId = document.getElementById('pedId').value;
     if (!pedidoId) return;
-    try {
-        await _pedirApi('/api/pedidos/' + pedidoId + '/parcelas/' + parcela,
-                        Object.assign(_json({ status: status }), { method: 'PATCH' }));
-        exibirToast('Parcela ' + parcela + ' atualizada.');
-        await abrirFormularioPedido(pedidoId);
-        carregarPedidos();
-    } catch (erro) {
-        exibirToast(erro.message, 'error');
-    }
+    await _umaDeCadaVez('parcela:' + pedidoId + ':' + parcela, async function () {
+        try {
+            await _pedirApi('/api/pedidos/' + pedidoId + '/parcelas/' + parcela,
+                            Object.assign(_json({ status: status }), { method: 'PATCH' }));
+            exibirToast('Parcela ' + parcela + ' atualizada.');
+            await abrirFormularioPedido(pedidoId);
+            carregarPedidos();
+        } catch (erro) {
+            exibirToast(erro.message, 'error');
+        }
+    });
 }
 
 /**
@@ -489,14 +533,16 @@ async function transicionarPedido(destino) {
     }
 
     var acao = ACAO_PEDIDO[destino];
-    try {
-        await _pedirApi('/api/pedidos/' + pedidoId + '/' + acao.rota, _json({}));
-        exibirToast('Pedido ' + (SITUACAO_PEDIDO[destino] || {}).rotulo.toLowerCase() + '.');
-        carregarPedidos();
-        await abrirFormularioPedido(pedidoId);
-    } catch (erro) {
-        exibirToast(erro.message, 'error');
-    }
+    await _umaDeCadaVez('pedido:' + pedidoId, async function () {
+        try {
+            await _pedirApi('/api/pedidos/' + pedidoId + '/' + acao.rota, _json({}));
+            exibirToast('Pedido ' + (SITUACAO_PEDIDO[destino] || {}).rotulo.toLowerCase() + '.');
+            carregarPedidos();
+            await abrirFormularioPedido(pedidoId);
+        } catch (erro) {
+            exibirToast(erro.message, 'error');
+        }
+    });
 }
 
 function abrirFaturamento() {
@@ -523,16 +569,9 @@ function _atualizarAvisoFaturamento() {
 
 // Reentrancia do faturamento.
 //
-// O submit nao travava nada: um duplo clique, ou um Enter repetido enquanto o
-// POST viajava, disparava dois faturamentos do mesmo pedido. O backend passou a
-// recusar o segundo (o UPDATE da transicao e condicional a situacao atual), mas
-// deixar o operador ver um erro 409 por ter clicado duas vezes seria trocar uma
-// falha silenciosa por uma confusa. Aqui o segundo clique simplesmente nao sai.
-var _faturamentoEmVoo = false;
-
 async function faturar(evento) {
     evento.preventDefault();
-    if (_faturamentoEmVoo) return;
+    if (_emVoo('pedido:' + document.getElementById('fatPedidoId').value)) return;
 
     var pedidoId = document.getElementById('fatPedidoId').value;
     var corpo = {
@@ -543,7 +582,7 @@ async function faturar(evento) {
     var botao = document.querySelector('#formFaturamento button[type="submit"]');
     var rotulo = botao ? botao.textContent : '';
 
-    _faturamentoEmVoo = true;
+    _travar('pedido:' + pedidoId);
     if (botao) { botao.disabled = true; botao.textContent = 'Faturando...'; }
     try {
         var pedido = await _pedirApi('/api/pedidos/' + pedidoId + '/faturamento', _json(corpo));
@@ -556,7 +595,7 @@ async function faturar(evento) {
     } finally {
         // `finally` e nao o fim do `try`: se a rede cair no meio, o botao
         // precisa voltar a funcionar para o operador tentar de novo.
-        _faturamentoEmVoo = false;
+        _destravar('pedido:' + pedidoId);
         if (botao) { botao.disabled = false; botao.textContent = rotulo; }
     }
 }
@@ -716,15 +755,17 @@ async function salvarEntrega(evento) {
 }
 
 async function mudarSituacaoEntrega(entregaId, destino) {
-    try {
-        await _pedirApi('/api/entregas/' + entregaId + '/status',
-            { method: 'PUT', headers: CABECALHOS_JSON, body: JSON.stringify({ status: destino }) });
-        exibirToast('Entrega atualizada.');
-        carregarEntregas();
-        carregarNotificacoes();
-    } catch (erro) {
-        exibirToast(erro.message, 'error');
-    }
+    await _umaDeCadaVez('entrega:' + entregaId, async function () {
+        try {
+            await _pedirApi('/api/entregas/' + entregaId + '/status',
+                { method: 'PUT', headers: CABECALHOS_JSON, body: JSON.stringify({ status: destino }) });
+            exibirToast('Entrega atualizada.');
+            carregarEntregas();
+            carregarNotificacoes();
+        } catch (erro) {
+            exibirToast(erro.message, 'error');
+        }
+    });
 }
 
 

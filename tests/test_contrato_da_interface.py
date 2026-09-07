@@ -320,3 +320,68 @@ def test_o_service_worker_precacheia_o_que_o_html_carrega():
     sw = _ler(os.path.join(RAIZ, 'frontend', 'sw.js'))
     for caminho in re.findall(r'(?:src|href)="(/vendor/[^"]+)"', html):
         assert f"'{caminho}'" in sw, f"{caminho} nao esta no precache do sw.js"
+
+
+# =============================================================================
+# Toda escrita e travada contra o duplo clique
+# =============================================================================
+# O backend recusa a segunda de duas requisicoes concorrentes sobre o mesmo
+# registro -- as transicoes viraram UPDATE condicional a situacao atual. Isso
+# fecha a duplicidade no banco, que era o risco caro.
+#
+# Mas resolve so metade. Sem travar no frontend, o operador que clica duas
+# vezes leva um 409 vermelho: a falha silenciosa vira uma falha confusa. Estes
+# testes existem porque o reflexo natural de quem escrever o proximo handler e
+# copiar um dos que ja existem -- e ele precisa copiar um que trava.
+def test_toda_escrita_do_comercial_passa_pelo_guarda_de_duplo_clique():
+    js = _ler(os.path.join(PASTA_JS, 'comercial.js'))
+
+    # Handlers que alteram estado no servidor e sao disparados por clique.
+    esperados = (
+        'transicionarPedido',
+        '_mudarStatusDaParcela',
+        'mudarSituacaoEntrega',
+        'faturar',
+    )
+    for nome in esperados:
+        inicio = js.find('function ' + nome + '(')
+        assert inicio != -1, f"handler {nome} sumiu; atualize este teste"
+        # O corpo vai ate a proxima declaracao de funcao no topo do arquivo.
+        fim = js.find('\nasync function ', inicio + 1)
+        outro = js.find('\nfunction ', inicio + 1)
+        if outro != -1 and (fim == -1 or outro < fim):
+            fim = outro
+        corpo = js[inicio:fim if fim != -1 else len(js)]
+
+        assert '_umaDeCadaVez(' in corpo or '_emVoo(' in corpo, (
+            f"{nome} escreve no servidor sem travar o duplo clique. "
+            "Envolva a chamada em _umaDeCadaVez('<tipo>:<id>', ...)."
+        )
+
+
+def test_o_guarda_libera_a_chave_mesmo_quando_a_requisicao_falha():
+    """
+    Um `finally` ausente aqui e pior que a ausencia do guarda: a acao trava
+    para sempre depois do primeiro erro de rede, e o operador precisa reabrir
+    o aplicativo.
+    """
+    js = _ler(os.path.join(PASTA_JS, 'comercial.js'))
+    inicio = js.index('async function _umaDeCadaVez(')
+    corpo = js[inicio:js.index('\n}', inicio)]
+
+    assert 'finally' in corpo, "_umaDeCadaVez precisa liberar a chave no finally"
+    assert '_destravar(' in corpo
+
+
+def test_a_chave_do_guarda_inclui_o_id_do_registro():
+    """
+    Travar por nome de acao impediria aprovar dois pedidos DIFERENTES em
+    sequencia rapida -- uso legitimo que viraria bug de interface.
+    """
+    js = _ler(os.path.join(PASTA_JS, 'comercial.js'))
+    chaves = re.findall(r"_umaDeCadaVez\('([^']+)'\s*\+", js)
+    assert chaves, "nenhuma chamada a _umaDeCadaVez com chave composta"
+    for chave in chaves:
+        assert chave.endswith(':'), (
+            f"a chave {chave!r} nao concatena um id; travaria a acao inteira"
+        )

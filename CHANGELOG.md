@@ -32,6 +32,16 @@ parcelas, que fecha um ciclo que a 1.5.0 deixou pela metade.
 
 ### Corrigido — integridade e concorrência
 
+- **Toda escrita passou a travar o duplo clique, não só o faturamento.** O
+  backend recusa a segunda de duas requisições concorrentes sobre o mesmo
+  registro, o que fecha a duplicidade no banco — mas resolvia só metade: sem
+  travar na tela, o operador que clicasse duas vezes em Abrir, Aprovar,
+  Cancelar, dar baixa numa parcela ou mudar o status de uma entrega levava um
+  409 vermelho. Trocar uma falha silenciosa por uma confusa não é progresso.
+  As cinco ações agora compartilham um guarda por registro (`_umaDeCadaVez`),
+  com a chave carregando o ID — travar "aprovar" inteiro impediria aprovar
+  dois pedidos diferentes em sequência, que é uso legítimo.
+
 - **Duplo clique no faturamento emitia dois conjuntos de parcelas.** O
   `sqlite3` do Python só abre transação na primeira escrita, então a leitura da
   situação acontecia fora de qualquer transação; com `threaded=True`, dois
