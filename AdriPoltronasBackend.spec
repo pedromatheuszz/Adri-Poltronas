@@ -26,7 +26,7 @@ a = Analysis(
         ('package.json', '.'),
     ],
     hiddenimports=[
-        'database', 'notificacoes_db', 'security', 'asaas', 'config', 'validators',
+        'database', 'notificacoes_db', 'security', 'config', 'validators',
         'blueprints', 'migrations_manager', 'capacidade', 'microsoft', 'planilha',
         'limites', 'licenca', 'mercadopago',
         'openpyxl', 'openpyxl.utils', 'et_xmlfile',

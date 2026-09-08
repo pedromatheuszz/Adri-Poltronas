@@ -9,11 +9,10 @@ clientes e endereços;
 pedidos e locações;
 modelos de poltronas e demais itens do catálogo;
 entregas e retiradas;
-cobranças, parcelas e recebimentos;
-valores a receber e pagamentos em atraso;
-indicadores financeiros e operacionais;
+parcelas a receber geradas pelo faturamento;
+indicadores operacionais;
 localização dos clientes;
-relatórios e alertas importantes.
+alertas importantes.
 Importante: na versão atual, a aba Produtos funciona como catálogo de itens usados nos pedidos. O controle físico de estoque — quantidade total, disponível, locada, movimentações e reservas automáticas — ainda não está completo.
 Sumário
 Primeiros passos
@@ -25,8 +24,6 @@ Clientes
 Produtos
 Entregas
 Mapa
-Pagamentos
-Relatórios
 Notificações
 Importação, exportação e backup
 Atalhos de teclado
@@ -48,7 +45,7 @@ cadastrar os modelos de poltronas na aba Produtos;
 cadastrar ou importar os clientes existentes;
 conferir endereços, cidades e tipos de atendimento;
 criar um backup inicial;
-configurar, com o responsável pelo sistema, as integrações opcionais de Microsoft/Excel e Asaas.
+configurar, com o responsável pelo sistema, a integração opcional de Microsoft/Excel.
 Como navegar pelo aplicativo
 As áreas principais ficam no menu lateral esquerdo, organizadas por assunto:
 Grupo
@@ -59,10 +56,6 @@ Comercial
 Pedidos, Clientes e Produtos
 Operacional
 Entregas e Mapa
-Financeiro
-Pagamentos
-Análise
-Relatórios
 O menu pode ser recolhido para aumentar a área de trabalho. Na parte superior ficam o indicador de conexão, o botão de notificações e a opção de alternar entre tema claro e escuro.
 Fluxo recomendado de trabalho
 Para manter todas as informações relacionadas, utilize esta sequência:
@@ -73,10 +66,10 @@ Salve o pedido antes de adicionar os itens.
 Adicione a poltrona, quantidade, descrição personalizada e preço.
 Abra e aprove o pedido quando a negociação estiver confirmada.
 Agende a entrega ou retirada e confira data, horário e endereço.
-Fature o pedido para gerar as parcelas na aba Pagamentos.
-Acompanhe e confirme os recebimentos.
+Fature o pedido para gerar as parcelas, que ficam listadas dentro dele.
+Acompanhe e dê baixa nas parcelas recebidas, pelo próprio pedido.
 Atualize o andamento da entrega até sua conclusão.
-Consulte o Dashboard, o Mapa e os Relatórios para acompanhar os resultados.
+Consulte o Dashboard e o Mapa para acompanhar os resultados.
 Registrar cada mudança no momento em que ela acontece mantém os indicadores, alertas e valores pendentes confiáveis.
 Abas do aplicativo
 1. Dashboard
@@ -85,20 +78,14 @@ O que é exibido
 total de clientes cadastrados;
 cadastros classificados como entrega ou retirada;
 novos clientes dos últimos 30 dias;
-faturamento do mês e comparação com o mês anterior;
-total a receber;
-total em atraso;
-ticket médio do mês;
-gráfico de receita por mês;
 distribuição entre entregas e retiradas;
 cidades com mais clientes;
 evolução dos novos cadastros;
 clientes cadastrados recentemente.
 Como usar de forma eficiente
-Comece pelos valores em atraso e pelas tarefas que vencem no dia.
-Compare o faturamento com o mês anterior para identificar mudanças.
+Comece pelas tarefas que vencem no dia.
 Use as cidades com maior concentração de clientes para apoiar ações comerciais e logísticas.
-Se um número parecer incorreto, confira se pedidos, pagamentos e entregas foram atualizados corretamente.
+Se um número parecer incorreto, confira se pedidos e entregas foram atualizados corretamente.
 2. Pedidos
 A aba Pedidos concentra as negociações e locações realizadas com os clientes. Cada pedido recebe um número e reúne cliente, itens, valores, previsão de entrega e observações.
 Criar um pedido
@@ -121,10 +108,11 @@ Pedido registrado e aguardando confirmação.
 Aprovado
 Negociação confirmada; a entrega pode ser agendada.
 Faturado
-Parcelas geradas em Pagamentos; o pedido deixa de aceitar alterações.
+Parcelas geradas e listadas no próprio pedido; ele deixa de aceitar alterações de itens.
 Cancelado
 Pedido encerrado e mantido apenas no histórico.
-Ao faturar, informe a quantidade de parcelas, o primeiro vencimento e a forma de pagamento. O sistema criará os lançamentos correspondentes na aba Pagamentos.
+Ao faturar, informe a quantidade de parcelas, o primeiro vencimento e a forma de pagamento. As parcelas aparecem em uma tabela dentro do próprio pedido, com vencimento, valor e situação.
+Cada parcela tem um botão Receber, que registra a baixa na data de hoje, e um botão Desfazer, para o caso de a baixa ter sido feita por engano. Uma parcela pendente cujo vencimento já passou aparece marcada como em atraso — isso é calculado pela data, não registrado manualmente.
 Confira itens, preço, desconto, frete e vencimentos antes de faturar. Depois dessa etapa, o pedido não pode mais ser alterado pela tela.
 Use a pesquisa por número ou cliente e o filtro por situação para localizar pedidos rapidamente.
 3. Clientes
@@ -191,38 +179,21 @@ planejar uma sequência de deslocamentos;
 identificar cidades com maior concentração de clientes;
 reduzir trajetos desnecessários.
 O mapa e a localização dos endereços dependem de acesso à internet. Se um cliente não aparecer, revise CEP, rua, bairro e cidade no cadastro. O carregamento inicial de muitos endereços pode levar alguns instantes.
-7. Pagamentos
-A aba Pagamentos reúne parcelas geradas pelo faturamento dos pedidos e recebimentos registrados manualmente.
-O que pode ser feito
-filtrar lançamentos por cliente e situação;
-consultar valor, descrição, forma e data;
-registrar um novo recebimento manual;
-acompanhar pagamentos pendentes e atrasados;
-confirmar ou cancelar lançamentos, quando permitido;
-gerar cobrança por Pix ou boleto quando o Asaas estiver configurado;
-conciliar cobranças com o Asaas.
-Situações do pagamento
+Parcelas a receber
+As parcelas nascem do faturamento de um pedido e ficam dentro dele — não há aba financeira separada. Abra o pedido faturado e a tabela Parcelas a receber aparece abaixo dos itens, com o total já recebido e o total em aberto.
+Situações da parcela
 Situação
 Significado
 Pendente
 Valor lançado, ainda aguardando pagamento.
-Recebido
-Pagamento confirmado.
-Atrasado
-Vencimento ultrapassado sem confirmação.
-Cancelado
-Cobrança encerrada sem recebimento.
-Para registrar um recebimento manual, selecione o cliente, informe valor, data, forma de pagamento, situação e uma descrição. Use a descrição para identificar parcelas, acordos ou outras informações importantes.
-Marque um pagamento como recebido somente depois de conferir o valor. Quando houver cobrança integrada, prefira a conciliação com o Asaas. Confirmações realizadas fora do gateway podem exigir um motivo para ficar registrado no histórico.
-8. Relatórios
-A aba Relatórios permite consultar informações de clientes e atendimentos usando filtros específicos.
-É possível filtrar por:
-tipo de atendimento;
-cidade;
-data inicial;
-data final.
-Depois de aplicar os filtros, o sistema mostra uma prévia com nome, cidade, bairro, tipo, CEP e data de criação, além da análise de desempenho por região.
-O resultado pode ser exportado em CSV ou Excel (XLSX). Para uma análise mais clara, escolha primeiro o período e a região desejados, visualize os dados e somente depois faça a exportação.
+Recebida
+Pagamento confirmado, com a data em que foi registrado.
+Cancelada
+Parcela encerrada sem recebimento.
+Uma parcela pendente com vencimento já passado aparece sinalizada como em atraso. Isso é calculado a partir da data, e não registrado: assim que ela é recebida, a marcação some sozinha.
+Confira o valor antes de dar baixa. A ação fica registrada no histórico de auditoria, e desfazer uma baixa também.
+O que esta versão não faz
+A versão 1.5.0 removeu o módulo financeiro e a integração com gateway de cobrança. Não há, hoje, geração de Pix ou boleto pelo aplicativo, conciliação bancária, recebimento avulso desvinculado de pedido, nem relatórios financeiros. O acompanhamento de recebimento existe no escopo acima: parcela do pedido, baixa manual.
 Notificações
 O sino no canto superior da tela abre o painel de notificações. O número exibido representa os alertas ainda não lidos.
 O sistema pode avisar sobre:
@@ -232,11 +203,7 @@ Entrega atrasada
 Crítica
 Entrega prevista para hoje
 Alta
-Pagamento atrasado
-Alta
 Entrega nos próximos três dias
-Média
-Pagamento com vencimento hoje
 Média
 Cliente sem movimentação há 90 dias
 Baixa
@@ -253,11 +220,11 @@ execute a importação e confira o resumo de sucessos, duplicados e erros.
 Exportar para Excel
 A exportação pela Microsoft permite enviar clientes selecionados ou os resultados da pesquisa atual para um arquivo do Excel. Essa função depende da conexão da conta Microsoft configurada pelo responsável pelo sistema.
 Backup e restauração
-O backup do banco inclui clientes, pedidos, pagamentos e histórico. Faça uma cópia antes de importações, restaurações ou alterações em grande quantidade.
+O backup do banco inclui clientes, pedidos, parcelas, entregas e histórico. Faça uma cópia antes de importações, restaurações ou alterações em grande quantidade.
 Guarde o arquivo em local seguro, pois ele contém informações pessoais e financeiras. Ao restaurar uma cópia, o banco atual é substituído; o sistema cria antes uma cópia de segurança do estado atual para permitir recuperação.
 Funcionamento offline
 O indicador no topo informa o estado da conexão. Parte dos dados de clientes já carregados pode continuar disponível no computador, e algumas alterações podem ficar pendentes para envio quando o serviço voltar a responder.
-Operações que dependem da internet ou de serviços externos — como mapa, Microsoft/Excel, cobranças e conciliação com o Asaas — podem ficar indisponíveis. Verifique o indicador de pendências depois que a conexão retornar e não feche o aplicativo durante uma sincronização.
+Operações que dependem da internet ou de serviços externos — como o mapa e a exportação para Microsoft/Excel — podem ficar indisponíveis. Verifique o indicador de pendências depois que a conexão retornar e não feche o aplicativo durante uma sincronização.
 Atalhos de teclado
 Atalho
 Ação
@@ -279,7 +246,6 @@ No início do dia
 Abra o Dashboard.
 Consulte as notificações críticas e altas.
 Verifique entregas atrasadas e previstas para hoje.
-Confira pagamentos atrasados e vencimentos do dia.
 Organize os deslocamentos usando a Agenda e o Mapa.
 Ao atender um cliente
 Pesquise se o cadastro já existe.
@@ -289,12 +255,12 @@ Adicione os itens e confira os valores.
 Aprove o pedido somente quando a negociação estiver confirmada.
 Durante a locação
 Agende e acompanhe a entrega.
-Fature o pedido e revise as parcelas.
-Monitore os vencimentos.
-Atualize pagamentos e status da entrega conforme as atividades acontecem.
+Fature o pedido e revise as parcelas geradas.
+Monitore os vencimentos pelo próprio pedido.
+Dê baixa nas parcelas recebidas e atualize o status da entrega conforme as atividades acontecem.
 No final do dia
 Confira compromissos que continuam em aberto.
-Atualize recebimentos já confirmados.
+Dê baixa nas parcelas já recebidas.
 Revise notificações ainda não tratadas.
 Consulte novamente os indicadores do Dashboard.
 Faça backup quando houver alterações importantes.
@@ -302,13 +268,13 @@ Boas práticas
 Pesquise antes de cadastrar para evitar clientes duplicados.
 Use nomes e códigos padronizados para os produtos.
 Registre no pedido tudo o que foi combinado com o cliente.
-Confira os valores antes de faturar ou confirmar um pagamento.
+Confira os valores antes de faturar ou dar baixa numa parcela.
 Mantenha endereços completos para melhorar o Mapa e a logística.
 Atualize os status no momento em que cada atividade acontecer.
 Faça backups frequentes e mantenha pelo menos uma cópia fora do computador principal.
 Não compartilhe arquivos de backup com pessoas não autorizadas.
 Não use o campo de observações para informações pessoais que não sejam necessárias à operação.
-O funcionamento correto depende da qualidade dos dados. Se uma entrega concluída continuar como pendente ou um pagamento recebido não for confirmado, os alertas e indicadores também ficarão incorretos.
+O funcionamento correto depende da qualidade dos dados. Se uma entrega concluída continuar como pendente ou uma parcela recebida não receber baixa, os alertas e indicadores também ficarão incorretos.
 Limitações atuais
 A versão atual ainda não possui controle completo de:
 quantidade física total, disponível e locada;
@@ -316,11 +282,12 @@ reservas automáticas por período;
 entradas e saídas de estoque;
 manutenção e avarias de cada poltrona;
 compras, fornecedores e contas a pagar;
+geração de Pix ou boleto, conciliação bancária e relatórios financeiros;
 contratos e assinaturas digitais;
 emissão de nota fiscal;
 vários usuários com permissões diferentes;
 vários computadores trabalhando simultaneamente em uma base centralizada.
-Essas limitações não impedem o uso do sistema para cadastro, pedidos, agenda, acompanhamento financeiro e relatórios, mas devem ser consideradas na organização da operação.
+Essas limitações não impedem o uso do sistema para cadastro, pedidos, agenda e acompanhamento das parcelas, mas devem ser consideradas na organização da operação.
 Dúvidas comuns
 O cliente não aparece no pedido
 Confirme se o cadastro foi salvo e pesquise o nome na aba Clientes. Depois feche e abra novamente o formulário do pedido para atualizar a lista.
@@ -328,10 +295,12 @@ O produto não aparece na lista de itens
 Confira se ele foi salvo na aba Produtos. Reabra o pedido para atualizar o catálogo disponível.
 Um cliente não aparece no mapa
 Revise CEP, rua, bairro e cidade. Confirme também se o computador possui acesso à internet e aguarde o processamento dos endereços.
-Não consigo gerar Pix ou boleto
-Essa função depende da configuração do Asaas. Solicite ao responsável pelo sistema que verifique a integração.
+Não encontro a aba Pagamentos
+Ela foi removida na versão 1.5.0. As parcelas geradas pelo faturamento ficam dentro do próprio pedido: abra o pedido faturado e role até Parcelas a receber.
 Não consigo exportar para Excel
 Use Conectar Microsoft antes da exportação. Se a sessão tiver expirado, faça a conexão novamente.
+O aplicativo pediu uma licença
+O período de teste é de 30 dias a partir da primeira abertura. Depois disso o aplicativo pede a licença de uso e mostra um Pix para pagamento; a liberação é automática assim que o pagamento é confirmado. Fale com o responsável pelo sistema.
 Os indicadores parecem desatualizados
 Confira se as alterações foram salvas e se não existem operações offline pendentes. Navegue novamente até o Dashboard ou reinicie o aplicativo, se necessário.
 O aplicativo informa que está sem conexão
@@ -340,4 +309,4 @@ Privacidade e uso responsável
 O Adri Poltronas armazena informações de clientes e dados financeiros necessários à operação. Utilize esses dados somente para finalidades relacionadas ao atendimento e ao gerenciamento do negócio.
 Para mais informações, consulte a Política de Privacidade.
 Adri Poltronas — mais organização, controle e clareza para acompanhar o que já aconteceu, o que está acontecendo e o que ainda precisa ser feito.
-Versão documentada: 1.3.0.
+Versão documentada: 1.5.1-beta.

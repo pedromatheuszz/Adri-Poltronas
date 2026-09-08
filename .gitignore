@@ -90,6 +90,16 @@ site/
 # --- Frontend: se houver build de assets ---
 *.min.js
 *.min.css
+
+# Excecao: as bibliotecas de terceiros sao VERSIONADAS de proposito.
+#
+# `chart.umd.min.js` casa com `*.min.js` acima. Sem esta excecao ele ficava
+# fora do repositorio -- funcionando na maquina de quem baixou e ausente na
+# CI, que constroi o instalador a partir do que esta versionado. O sintoma
+# seria um app instalado com o grafico em branco, e a causa nao apareceria em
+# lugar nenhum: `git status` fica limpo, porque o arquivo esta ignorado.
+!frontend/vendor/**
+
 .DS_Store
 
 # --- Uploads temporários do usuário ---
@@ -108,3 +118,17 @@ backup/
 # Cofre das credenciais de integracao (cifrado, mas nao entra aqui).
 .segredos
 .env.bak
+
+# Token de acesso a API local, gerado pelo Electron.
+#
+# Normalmente vive em %APPDATA% e nunca chega perto do repositorio. Mas
+# `obter_caminho_banco()` cai para a raiz do projeto sempre que APPDATA nao
+# esta definida -- todo ambiente nao-Windows, inclusive rodar a suite de testes
+# fora do Windows. Uma execucao de pytest a partir da raiz deixa aqui um
+# `.capacidade` de 64 caracteres hexadecimais, ao lado de um
+# `adri_poltronas.db` que o `*.db` acima corretamente ignora. Um `git add .`
+# distraido commitaria o token.
+.capacidade
+
+# Config local de ferramenta (a de preview gera um stub com porta errada).
+.claude/launch.json

@@ -29,13 +29,15 @@ def banco_fallback(tmp_path, monkeypatch):
     return caminho
 
 
-def test_exclusao_de_cliente_e_logica_e_preserva_vinculos(banco_fallback):
+def test_exclusao_de_cliente_e_logica_e_preserva_vinculos(banco_fallback, semear_parcela):
     cliente_id = database.salvar_cliente(
         "Cliente", "11000-000", "Rua A", "Centro", "Santos", "Entrega"
     )
-    pagamento_id = database.salvar_pagamento(
-        cliente_id, "Cliente", 120.50, "Sinal", "2030-01-01"
-    )
+    # A parcela precisa estar liquidada para a exclusao ser permitida -- ver
+    # `test_exclusao_e_recusada_com_parcela_a_receber`. O que este teste afirma
+    # e outra coisa: que a exclusao PERMITIDA e logica e nao leva o vinculo
+    # junto. Deixa-la pendente misturaria as duas perguntas num teste so.
+    pagamento_id = semear_parcela(cliente_id, "Cliente", status="Recebido")
 
     assert database.excluir_cliente(cliente_id) == 1
     assert database.listar_clientes() == []
@@ -60,14 +62,80 @@ def test_exclusao_de_cliente_e_logica_e_preserva_vinculos(banco_fallback):
     assert auditoria["acao"] == "crm.cliente.inativado"
 
 
-def test_foreign_keys_sao_aplicadas_em_toda_conexao(banco_fallback):
+# =============================================================================
+# Exclusao de cliente com vinculos vivos
+# =============================================================================
+# Antes destes testes a inativacao passava sempre. O cliente sumia das listas e
+# deixava para tras um limbo: o pedido faturado continuava listado com o nome
+# dele (snapshot em `pedidos.cliente_nome`), as parcelas seguiam pendentes e
+# invisiveis, e editar aquele pedido falhava com 404 "Cliente nao encontrado"
+# -- porque a validacao do cabecalho exige cliente ativo. O pedido existia, era
+# listado, e nao aceitava alteracao por um motivo que nao era dele.
+def test_exclusao_e_recusada_com_parcela_a_receber(banco_fallback, semear_parcela):
+    cliente_id = database.salvar_cliente(
+        "Devedora", "11000-000", "Rua A", "Centro", "Santos", "Entrega")
+    # Com `pedido_id`: e assim que toda parcela nasce hoje, pelo faturamento.
+    # A parcela SEM pedido e outro caso, coberto em test_migrations_schema.py.
+    with database.conectar() as conexao:
+        conexao.execute(
+            "INSERT INTO pedidos (numero, cliente_id, cliente_nome, data_emissao, situacao) "
+            "VALUES ('PED-2026-000009', ?, 'Devedora', '2026-01-01', 'faturado')",
+            (cliente_id,))
+    semear_parcela(cliente_id, "Devedora", pedido_id=1)
+
+    with pytest.raises(database.ClienteTemVinculos) as capturado:
+        database.excluir_cliente(cliente_id)
+
+    # A mensagem tem de dizer O QUE impede -- "nao foi possivel excluir" manda
+    # o operador adivinhar.
+    assert "1 parcela(s) a receber" in str(capturado.value)
+    assert database.obter_cliente_por_id(cliente_id) is not None
+
+
+def test_exclusao_e_recusada_com_pedido_em_aberto(banco_fallback):
+    cliente_id = database.salvar_cliente(
+        "Em obras", "11000-000", "Rua A", "Centro", "Santos", "Entrega")
+    with database.conectar() as conexao:
+        conexao.execute(
+            "INSERT INTO pedidos (numero, cliente_id, cliente_nome, data_emissao, situacao) "
+            "VALUES ('PED-2026-000001', ?, 'Em obras', '2026-01-01', 'aprovado')",
+            (cliente_id,))
+
+    with pytest.raises(database.ClienteTemVinculos) as capturado:
+        database.excluir_cliente(cliente_id)
+
+    assert "1 pedido(s) em aberto" in str(capturado.value)
+
+
+def test_pedido_cancelado_ou_faturado_nao_impede_a_exclusao(banco_fallback):
+    """
+    O cancelado nao espera mais nada; o faturado ja produziu as parcelas, que
+    sao contadas a parte. Travar por causa deles tornaria qualquer cliente
+    antigo permanentemente inexcluivel.
+    """
+    cliente_id = database.salvar_cliente(
+        "Historica", "11000-000", "Rua A", "Centro", "Santos", "Entrega")
+    with database.conectar() as conexao:
+        conexao.execute(
+            "INSERT INTO pedidos (numero, cliente_id, cliente_nome, data_emissao, situacao) "
+            "VALUES ('PED-2026-000001', ?, 'Historica', '2026-01-01', 'cancelado')",
+            (cliente_id,))
+        conexao.execute(
+            "INSERT INTO pedidos (numero, cliente_id, cliente_nome, data_emissao, situacao) "
+            "VALUES ('PED-2026-000002', ?, 'Historica', '2026-01-01', 'faturado')",
+            (cliente_id,))
+
+    assert database.excluir_cliente(cliente_id) == 1
+
+
+def test_foreign_keys_sao_aplicadas_em_toda_conexao(banco_fallback, semear_parcela):
     with database.conectar() as conexao:
         assert conexao.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 
+    # Sem o PRAGMA por conexao as FKs do schema seriam decorativas: este
+    # INSERT aponta para um cliente que nao existe e precisa ser recusado.
     with pytest.raises(sqlite3.IntegrityError):
-        database.salvar_pagamento(
-            99999, "Inexistente", 10.0, "Registro invalido", "2030-01-01"
-        )
+        semear_parcela(99999, "Inexistente")
 
 
 def test_falha_na_auditoria_reverte_a_operacao(banco_fallback, monkeypatch):
@@ -179,7 +247,7 @@ def test_migrations_reconstroem_schema_integral_em_banco_novo(tmp_path, monkeypa
     # Cabeca da cadeia de migrations. Atualizar junto ao acrescentar uma
     # revisao nova -- e o que garante que ela entrou na cadeia, e nao ficou
     # pendurada fora dela.
-    assert revisao == "e5c94a17b3d8"
+    assert revisao == "b7f21c9e4a05"
     # O modulo comercial: sem estas tres, pagamento e entrega continuam
     # pendurados no cliente, sem saber a que venda pertencem.
     assert {"produtos", "pedidos", "pedido_itens"} <= tabelas

@@ -144,3 +144,12 @@ def faturar_pedido(pedido_id):
 @traduzir_erros
 def cancelar_pedido(pedido_id):
     return jsonify(servico.cancelar_pedido(pedido_id, _corpo().get("motivo", "")))
+
+
+# --- Recebiveis ---------------------------------------------------------------
+# PATCH e nao POST: nao ha recurso novo, so um campo mudando de valor numa
+# parcela que ja existe desde o faturamento.
+@pedidos_bp.route("/<int:pedido_id>/parcelas/<int:parcela>", methods=["PATCH"])
+@traduzir_erros
+def baixar_parcela(pedido_id, parcela):
+    return jsonify(servico.baixar_parcela(pedido_id, parcela, _corpo()))

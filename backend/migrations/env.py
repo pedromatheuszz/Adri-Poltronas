@@ -14,7 +14,7 @@ config = context.config
 # `disable_existing_loggers=False` nao e detalhe: o padrao do `fileConfig` e
 # True, e True aqui significa DESLIGAR todo logger ja criado que nao esteja
 # declarado em alembic.ini. Como `servidor.py` importa `app` (que cria
-# `adri.app`, `adri.asaas`, `adri.security`, `adri.db`, `adri.capacidade`)
+# `adri.app`, `adri.comercial`, `adri.security`, `adri.db`, `adri.capacidade`)
 # ANTES de chamar `preparar_banco()`, e a preparacao roda `command.upgrade`
 # em todo boot, o efeito era este: a partir da primeira migracao de cada
 # execucao, o aplicativo parava de escrever no proprio `app.log`.

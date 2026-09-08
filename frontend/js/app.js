@@ -6,38 +6,20 @@ let debounceTimer;
 var filtrosAtivos = { tipos: ['Entrega', 'Retirada'], cidades: [] };
 
 // ---------------------------------------------------------------------------
-// CSRF Token - integridade de requisicoes
+// O ritual do CSRF saiu na 1.5.1, das duas pontas.
+//
+// O backend gerava um token, devolvia no header `X-CSRF-Token` a cada
+// resposta, o frontend guardava em cookie legivel por JS e reenviava -- e o
+// backend NUNCA validava. As duas pontas executavam o ritual completo de uma
+// protecao que nao existia.
+//
+// Quem protege as rotas que alteram estado e a checagem de Origin/Referer em
+// `_bloquear_requisicao_de_origem_externa`, e sempre foi.
+//
+// Ligar a validacao de verdade nao era opcao: o cache do backend reservava o
+// MESMO token por uma hora, enquanto `security.validar_csrf_token` era de uso
+// unico. A segunda requisicao de qualquer sessao seria recusada como replay.
 // ---------------------------------------------------------------------------
-function _obterCsrfToken() {
-    var match = document.cookie.match(/csrf_token=([^;]+)/);
-    if (match) return match[1];
-    var meta = document.querySelector('meta[name="csrf-token"]');
-    if (meta) return meta.getAttribute('content');
-    return null;
-}
-
-async function fetchSeguro(url, options) {
-    options = options || {};
-    options.headers = options.headers || {};
-    var token = _obterCsrfToken();
-    if (token && !options.headers['X-CSRF-Token']) {
-        options.headers['X-CSRF-Token'] = token;
-    }
-    if (!options.headers['Content-Type'] && !(options.body instanceof FormData)) {
-        options.headers['Content-Type'] = 'application/json';
-    }
-    try {
-        var resp = await fetch(url, options);
-        var csrfHeader = resp.headers.get('X-CSRF-Token');
-        if (csrfHeader) {
-            document.cookie = 'csrf_token=' + csrfHeader + '; path=/; SameSite=Lax';
-        }
-        return resp;
-    } catch (e) {
-        console.error('[fetchSeguro] Erro:', e);
-        throw e;
-    }
-}
 
 // -----------------------------------------------------------------------------
 // Sessao ausente
@@ -104,21 +86,41 @@ function esconderPainelSemConexao() {
     if (casca) casca.classList.remove('sem-conexao');
 }
 
-// Patch do fetch original para injetar CSRF automaticamente
+// Gancho central em `window.fetch`.
+//
+// Existe por UM motivo que vale o acoplamento: observar 401 e 402 num lugar so.
+// Sem ele, cada chamada da API precisaria lembrar de tratar "sessao caiu" e
+// "licenca venceu" -- e a proxima rota escrita seria a que esquece.
+//
+// O `Content-Type` padrao e conveniencia, nao seguranca.
 var _fetchOriginal = window.fetch;
 window.fetch = function(url, options) {
-    if (typeof url === 'string' && (url.startsWith('/api/') || url.startsWith('/api/auth/logout') || url.startsWith('/api/auth/login'))) {
+    var nossa = typeof url === 'string' && url.startsWith('/api/');
+    if (nossa) {
         options = options || {};
-        options.headers = options.headers || {};
-        if (!options.headers['X-CSRF-Token']) {
-            var tok = _obterCsrfToken();
-            if (tok) options.headers['X-CSRF-Token'] = tok;
-        }
-        if (!options.headers['Content-Type'] && !(options.body instanceof FormData)) {
-            options.headers['Content-Type'] = 'application/json';
+        // `Headers` precisa ser tratado a parte: nele a notacao de indice grava
+        // uma propriedade solta que o fetch ignora, e o cabecalho simplesmente
+        // nao vai -- em silencio. Era assim que o X-CSRF-Token se perdia para
+        // quem chamasse com `new Headers(...)`, e seria assim com o
+        // Content-Type.
+        if (options.headers instanceof Headers) {
+            if (!options.headers.has('Content-Type') && !(options.body instanceof FormData)) {
+                options.headers.set('Content-Type', 'application/json');
+            }
+        } else {
+            options.headers = options.headers || {};
+            if (!options.headers['Content-Type'] && !(options.body instanceof FormData)) {
+                options.headers['Content-Type'] = 'application/json';
+            }
         }
     }
-    var promessa = _fetchOriginal.apply(this, arguments);
+    // `call` explicito, e nao `apply(this, arguments)`: chamado como
+    // `fetch(url)`, `arguments.length` continua 1 mesmo depois de atribuirmos
+    // `options`, e o `apply` descartava justamente o objeto que acabamos de
+    // montar.
+    var promessa = nossa
+        ? _fetchOriginal.call(this, url, options)
+        : _fetchOriginal.apply(this, arguments);
     if (_ehRotaQueExigeSessao(url)) {
         // Observa sem consumir: a promessa devolvida a quem chamou e a
         // original, entao o corpo continua intacto para ele ler.
@@ -145,7 +147,7 @@ window.fetch = function(url, options) {
 //
 // O pagamento e verificado PERGUNTANDO ao Mercado Pago, e nao esperando
 // webhook: o backend escuta em loopback e um servidor da internet nao alcanca
-// este endereco. Mesma inversao ja usada para o Asaas em reconciliacao.py.
+// este endereco -- nao ha para onde o Mercado Pago chamar de volta.
 // -----------------------------------------------------------------------------
 var _licencaVencida = false;
 var _intervaloDaLicenca = null;
@@ -291,8 +293,8 @@ function _desenharCobrancaDaLicenca(dados) {
     var caixa = document.getElementById('licencaCobranca');
     if (!caixa) return;
 
-    // Mesmo cuidado da cobranca do Asaas: o base64 do QR passa por
-    // `base64Seguro` antes de virar `src`, e o payload por `escaparHtml`.
+    // O base64 do QR passa por `base64Seguro` antes de virar `src`, e o
+    // payload por `escaparHtml`: os dois vem de resposta HTTP externa.
     var qr = base64Seguro(dados.pix_qr_code);
     var payload = dados.pix_payload || '';
 
@@ -354,11 +356,6 @@ async function verificarPagamentoDaLicenca(primeira) {
         // Sem rede: a proxima rodada tenta.
     }
 }
-
-// Atualiza o cookie CSRF a partir do header da resposta inicial
-(function() {
-    fetch('/').then(function(r) { var t = r.headers.get('X-CSRF-Token'); if(t) document.cookie = 'csrf_token=' + t + '; path=/; SameSite=Lax'; }).catch(function(){});
-})();
 
 function escaparHtml(str) {
     if (!str) return '';
@@ -641,11 +638,16 @@ function trocarAba(aba) {
     if (aba === 'pedidos') { carregarPedidos(); carregarProdutos(); }
     if (aba === 'produtos') { carregarProdutos(); }
     if (aba === 'entregas') { carregarEntregas(); }
-    if (aba === 'mapa') { setTimeout(function() { initMapa(); carregarMapaClientes(); }, 100); }
+    if (aba === 'mapa') {
+        // Sem autorizacao o mapa nao consulta nada: quem decide se o endereco
+        // dos clientes sai desta maquina e o operador, nao a troca de aba.
+        setTimeout(function() {
+            if (!_mostrarEstadoDoMapa()) return;
+            initMapa();
+            carregarMapaClientes();
+        }, 100);
+    }
     if (aba === 'clientes') { atualizarAvisoDePendenciasComErro(); }
-    // `pagamentos` e `relatorios` nao carregam nada: as duas areas estao
-    // desativadas nesta versao e a secao ja traz o aviso escrito no HTML.
-    // Pedir dado a elas so renderia 503 no console.
 }
 
 var chartInstances = {};
@@ -2287,6 +2289,76 @@ function guardarGeocache() {
     }
 }
 
+
+// -----------------------------------------------------------------------------
+// Consentimento do mapa
+//
+// Abrir a aba Mapa envia o endereco COMPLETO de cada cliente ativo -- rua,
+// bairro, cidade e CEP -- ao Nominatim/OpenStreetMap, um por um. E transferencia
+// de dado pessoal a um terceiro fora do pais.
+//
+// O aviso na tela ja existia e era claro. O que faltava era poder RECUSAR: o
+// envio acontecia ao abrir a aba, e nao havia como olhar o mapa sem ele nem
+// como apagar o que ja tinha sido guardado. Nao ha nada de ilegal em usar o
+// Nominatim; o que faltava era a escolha.
+// -----------------------------------------------------------------------------
+var CHAVE_CONSENTIMENTO_MAPA = 'adri-mapa-consentimento';
+
+function mapaAutorizado() {
+    try {
+        return localStorage.getItem(CHAVE_CONSENTIMENTO_MAPA) === 'sim';
+    } catch (e) {
+        // Sem storage nao da para lembrar da resposta, e perguntar de novo a
+        // cada abertura e melhor do que assumir um "sim" que ninguem deu.
+        return false;
+    }
+}
+
+function _mostrarEstadoDoMapa() {
+    var autorizado = mapaAutorizado();
+    var pedido = document.getElementById('mapaConsentimento');
+    var controles = document.getElementById('mapaControles');
+    var tela = document.getElementById('mapaClientes');
+    if (pedido) pedido.hidden = autorizado;
+    if (controles) controles.hidden = !autorizado;
+    if (tela) tela.hidden = !autorizado;
+    return autorizado;
+}
+
+function autorizarMapa() {
+    try {
+        localStorage.setItem(CHAVE_CONSENTIMENTO_MAPA, 'sim');
+    } catch (e) {
+        // Vale para esta sessao mesmo sem conseguir gravar.
+        console.warn('[mapa] consentimento nao persistido:', e);
+    }
+    _mostrarEstadoDoMapa();
+    initMapa();
+    carregarMapaClientes();
+}
+
+function revogarMapa() {
+    try {
+        localStorage.removeItem(CHAVE_CONSENTIMENTO_MAPA);
+    } catch (e) { /* nada a fazer */ }
+    // Revogar sem apagar o que ja foi buscado deixaria as coordenadas de todos
+    // os clientes guardadas numa maquina onde o operador acabou de dizer que
+    // nao quer isso.
+    limparCacheDoMapa({ silencioso: true });
+    _mostrarEstadoDoMapa();
+    exibirToast('Autorizacao revogada e coordenadas apagadas.');
+}
+
+function limparCacheDoMapa(opcoes) {
+    _geocacheCoords = {};
+    try {
+        localStorage.removeItem(CHAVE_GEOCACHE);
+    } catch (e) { /* nada a fazer */ }
+    if (!(opcoes && opcoes.silencioso)) {
+        exibirToast('Coordenadas guardadas apagadas.');
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Aparencia do mapa
 //
@@ -2511,6 +2583,7 @@ var COMANDOS_PERMITIDOS = [
     'alternarSidebar',
     'aplicarFiltros',
     'atualizarNotificacoes',
+    'autorizarMapa',
     'conectarMicrosoft',
     'copiarPixDaLicenca',
     'enviarParaExcel',
@@ -2519,7 +2592,9 @@ var COMANDOS_PERMITIDOS = [
     'fecharModal',
     'fecharNotificacoes',
     'gerarPixDaLicenca',
+    'limparCacheDoMapa',
     'limparFiltros',
+    'revogarMapa',
     'sugerirBairro',
     'toggleFiltro',
     'toggleModoSelecao',

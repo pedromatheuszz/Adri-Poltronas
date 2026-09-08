@@ -13,10 +13,11 @@ sem deixar metade do trabalho feito se algo falhar no meio.
 from __future__ import annotations
 
 import sqlite3
-from typing import Any, Iterable, Optional
+from typing import Any
+from collections.abc import Iterable
 
 
-def _dict(linha: Optional[sqlite3.Row]) -> Optional[dict]:
+def _dict(linha: sqlite3.Row | None) -> dict | None:
     return dict(linha) if linha is not None else None
 
 
@@ -40,11 +41,11 @@ def listar_produtos(conexao, busca: str = "", incluir_inativos: bool = False) ->
     return _dicts(conexao.execute(sql, parametros))
 
 
-def obter_produto(conexao, produto_id: int) -> Optional[dict]:
+def obter_produto(conexao, produto_id: int) -> dict | None:
     return _dict(conexao.execute("SELECT * FROM produtos WHERE id = ?", (produto_id,)).fetchone())
 
 
-def codigo_em_uso(conexao, codigo: str, ignorar_id: Optional[int] = None) -> bool:
+def codigo_em_uso(conexao, codigo: str, ignorar_id: int | None = None) -> bool:
     sql = "SELECT 1 FROM produtos WHERE codigo = ? AND ativo = 1"
     parametros: list[Any] = [codigo]
     if ignorar_id:
@@ -141,11 +142,11 @@ def listar_pedidos(conexao, situacao: str = "", busca: str = "") -> list[dict]:
     return _dicts(conexao.execute(sql, parametros))
 
 
-def obter_pedido(conexao, pedido_id: int) -> Optional[dict]:
+def obter_pedido(conexao, pedido_id: int) -> dict | None:
     return _dict(conexao.execute("SELECT * FROM pedidos WHERE id = ?", (pedido_id,)).fetchone())
 
 
-def obter_pedido_com_itens(conexao, pedido_id: int) -> Optional[dict]:
+def obter_pedido_com_itens(conexao, pedido_id: int) -> dict | None:
     pedido = obter_pedido(conexao, pedido_id)
     if pedido is None:
         return None
@@ -202,14 +203,52 @@ def atualizar_totais(conexao, pedido_id: int, bruto: int, liquido: int) -> None:
     )
 
 
-def mudar_situacao(conexao, pedido_id: int, situacao: str, extras: Optional[dict] = None) -> None:
+# Colunas que uma transicao pode carimbar junto com a situacao.
+#
+# Sao as unicas tres, e a lista existe porque este e o unico ponto do backend
+# em que um NOME DE COLUNA vira texto de query. Hoje as chaves vem de literais
+# do servico e sao seguras; bastaria alguem repassar `request.json` adiante
+# para virar injecao. A allowlist fecha o assunto antes que isso aconteca --
+# mesmo padrao que `database.atualizar_pagamento()` ja adota.
+COLUNAS_DE_TRANSICAO = frozenset({"faturado_em", "cancelado_em", "motivo_cancelamento"})
+
+
+def mudar_situacao(conexao, pedido_id: int, situacao: str,
+                   extras: dict | None = None,
+                   situacao_esperada: str | None = None) -> int:
+    """
+    Grava a nova situacao e devolve quantas linhas mudaram.
+
+    Com `situacao_esperada`, o proprio UPDATE vira o lock: `WHERE situacao = ?`
+    so casa se ninguem tiver mudado o pedido entre a leitura e a escrita.
+
+    Isso importa porque o sqlite3 do Python so abre transacao na PRIMEIRA
+    ESCRITA. O servico le a situacao com um SELECT que roda fora de qualquer
+    transacao; duas requisicoes concorrentes (o Flask roda com threaded=True)
+    liam 'aprovado' antes de qualquer BEGIN, as duas passavam pela maquina de
+    estados, o SQLite serializava as escritas e a segunda gravava tambem --
+    sem reler nada. Um duplo clique no faturamento virava seis parcelas.
+
+    Devolver 0 e a resposta certa para "outro chegou primeiro"; quem chama
+    traduz para 409.
+    """
     campos = ["situacao = ?", "atualizado_em = datetime('now', 'localtime')"]
     parametros: list[Any] = [situacao]
     for coluna, valor in (extras or {}).items():
+        if coluna not in COLUNAS_DE_TRANSICAO:
+            raise ValueError(f"Coluna nao permitida numa transicao: {coluna!r}")
         campos.append(f"{coluna} = ?")
         parametros.append(valor)
     parametros.append(pedido_id)
-    conexao.execute(f"UPDATE pedidos SET {', '.join(campos)} WHERE id = ?", parametros)
+
+    condicao = "id = ?"
+    if situacao_esperada is not None:
+        condicao += " AND situacao = ?"
+        parametros.append(situacao_esperada)
+
+    cursor = conexao.execute(
+        f"UPDATE pedidos SET {', '.join(campos)} WHERE {condicao}", parametros)  # noqa: S608 - fragmento constante do proprio codigo, nunca entrada do usuario
+    return cursor.rowcount
 
 
 # --- Itens -------------------------------------------------------------------
@@ -274,6 +313,50 @@ def parcelas_do_pedido(conexao, pedido_id: int) -> list[dict]:
     )
 
 
+def obter_parcela(conexao, pedido_id: int, parcela: int) -> dict | None:
+    return _dict(
+        conexao.execute(
+            "SELECT * FROM pagamentos WHERE pedido_id = ? AND parcela = ?",
+            (pedido_id, parcela),
+        ).fetchone()
+    )
+
+
+def mudar_status_da_parcela(conexao, pedido_id: int, parcela: int, status: str,
+                            data_pagamento: str, status_esperado: str) -> int:
+    """
+    Baixa (ou desfaz a baixa de) uma parcela, devolvendo quantas linhas mudaram.
+
+    `status_esperado` no WHERE pela mesma razao de `mudar_situacao`: a leitura
+    que decidiu se a baixa era valida rodou fora de transacao, e dois cliques
+    no botao de receber nao podem gravar dois eventos de auditoria para uma
+    baixa so.
+    """
+    cursor = conexao.execute(
+        """UPDATE pagamentos
+              SET status = ?, data_pagamento = ?
+            WHERE pedido_id = ? AND parcela = ? AND status = ?""",
+        (status, data_pagamento, pedido_id, parcela, status_esperado),
+    )
+    return cursor.rowcount
+
+
+def cancelar_entregas_do_pedido(conexao, pedido_id: int) -> int:
+    """
+    Cancela as entregas ainda vivas do pedido, devolvendo quantas.
+
+    'Concluida' fica de fora: uma entrega que ja aconteceu aconteceu, e
+    reescrever isso apagaria um fato do historico operacional. Cancelar um
+    pedido nao desfaz o passado, so encerra o que ainda estava previsto.
+    """
+    cursor = conexao.execute(
+        "UPDATE entregas_agendadas SET status = 'Cancelada' "
+        "WHERE pedido_id = ? AND status IN ('Pendente', 'Em andamento')",
+        (pedido_id,),
+    )
+    return cursor.rowcount
+
+
 def entregas_do_pedido(conexao, pedido_id: int) -> list[dict]:
     return _dicts(
         conexao.execute(
@@ -287,9 +370,14 @@ def inserir_parcela(conexao, dados: dict) -> int:
     """
     Uma parcela a receber e uma linha em `pagamentos`.
 
-    Reusar a tabela existente, em vez de criar `titulos`, mantem em pe toda a
-    maquina de cobranca que ja funciona: Pix, boleto, webhook do Asaas e a
-    tela de Pagamentos.
+    Reusar a tabela existente, em vez de criar `titulos`, preservou o dado ja
+    gravado dos pedidos faturados nas versoes anteriores. A tabela nasceu
+    servindo ao gateway de cobranca, removido na 1.5.0; o que restou dela e o
+    que o ERP precisa hoje -- valor, vencimento, status e vinculo com o pedido.
+
+    As parcelas sao lidas e recebidas dentro do proprio pedido
+    (`servico.baixar_parcela`), que e o unico caminho de escrita depois da
+    emissao.
 
     O valor chega em CENTAVOS e e gravado em centavos. Ate a versao 1.1 ele
     passava por `round(centavos / 100, 2)` aqui, e o rateio exato feito pelo

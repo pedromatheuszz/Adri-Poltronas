@@ -113,7 +113,7 @@ def caminho_do_arquivo() -> str:
 
 def _ler_arquivo() -> dict:
     try:
-        with open(caminho_do_arquivo(), "r", encoding="utf-8") as arquivo:
+        with open(caminho_do_arquivo(), encoding="utf-8") as arquivo:
             cifrado = arquivo.read().strip()
     except OSError:
         return {}

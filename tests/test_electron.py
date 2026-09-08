@@ -101,7 +101,7 @@ def test_servidor_importa_sem_dependencia_de_gui():
         'print(servidor.PORTA)' % BACKEND
     )
     resultado = subprocess.run(
-        [sys.executable, '-c', codigo],
+        [sys.executable, '-c', codigo],  # noqa: S603 - argumentos fixos, montados no codigo e nao pela entrada
         capture_output=True, text=True, cwd=BACKEND,
     )
     assert resultado.returncode == 0, resultado.stderr

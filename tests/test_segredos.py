@@ -158,16 +158,41 @@ def test_migracao_preserva_o_que_nao_e_credencial(cofre_isolado):
     assert 'ADRI_FLASK_SECRET=segredo-de-sessao' in depois
 
 
-def test_migracao_guarda_copia_antes_de_reescrever(cofre_isolado):
-    """Mexer no arquivo de configuracao do usuario sem deixar volta seria
-    trocar um risco por outro."""
+def test_migracao_nao_deixa_copia_em_texto_claro_para_tras(cofre_isolado):
+    """
+    A copia de seguranca existe para proteger a REESCRITA do `.env`, e so.
+
+    Cumprida essa funcao, ela vira o oposto do que o cofre faz: um arquivo
+    permanente, em texto puro, na mesma pasta do banco, com o `MP_ACCESS_TOKEN`
+    -- que da acesso total a conta do vendedor no Mercado Pago -- ao lado da
+    versao cifrada. O trabalho de cifrar ficava metade desfeito, e para sempre.
+    """
     caminho = _escrever_env(cofre_isolado, ENV_COM_SEGREDOS)
     segredos.migrar_do_env(caminho)
 
-    with open(caminho + ".bak", encoding="utf-8") as arquivo:
-        copia = arquivo.read()
+    assert not os.path.exists(caminho + ".bak")
+    # E a chave continua recuperavel -- apagar a copia so vale se o cofre
+    # cumprir o papel dela.
+    segredos._cache = None
+    assert segredos.obter('MP_ACCESS_TOKEN') == 'APP_USR-FALSA'
+    assert segredos.obter('GEMINI_API_KEY') == 'AIzaSyFALSA'
 
-    assert copia == ENV_COM_SEGREDOS
+
+def test_a_copia_e_mantida_se_o_cofre_nao_confere(cofre_isolado, monkeypatch):
+    """
+    O risco oposto, e o motivo de a conferencia por releitura existir.
+
+    Se o DPAPI gravar e nao conseguir decifrar de volta -- perfil de usuario
+    recriado, chave da maquina trocada --, apagar a copia perderia a
+    credencial. Diante de qualquer divergencia, o arquivo fica.
+    """
+    caminho = _escrever_env(cofre_isolado, ENV_COM_SEGREDOS)
+    monkeypatch.setattr(segredos, 'obter', lambda nome, padrao='': 'outra-coisa')
+
+    segredos.migrar_do_env(caminho)
+
+    with open(caminho + ".bak", encoding="utf-8") as arquivo:
+        assert arquivo.read() == ENV_COM_SEGREDOS
 
 
 def test_migracao_e_idempotente(cofre_isolado):
@@ -218,7 +243,7 @@ def test_env_inexistente_nao_quebra(cofre_isolado):
 
 def test_valor_comentado_nao_e_migrado(cofre_isolado):
     """Uma linha comentada e uma chave que o operador desativou de proposito."""
-    caminho = _escrever_env(cofre_isolado, "# MP_ACCESS_TOKEN=antiga\nASAAS_SANDBOX=true\n")
+    caminho = _escrever_env(cofre_isolado, "# MP_ACCESS_TOKEN=antiga\nADRI_BACKUP_EXTRA=D:/copias\n")
 
     assert segredos.migrar_do_env(caminho) == []
 

@@ -71,8 +71,7 @@ def enviar_excel_onedrive():
     nome_personalizado = dados_requisicao.get('nome_arquivo', '').strip()
     if not ids_selecionados:
         return jsonify({"erro": "Nenhum cliente selecionado."}), 400
-    todos_clientes = database.listar_clientes()
-    clientes = [c for c in todos_clientes if c['id'] in ids_selecionados]
+    clientes = database.listar_clientes_por_ids(ids_selecionados)
     if not clientes:
         return jsonify({"erro": "Clientes nao encontrados."}), 404
     nome_arquivo = nome_arquivo_seguro(nome_personalizado)
@@ -83,11 +82,11 @@ def enviar_excel_onedrive():
     # escapasse do saneamento acima ainda alteraria o caminho no Graph.
     caminho_no_drive = urllib.parse.quote(nome_arquivo, safe='')
     url_upload = f"https://graph.microsoft.com/v1.0/me/drive/root:/{caminho_no_drive}:/content"
-    req_upload = urllib.request.Request(url_upload, data=corpo_binario,
+    req_upload = urllib.request.Request(url_upload, data=corpo_binario,  # noqa: S310 - URL montada de constante do proprio codigo, sempre https
         headers={"Authorization": f"Bearer {token}", "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
         method='PUT')
     try:
-        with urllib.request.urlopen(req_upload) as resp:
+        with urllib.request.urlopen(req_upload) as resp:  # noqa: S310 - URL montada de constante do proprio codigo, sempre https
             retorno = json.loads(resp.read().decode('utf-8'))
             web_url = retorno.get('webUrl')
         if web_url:

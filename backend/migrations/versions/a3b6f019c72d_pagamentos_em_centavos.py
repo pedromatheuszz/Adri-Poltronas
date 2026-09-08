@@ -38,15 +38,15 @@ Revises: e2a9c4d70f61
 Create Date: 2026-09-01 23:30:00.000000
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
 
 revision: str = "a3b6f019c72d"
-down_revision: Union[str, None] = "e2a9c4d70f61"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "e2a9c4d70f61"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 # Convencao de nomes: sem ela, o `batch_alter_table` nao consegue referenciar
 # constraints anonimas na hora de recriar a tabela.

@@ -22,6 +22,17 @@ on:
 #   codecov/codecov-action@v5.5.1  5a1091511ad55cbe89839c7260b706298ca349f7
 #   jurplel/install-qt-action@v4.3.0  d325aaf2a8baeeda41ad0b5d39f84a6af9bcf005
 
+# Este workflow so LE o codigo. Nenhum job dele cria release, comenta em PR nem
+# escreve no repositorio.
+#
+# Sem este bloco o GITHUB_TOKEN herda o padrao do repositorio, que costuma ser
+# mais amplo do que qualquer job aqui precisa -- e este workflow roda em pull
+# request de qualquer origem, que e exatamente o caso em que o codigo executado
+# nao passou por revisao ainda. O `release.yml` ja declarava o dele; faltava
+# este.
+permissions:
+  contents: read
+
 jobs:
   test:
     # A aplicacao e Windows-only (DPAPI via pywin32, instalador NSIS).

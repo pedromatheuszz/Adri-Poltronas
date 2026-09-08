@@ -70,6 +70,48 @@ function _json(corpo) {
 }
 
 
+// --- Uma escrita de cada vez, por registro ------------------------------------
+// Nenhum botao de escrita travava nada: um duplo clique, ou um Enter repetido
+// enquanto a requisicao viajava, disparava duas.
+//
+// O backend passou a recusar a segunda -- as transicoes viraram UPDATE
+// condicional a situacao atual, e a baixa de parcela idem. Isso fecha a
+// duplicidade no banco, que era o risco caro. Mas resolve so metade: sem
+// travar aqui, o operador leva um 409 vermelho por ter clicado duas vezes.
+// Trocar uma falha silenciosa por uma confusa nao e progresso.
+//
+// A chave carrega o ID do registro, e nao so o nome da acao: travar "aprovar"
+// inteiro impediria aprovar dois pedidos DIFERENTES em sequencia rapida, o que
+// e uso legitimo. Faturamento e transicao compartilham a chave do pedido de
+// proposito -- as duas mexem na mesma situacao, e disparar uma enquanto a
+// outra viaja e a mesma corrida com outro nome.
+var _escritasEmVoo = new Set();
+
+function _emVoo(chave) {
+    return _escritasEmVoo.has(chave);
+}
+
+function _travar(chave) {
+    _escritasEmVoo.add(chave);
+}
+
+function _destravar(chave) {
+    _escritasEmVoo.delete(chave);
+}
+
+async function _umaDeCadaVez(chave, tarefa) {
+    if (_emVoo(chave)) return;
+    _travar(chave);
+    try {
+        return await tarefa();
+    } finally {
+        // `finally`, e nao o fim do `try`: se a rede cair no meio, a acao
+        // precisa voltar a ser possivel para o operador tentar de novo.
+        _destravar(chave);
+    }
+}
+
+
 // =============================================================================
 // Produtos
 // =============================================================================
@@ -255,6 +297,7 @@ async function abrirFormularioPedido(pedidoId) {
         // alteracao. A regra vem do backend, em `editavel`.
         _travarFormularioPedido(!pedido.editavel);
         _renderizarItens(pedido);
+        _renderizarParcelas(pedido);
         _renderizarAcoesPedido(pedido);
         abrirModal('modalPedido');
     } catch (erro) {
@@ -301,6 +344,89 @@ function _renderizarItens(pedido) {
         '<option value="">Selecione...</option>' + produtos.map(function (p) {
             return '<option value="' + p.id + '">' + escaparHtml(p.codigo + ' - ' + p.descricao) + '</option>';
         }).join('');
+}
+
+var _ROTULO_PARCELA = {
+    Recebido: 'Recebida',
+    Pendente: 'Pendente',
+    Cancelado: 'Cancelada'
+};
+
+/**
+ * Parcelas a receber, dentro do proprio pedido.
+ *
+ * O bloco so aparece quando existem parcelas -- ou seja, depois do
+ * faturamento. Antes disso ele nao teria o que dizer.
+ *
+ * `em_atraso` vem calculado do backend e NAO e o status gravado: o status diz
+ * o que o operador declarou, `em_atraso` diz o que o calendario diz. Marcar
+ * 'Atrasado' no banco exigiria uma rotina passando meia-noite, e ate ela rodar
+ * a tela mentiria.
+ */
+function _renderizarParcelas(pedido) {
+    var bloco = document.getElementById('pedidoBlocoParcelas');
+    var corpo = document.getElementById('tabelaParcelasPedido');
+    var resumo = document.getElementById('pedidoResumoParcelas');
+    if (!bloco || !corpo) return;
+
+    var parcelas = pedido.parcelas || [];
+    bloco.hidden = !parcelas.length;
+    if (!parcelas.length) return;
+
+    corpo.innerHTML = parcelas.map(function (p) {
+        var situacao = escaparHtml(_ROTULO_PARCELA[p.status] || p.status || '');
+        if (p.em_atraso) situacao += ' <span class="badge badge-perigo">em atraso</span>';
+
+        var acao = '';
+        if (p.status === 'Pendente') {
+            acao = '<button type="button" class="btn btn-sucesso btn-sm" ' +
+                   'data-parcela-receber="' + p.parcela + '">Receber</button>';
+        } else if (p.status === 'Recebido') {
+            acao = '<button type="button" class="btn btn-secundario btn-sm" ' +
+                   'data-parcela-desfazer="' + p.parcela + '">Desfazer</button>';
+        }
+
+        var quando = p.status === 'Recebido' && p.data_pagamento
+            ? '<br><small>em ' + escaparHtml(_dataBR(p.data_pagamento)) + '</small>'
+            : '';
+
+        return '<tr>' +
+            '<td class="centro">' + escaparHtml(String(p.parcela)) + '/' +
+                escaparHtml(String(p.total_parcelas)) + '</td>' +
+            '<td>' + escaparHtml(_dataBR(p.data_vencimento)) + '</td>' +
+            '<td class="direita">' + _brl(p.valor) + '</td>' +
+            '<td>' + situacao + quando + '</td>' +
+            '<td class="col-acoes">' + acao + '</td></tr>';
+    }).join('');
+
+    var recebido = 0, aberto = 0;
+    parcelas.forEach(function (p) {
+        var centavos = p.valor_centavos || 0;
+        if (p.status === 'Recebido') recebido += centavos;
+        else if (p.status !== 'Cancelado') aberto += centavos;
+    });
+    // `formatarReal` e nao `_brl`: `_brl` espera o objeto {centavos, formatado}
+    // que a API manda, e aqui a soma foi feita na tela.
+    resumo.innerHTML =
+        '<div><dt>Recebido</dt><dd>' + formatarReal(recebido / 100) + '</dd></div>' +
+        '<div class="pedido-total-final"><dt>Em aberto</dt><dd>' +
+            formatarReal(aberto / 100) + '</dd></div>';
+}
+
+async function _mudarStatusDaParcela(parcela, status) {
+    var pedidoId = document.getElementById('pedId').value;
+    if (!pedidoId) return;
+    await _umaDeCadaVez('parcela:' + pedidoId + ':' + parcela, async function () {
+        try {
+            await _pedirApi('/api/pedidos/' + pedidoId + '/parcelas/' + parcela,
+                            Object.assign(_json({ status: status }), { method: 'PATCH' }));
+            exibirToast('Parcela ' + parcela + ' atualizada.');
+            await abrirFormularioPedido(pedidoId);
+            carregarPedidos();
+        } catch (erro) {
+            exibirToast(erro.message, 'error');
+        }
+    });
 }
 
 /**
@@ -407,14 +533,16 @@ async function transicionarPedido(destino) {
     }
 
     var acao = ACAO_PEDIDO[destino];
-    try {
-        await _pedirApi('/api/pedidos/' + pedidoId + '/' + acao.rota, _json({}));
-        exibirToast('Pedido ' + (SITUACAO_PEDIDO[destino] || {}).rotulo.toLowerCase() + '.');
-        carregarPedidos();
-        await abrirFormularioPedido(pedidoId);
-    } catch (erro) {
-        exibirToast(erro.message, 'error');
-    }
+    await _umaDeCadaVez('pedido:' + pedidoId, async function () {
+        try {
+            await _pedirApi('/api/pedidos/' + pedidoId + '/' + acao.rota, _json({}));
+            exibirToast('Pedido ' + (SITUACAO_PEDIDO[destino] || {}).rotulo.toLowerCase() + '.');
+            carregarPedidos();
+            await abrirFormularioPedido(pedidoId);
+        } catch (erro) {
+            exibirToast(erro.message, 'error');
+        }
+    });
 }
 
 function abrirFaturamento() {
@@ -435,25 +563,40 @@ function _atualizarAvisoFaturamento() {
     var parcelas = parseInt(document.getElementById('fatParcelas').value, 10) || 1;
     document.getElementById('faturamentoEfeito').textContent =
         'Vai gerar ' + parcelas + (parcelas === 1 ? ' parcela' : ' parcelas') +
-        ' a receber na aba Pagamentos. O pedido passa a faturado e nao aceita mais alteracao.';
+        ' a receber, listadas no proprio pedido. O pedido passa a faturado e ' +
+        'nao aceita mais alteracao de itens.';
 }
 
+// Reentrancia do faturamento.
+//
 async function faturar(evento) {
     evento.preventDefault();
+    if (_emVoo('pedido:' + document.getElementById('fatPedidoId').value)) return;
+
     var pedidoId = document.getElementById('fatPedidoId').value;
     var corpo = {
         parcelas: parseInt(document.getElementById('fatParcelas').value, 10) || 1,
         primeiro_vencimento: document.getElementById('fatPrimeiroVencimento').value,
         forma_pagamento: document.getElementById('fatFormaPagamento').value
     };
+    var botao = document.querySelector('#formFaturamento button[type="submit"]');
+    var rotulo = botao ? botao.textContent : '';
+
+    _travar('pedido:' + pedidoId);
+    if (botao) { botao.disabled = true; botao.textContent = 'Faturando...'; }
     try {
         var pedido = await _pedirApi('/api/pedidos/' + pedidoId + '/faturamento', _json(corpo));
         fecharModal('modalFaturamento');
-        exibirToast((pedido.parcelas || []).length + ' parcela(s) gerada(s) em Pagamentos.');
+        exibirToast((pedido.parcelas || []).length + ' parcela(s) gerada(s) no pedido.');
         carregarPedidos();
         await abrirFormularioPedido(pedidoId);
     } catch (erro) {
         exibirToast(erro.message, 'error');
+    } finally {
+        // `finally` e nao o fim do `try`: se a rede cair no meio, o botao
+        // precisa voltar a funcionar para o operador tentar de novo.
+        _destravar('pedido:' + pedidoId);
+        if (botao) { botao.disabled = false; botao.textContent = rotulo; }
     }
 }
 
@@ -547,9 +690,15 @@ function renderizarAgenda(entregas) {
                 '<div class="tabela-acoes">' + pedido + acoes + '</div>' +
                 '</li>';
         }).join('');
+        // `rotulo.titulo` e `_dataBR(dia)` passam por `escaparHtml` como todo o
+        // resto do arquivo. Eram a unica excecao a regra: 'Hoje'/'Amanha' sao
+        // literais e a data vem validada como AAAA-MM-DD, entao exploracao e
+        // implausivel -- mas uma linha herdada de versao anterior pode conter
+        // outra coisa, e uma excecao a uma regra consistente e o lugar onde o
+        // proximo defeito se instala sem ninguem notar.
         return '<section class="card agenda-dia ' + rotulo.classe + '">' +
-            '<h3 class="agenda-dia-titulo">' + rotulo.titulo +
-            (rotulo.comData ? '<small>' + _dataBR(dia) + '</small>' : '') +
+            '<h3 class="agenda-dia-titulo">' + escaparHtml(rotulo.titulo) +
+            (rotulo.comData ? '<small>' + escaparHtml(_dataBR(dia)) + '</small>' : '') +
             '<small class="agenda-contagem">' + porDia[dia].length +
             (porDia[dia].length === 1 ? ' entrega' : ' entregas') + '</small></h3>' +
             '<ul class="agenda-lista">' + linhas + '</ul></section>';
@@ -606,15 +755,17 @@ async function salvarEntrega(evento) {
 }
 
 async function mudarSituacaoEntrega(entregaId, destino) {
-    try {
-        await _pedirApi('/api/entregas/' + entregaId + '/status',
-            { method: 'PUT', headers: CABECALHOS_JSON, body: JSON.stringify({ status: destino }) });
-        exibirToast('Entrega atualizada.');
-        carregarEntregas();
-        carregarNotificacoes();
-    } catch (erro) {
-        exibirToast(erro.message, 'error');
-    }
+    await _umaDeCadaVez('entrega:' + entregaId, async function () {
+        try {
+            await _pedirApi('/api/entregas/' + entregaId + '/status',
+                { method: 'PUT', headers: CABECALHOS_JSON, body: JSON.stringify({ status: destino }) });
+            exibirToast('Entrega atualizada.');
+            carregarEntregas();
+            carregarNotificacoes();
+        } catch (erro) {
+            exibirToast(erro.message, 'error');
+        }
+    });
 }
 
 
@@ -673,6 +824,10 @@ function registrarEventosComerciais() {
             abrirFormularioEntrega(_pedidoAberto);
         } else if (alvo.dataset.entrega) {
             mudarSituacaoEntrega(parseInt(alvo.dataset.entrega, 10), alvo.dataset.para);
+        } else if (alvo.dataset.parcelaReceber) {
+            _mudarStatusDaParcela(parseInt(alvo.dataset.parcelaReceber, 10), 'Recebido');
+        } else if (alvo.dataset.parcelaDesfazer) {
+            _mudarStatusDaParcela(parseInt(alvo.dataset.parcelaDesfazer, 10), 'Pendente');
         }
     });
 }

@@ -24,19 +24,19 @@ o que dá para sustentar honestamente, não o de uma equipe dedicada.
 |---|---|
 | ✅ | O backend Flask (`backend/`) e as APIs que ele expõe |
 | ✅ | O processo principal do Electron (`electron/`) e a configuração da janela |
-| ✅ | O tratamento de credenciais: Asaas, Microsoft, Gemini |
+| ✅ | O tratamento de credenciais: Microsoft, Gemini, Mercado Pago |
 | ✅ | O banco local e os backups |
 | ✅ | A cadeia de build e o instalador |
 | ❌ | O aplicativo `.NET/Avalonia` (`dotnet/`) — exploração arquitetural, não distribuída |
 | ❌ | A janela Qt (`qt-app/`) — interface alternativa, não distribuída |
-| ❌ | Serviços de terceiros (Asaas, Microsoft Graph, ViaCEP, Nominatim) — relate a eles |
+| ❌ | Serviços de terceiros (Microsoft Graph, ViaCEP, Nominatim, Mercado Pago) — relate a eles |
 
 ## Versões suportadas
 
 | Versão | Situação |
 |---|---|
-| 1.1.x | Suportada |
-| < 1.1 | Sem suporte |
+| 1.5.x | Suportada |
+| < 1.5 | Sem suporte |
 
 ## O modelo de ameaça, e seus limites
 
@@ -58,11 +58,18 @@ computador, e isso define o que é defensável:
   valores sensíveis removidos.
 - **Janela isolada**: `contextIsolation`, sandbox, sem integração com Node,
   navegação externa bloqueada.
-- **Webhook do Asaas fail closed**: sem token configurado, ele recusa tudo.
-- **Segredos fora do repositório e cifrados em repouso**: as chaves do Asaas
-  e do Gemini vivem em `%APPDATA%\AdriPoltronas\.segredos`, protegidas por
-  DPAPI. Uma chave em texto no `.env` é migrada automaticamente na próxima
-  abertura.
+- **Nenhuma rota chega de fora.** Desde a 1.5.0 não há webhook: a
+  verificação do pagamento da licença é feita perguntando ao Mercado Pago, de
+  dentro para fora. O conjunto de rotas isentas das regras de tráfego local
+  está vazio.
+- **Segredos fora do repositório e cifrados em repouso**: o `MP_ACCESS_TOKEN`
+  e a `GEMINI_API_KEY` vivem em `%APPDATA%\AdriPoltronas\.segredos`,
+  protegidos por DPAPI. Uma chave em texto no `.env` é migrada automaticamente
+  na próxima abertura, e a cópia em texto claro é descartada depois que o cofre
+  é relido e conferido.
+- **Allowlist de contas, quando configurada.** `ADRI_CONTAS_AUTORIZADAS`
+  restringe quais contas Microsoft destravam a base. Vazia, qualquer conta
+  entra — ver a limitação correspondente abaixo.
 
 ### O que **não** é tratado — e por quê
 
@@ -78,10 +85,20 @@ computador, e isso define o que é defensável:
   endereço e CEP de clientes reais. Um disco sem BitLocker, roubado, entrega
   tudo. Cifrar exigiria SQLCipher e uma chave que o usuário teria de digitar a
   cada abertura — uma decisão de produto que ainda não foi tomada.
-- **Não há usuários nem permissões.** Quem abre o aplicativo pode tudo. A
-  autenticação existente é o OAuth da Microsoft, que serve à integração com o
-  OneDrive e foi indevidamente reaproveitada como identidade — está na lista
-  de correções.
+- **Não há papéis nem permissões.** Quem abre o aplicativo pode tudo:
+  faturar, restaurar backup e baixar o banco completo exigem exatamente a
+  mesma permissão que listar clientes. A autenticação é o OAuth da Microsoft,
+  que serve à integração com o OneDrive e foi reaproveitada como identidade.
+  Desde a 1.5.1 é possível restringir *quais* contas entram
+  (`ADRI_CONTAS_AUTORIZADAS`), o que fecha o caso do colaborador que conecta a
+  conta pessoal — mas continua sendo um único nível de privilégio. Identidade
+  local própria e separação por papéis seguem na lista de correções.
+
+- **O controle de licença é local, e um controle local é contornável.** O
+  estado vive em arquivo cifrado por DPAPI e na tabela `licenca`, reconciliados
+  sempre pelo lado mais restritivo, com marca-d'água monotônica contra recuo do
+  relógio. Isso resiste a acidente e a tentativa casual, não a alguém decidido
+  a editar o próprio banco.
 - **O aplicativo não é assinado digitalmente.** O Windows exibe o aviso do
   SmartScreen na instalação.
 - **Vários computadores compartilhando a mesma base** não são suportados. O

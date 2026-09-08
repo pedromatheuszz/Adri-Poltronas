@@ -4,13 +4,11 @@ import logging
 
 import security
 import notificacoes_db
-from erp.core import dinheiro
 from erp.core.auditoria import registrar_evento
 from erp.core.schema_fallback import garantir_schema_fallback
 from notificacoes_db import MAX_NOTIFICACOES_POR_TIPO  # noqa: F401
 
 log_db = logging.getLogger("adri.db")
-
 
 
 def obter_caminho_banco() -> str:
@@ -143,7 +141,7 @@ def contar_clientes(busca='') -> int:
     filtro, parametros = _filtro_de_busca(busca)
     with conectar() as conexao:
         return conexao.execute(
-            f'SELECT COUNT(*) FROM clientes WHERE ativo=1{filtro}', parametros
+            f'SELECT COUNT(*) FROM clientes WHERE ativo=1{filtro}', parametros  # noqa: S608 - fragmento constante do proprio codigo, nunca entrada do usuario
         ).fetchone()[0]
 
 
@@ -160,7 +158,7 @@ def listar_clientes(busca='', limite=None, deslocamento=0):
     a resposta e parcial.
     """
     filtro, parametros = _filtro_de_busca(busca)
-    sql = f'SELECT * FROM clientes WHERE ativo=1{filtro} ORDER BY id DESC'
+    sql = f'SELECT * FROM clientes WHERE ativo=1{filtro} ORDER BY id DESC'  # noqa: S608 - fragmento constante do proprio codigo, nunca entrada do usuario
     if limite is not None:
         sql += ' LIMIT ? OFFSET ?'
         parametros = parametros + [int(limite), int(deslocamento or 0)]
@@ -204,6 +202,44 @@ def obter_cliente_por_id(id_cliente):
         if not linha:
             return None
         return dict(linha)
+
+
+# Quantos ids cabem num IN. O SQLite aceita 999 parametros por padrao (32766
+# nas versoes recentes), e a exportacao vem de uma selecao feita a mao na tela
+# -- ninguem marca mil clientes de uma vez. Cortar aqui evita que uma chamada
+# construida em outro lugar derrube a consulta com "too many SQL variables".
+MAX_IDS_POR_CONSULTA = 900
+
+
+def listar_clientes_por_ids(ids):
+    """
+    Clientes ativos entre os ids informados, na ordem em que aparecem na lista.
+
+    A exportacao carregava a BASE INTEIRA e filtrava em Python para ficar com N
+    linhas -- custo proporcional ao total de clientes para exportar tres. Aqui o
+    filtro vai ao banco, que e onde ha indice.
+
+    A ordem da lista e preservada porque a planilha sai na ordem em que o
+    operador selecionou; `ORDER BY id` reordenaria sem motivo.
+    """
+    numeros = []
+    for bruto in (ids or []):
+        try:
+            numeros.append(int(bruto))
+        except (TypeError, ValueError):
+            continue
+    if not numeros:
+        return []
+
+    marcadores = ','.join('?' * len(numeros[:MAX_IDS_POR_CONSULTA]))
+    with conectar() as conexao:
+        linhas = conexao.execute(
+            f'SELECT * FROM clientes WHERE ativo=1 AND id IN ({marcadores})',  # noqa: S608 - fragmento constante do proprio codigo, nunca entrada do usuario
+            numeros[:MAX_IDS_POR_CONSULTA],
+        ).fetchall()
+
+    por_id = {linha['id']: dict(linha) for linha in linhas}
+    return [por_id[i] for i in numeros if i in por_id]
 
 
 def atualizar_cliente(id_cliente, nome, cep, rua, bairro, cidade, entrega_retirada, observacoes='') -> int:
@@ -258,14 +294,102 @@ def atualizar_cliente(id_cliente, nome, cep, rua, bairro, cidade, entrega_retira
         return 1
 
 
+class ClienteTemVinculos(Exception):
+    """
+    Exclusao recusada porque o cliente tem pedido em aberto ou valor a receber.
+
+    O blueprint traduz para 409: o pedido e valido, o cliente existe -- o que
+    nao serve e o estado em que ele esta.
+    """
+
+
+# Status de parcela que representam dinheiro ainda a entrar.
+#
+# O codigo atual NUNCA grava 'Atrasado': o atraso e derivado do vencimento
+# (`em_atraso`), nao declarado -- gravar seria manter duas verdades sobre o
+# mesmo fato. 'Atrasado' entra aqui so para cobrir linha gravada por versao
+# anterior: uma parcela vencida e mais devida, nao menos.
+STATUS_A_RECEBER = ('Pendente', 'Atrasado')
+
+
+def _vinculos_que_impedem_exclusao(conexao, id_cliente) -> tuple:
+    """
+    Conta o que ficaria orfao se o cliente fosse inativado agora.
+
+    Pedido faturado e cancelado NAO contam: o primeiro ja produziu as parcelas
+    (que sao contadas a parte) e o segundo nao espera mais nada. O que trava e
+    trabalho em andamento -- rascunho, aberto, aprovado -- e dinheiro a receber.
+
+    Devolve `(abertos, a_receber, orfas)`. As orfas sao contadas separado
+    porque o operador NAO consegue resolve-las pela interface: as parcelas sao
+    lidas e baixadas dentro do pedido que as emitiu, entao uma parcela sem
+    `pedido_id` nao aparece em tela nenhuma. Nenhum caminho de escrita atual
+    produz uma dessas -- `inserir_parcela` exige o pedido e e o unico INSERT em
+    `pagamentos` do backend --, mas bancos anteriores a 1.5.0 tem linhas assim,
+    criadas pelo cadastro avulso de pagamento que existia entao.
+
+    Sem essa separacao o cliente ficava permanentemente inexcluivel e a
+    mensagem mandava "conclua ou cancele" algo que ele nao tinha como achar.
+    """
+    marcadores = ", ".join("?" * len(STATUS_A_RECEBER))
+    abertos = conexao.execute(
+        "SELECT COUNT(*) FROM pedidos WHERE cliente_id = ? "
+        "AND situacao NOT IN ('cancelado', 'faturado')", (id_cliente,)
+    ).fetchone()[0]
+    a_receber = conexao.execute(
+        f"SELECT COUNT(*) FROM pagamentos WHERE cliente_id = ? "  # noqa: S608 - marcadores sao '?', o valor vai parametrizado
+        f"AND status IN ({marcadores}) AND pedido_id IS NOT NULL",
+        (id_cliente, *STATUS_A_RECEBER)
+    ).fetchone()[0]
+    orfas = conexao.execute(
+        f"SELECT COUNT(*) FROM pagamentos WHERE cliente_id = ? "  # noqa: S608 - marcadores sao '?', o valor vai parametrizado
+        f"AND status IN ({marcadores}) AND pedido_id IS NULL",
+        (id_cliente, *STATUS_A_RECEBER)
+    ).fetchone()[0]
+    return abertos, a_receber, orfas
+
+
 def excluir_cliente(id_cliente) -> int:
-    """Inativa o cliente sem apagar seu historico ou vinculos empresariais."""
+    """
+    Inativa o cliente sem apagar seu historico ou vinculos empresariais.
+
+    Recusa quando ha pedido em aberto ou parcela a receber. Antes disso a
+    inativacao passava sempre, e o resultado era um limbo: o cliente sumia de
+    todas as listas, mas o pedido faturado continuava aparecendo com o nome
+    dele (que e snapshot em `pedidos.cliente_nome`) e as parcelas seguiam
+    pendentes, invisiveis. Pior, tentar editar aquele pedido depois falhava com
+    404 "Cliente nao encontrado", porque a validacao do cabecalho exige cliente
+    ativo -- o pedido existia, era listado, e nao aceitava alteracao por um
+    motivo que nao tinha nada a ver com ele.
+    """
     with conectar() as conexao:
         antigo = conexao.execute(
             'SELECT * FROM clientes WHERE id=? AND ativo=1', (id_cliente,)
         ).fetchone()
         if not antigo:
             return 0
+
+        abertos, a_receber, orfas = _vinculos_que_impedem_exclusao(conexao, id_cliente)
+        if abertos or a_receber or orfas:
+            partes = []
+            if abertos:
+                partes.append(f"{abertos} pedido(s) em aberto")
+            if a_receber:
+                partes.append(f"{a_receber} parcela(s) a receber")
+            if orfas:
+                partes.append(f"{orfas} parcela(s) antiga(s) sem pedido")
+            mensagem = f"{antigo['nome']} tem {' e '.join(partes)}. "
+            if abertos or a_receber:
+                mensagem += "Conclua ou cancele antes de excluir."
+            if orfas:
+                # Sem esta frase o operador procura para sempre uma tela que
+                # nao existe: parcela sem pedido nao aparece em lugar nenhum.
+                mensagem = mensagem.rstrip() + (
+                    " As parcelas sem pedido vieram de uma versao anterior e nao"
+                    " aparecem na interface; peca suporte para encerra-las."
+                )
+            raise ClienteTemVinculos(mensagem.strip())
+
         cursor = conexao.execute(
             "UPDATE clientes SET ativo=0, excluido_em=datetime('now', 'localtime'), "
             "atualizado_em=datetime('now', 'localtime') WHERE id=? AND ativo=1",
@@ -412,357 +536,6 @@ def obter_caminho_banco_absoluto() -> str:
     return os.path.abspath(DB_PATH)
 
 
-def listar_pagamentos(cliente_id=None, status=None):
-    with conectar() as conexao:
-        query = 'SELECT * FROM pagamentos WHERE 1=1'
-        params = []
-        if cliente_id:
-            query += ' AND cliente_id=?'
-            params.append(cliente_id)
-        if status:
-            query += ' AND status=?'
-            params.append(status)
-        query += ' ORDER BY id DESC'
-        linhas = conexao.execute(query, params).fetchall()
-    return [dict(linha) for linha in linhas]
-
-
-def salvar_pagamento(cliente_id, cliente_nome, valor, descricao, data_vencimento,
-                     tipo_pagamento='Pix', status='Pendente', data_pagamento='',
-                     valor_centavos=None):
-    """
-    Cria um novo pagamento e retorna o ID.
-
-    `status`/`data_pagamento` sao parametros porque a tela de recebimento
-    registra dinheiro que JA entrou. Fixar 'Pendente' aqui fazia esse
-    lancamento nascer vencido e ser contado como atrasado no mesmo instante.
-
-    `valor_centavos` e a fonte de verdade quando informado -- e o caso do
-    faturamento de pedido, que ja tem o valor rateado em centavos exatos e nao
-    deve passa-lo por float. Quando so `valor` chega (tela de recebimento
-    avulso), os centavos sao derivados dele.
-    """
-    centavos = dinheiro.para_centavos(valor) if valor_centavos is None else int(valor_centavos)
-    valor = round(centavos / 100, 2)
-
-    with conectar() as conexao:
-        conexao.execute(
-            'INSERT INTO pagamentos (cliente_id, cliente_nome, valor, valor_centavos, descricao, status, data_vencimento, tipo_pagamento, data_pagamento) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            (cliente_id, cliente_nome, valor, centavos, descricao, status, data_vencimento, tipo_pagamento, data_pagamento),
-        )
-        pagamento_id = conexao.execute('SELECT last_insert_rowid()').fetchone()[0]
-        acao = 'Recebimento registrado' if status == 'Recebido' else 'Cobranca criada'
-        conexao.execute(
-            'INSERT INTO historico (cliente_id, cliente_nome, acao, detalhes) VALUES (?, ?, ?, ?)',
-            (cliente_id, cliente_nome, 'PAGAMENTO', f'{acao}: R$ {valor:.2f} ({tipo_pagamento})'),
-        )
-        novo = conexao.execute('SELECT * FROM pagamentos WHERE id=?', (pagamento_id,)).fetchone()
-        registrar_evento(
-            conexao,
-            acao="financeiro.recebivel.criado",
-            entidade="pagamento",
-            entidade_id=pagamento_id,
-            valores_novos=novo,
-        )
-        return pagamento_id
-
-
-def atualizar_pagamento(pagamento_id, **kwargs):
-    """Atualiza campos de um pagamento existente."""
-    campos_permitidos = {
-        'status', 'data_pagamento', 'descricao',
-        'valor', 'valor_centavos', 'data_vencimento', 'tipo_pagamento',
-        'cliente_nome',
-    }
-    campos = {k: v for k, v in kwargs.items() if k in campos_permitidos and v is not None}
-    if not campos:
-        return 0
-
-    # As duas colunas de dinheiro andam juntas. Deixar `valor` mudar sozinho
-    # faria `valor_centavos` guardar o numero antigo -- e a divergencia seria
-    # silenciosa ate alguem comparar os dois em um relatorio.
-    if 'valor' in campos and 'valor_centavos' not in campos:
-        campos['valor_centavos'] = dinheiro.para_centavos(campos['valor'])
-    elif 'valor_centavos' in campos and 'valor' not in campos:
-        campos['valor'] = round(int(campos['valor_centavos']) / 100, 2)
-    sets = ', '.join(f'{k}=?' for k in campos)
-    vals = list(campos.values()) + [pagamento_id]
-    with conectar() as conexao:
-        antigo = conexao.execute(
-            'SELECT * FROM pagamentos WHERE id=?', (pagamento_id,)
-        ).fetchone()
-        if not antigo:
-            return 0
-        conexao.execute(f'UPDATE pagamentos SET {sets} WHERE id=?', vals)
-        linhas = conexao.execute('SELECT changes()').fetchone()[0]
-        if 'status' in campos and campos['status'] == 'Recebido':
-            pagamento = conexao.execute('SELECT * FROM pagamentos WHERE id=?', (pagamento_id,)).fetchone()
-            if pagamento:
-                conexao.execute(
-                    'INSERT INTO historico (cliente_id, cliente_nome, acao, detalhes) VALUES (?, ?, ?, ?)',
-                    (pagamento['cliente_id'], pagamento['cliente_nome'], 'PAGAMENTO',
-                     f'Pagamento confirmado: R$ {pagamento["valor"]:.2f}'),
-                )
-        if linhas:
-            novo = conexao.execute(
-                'SELECT * FROM pagamentos WHERE id=?', (pagamento_id,)
-            ).fetchone()
-            registrar_evento(
-                conexao,
-                acao="financeiro.recebivel.atualizado",
-                entidade="pagamento",
-                entidade_id=pagamento_id,
-                valores_anteriores=antigo,
-                valores_novos=novo,
-            )
-        return linhas
-
-
-def registrar_observacao_de_pagamento(pagamento_id: int, observacao: str) -> None:
-    """
-    Anexa uma nota ao historico e a auditoria do pagamento.
-
-    Usado quando uma decisao humana contraria o que o sistema apuraria
-    sozinho -- confirmar na mao uma cobranca que o gateway ainda mostra em
-    aberto, por exemplo. Sem o registro, o numero fica certo na tela e
-    inexplicavel depois.
-    """
-    with conectar() as conexao:
-        pagamento = conexao.execute(
-            'SELECT * FROM pagamentos WHERE id=?', (pagamento_id,)
-        ).fetchone()
-        if not pagamento:
-            return
-        conexao.execute(
-            'INSERT INTO historico (cliente_id, cliente_nome, acao, detalhes) '
-            'VALUES (?, ?, ?, ?)',
-            (pagamento['cliente_id'], pagamento['cliente_nome'], 'PAGAMENTO',
-             observacao[:500]),
-        )
-        registrar_evento(
-            conexao,
-            acao="financeiro.recebivel.observacao_manual",
-            entidade="pagamento",
-            entidade_id=pagamento_id,
-            valores_novos={"observacao": observacao[:500]},
-        )
-
-
-# Status locais que ainda representam cobranca ABERTA, e portanto cancelavel.
-#
-# 'Atrasado' estava de fora, e nao devia: vencer nao quita nem cancela nada --
-# o cliente continua com um boleto ou um Pix vivo. O ERP recusava o
-# cancelamento justamente das cobrancas mais antigas, que sao as que mais
-# precisam ser encerradas.
-STATUS_CANCELAVEIS = ("Pendente", "Atrasado")
-
-
-def excluir_pagamento(pagamento_id) -> int:
-    """
-    Cancela uma cobranca aberta marcando-a como 'Cancelado'.
-
-    Nao apaga a linha, e a mudanca e deliberada. Registro financeiro apagado
-    e registro que nao existe: some do extrato, some da conferencia com o
-    Asaas (que continua conhecendo aquela cobranca pelo `asaas_payment_id`) e
-    some da propria trilha de auditoria, que passa a ter um evento de
-    cancelamento apontando para um id sem destino.
-
-    'Cancelado' ja era um status do dominio -- as metricas do dashboard e os
-    filtros da tela ja o tratavam. O que faltava era o caminho de cancelamento
-    usa-lo.
-
-    O nome da funcao fica como esta por ser o contrato que a rota DELETE e os
-    chamadores conhecem; o docstring e o que descreve o comportamento.
-    """
-    with conectar() as conexao:
-        pagamento = conexao.execute('SELECT * FROM pagamentos WHERE id=?', (pagamento_id,)).fetchone()
-        marcadores = ",".join("?" for _ in STATUS_CANCELAVEIS)
-        cursor = conexao.execute(
-            f"UPDATE pagamentos SET status='Cancelado' "
-            f"WHERE id=? AND status IN ({marcadores})",
-            (pagamento_id, *STATUS_CANCELAVEIS),
-        )
-        if pagamento and cursor.rowcount > 0:
-            conexao.execute(
-                'INSERT INTO historico (cliente_id, cliente_nome, acao, detalhes) VALUES (?, ?, ?, ?)',
-                (pagamento['cliente_id'], pagamento['cliente_nome'], 'PAGAMENTO',
-                 f'Cobranca cancelada: R$ {pagamento["valor"]:.2f}'),
-            )
-            novo = conexao.execute(
-                'SELECT * FROM pagamentos WHERE id=?', (pagamento_id,)
-            ).fetchone()
-            registrar_evento(
-                conexao,
-                acao="financeiro.recebivel.cancelado",
-                entidade="pagamento",
-                entidade_id=pagamento_id,
-                valores_anteriores=pagamento,
-                valores_novos=novo,
-            )
-        return cursor.rowcount
-
-
-def obter_pagamento_por_id(pagamento_id):
-    """Retorna um pagamento pelo ID."""
-    with conectar() as conexao:
-        linha = conexao.execute('SELECT * FROM pagamentos WHERE id=?', (pagamento_id,)).fetchone()
-        return dict(linha) if linha else None
-
-# Cobrancas que ainda representam dinheiro a entrar. 'Atrasado' continua
-# sendo um valor a receber: vencer nao quita nem cancela a cobranca. Os
-# dois blocos de metricas do dashboard leem daqui para nao divergirem.
-_STATUS_A_RECEBER = "('Pendente', 'Atrasado')"
-
-# Soma de dinheiro, em CENTAVOS INTEIROS.
-#
-# Todo relatorio financeiro somava `SUM(valor)` -- a coluna REAL. Escrever em
-# centavos e ler em ponto flutuante desfaz metade do trabalho: somar mil
-# parcelas de 33,33 em IEEE 754 acumula erro, e o total do dashboard nao bate
-# com a soma das linhas que o operador ve na tela.
-#
-# `COALESCE` cobre a linha que ainda nao passou pelo backfill -- um banco em
-# migracao, ou uma gravacao feita por versao anterior. Nesse caso deriva dos
-# reais, com ROUND antes do CAST: `CAST(33.335 * 100 AS INTEGER)` trunca para
-# 3333 em vez de arredondar para 3334, e um centavo por linha nao e
-# arredondamento, e erro.
-_SOMA_EM_CENTAVOS = (
-    "COALESCE(SUM(COALESCE(valor_centavos, "
-    "CAST(ROUND(COALESCE(valor, 0) * 100) AS INTEGER))), 0)"
-)
-
-
-def _reais(centavos) -> float:
-    """
-    Converte na BORDA, e so na borda.
-
-    A API continua falando em reais -- o frontend, os graficos e as planilhas
-    dependem disso. O que muda e onde a divisao acontece: uma vez, sobre o
-    total ja somado, em vez de mil vezes durante a soma.
-    """
-    return round(int(centavos or 0) / 100, 2)
-
-
-def obter_metricas_pagamentos():
-    """Retorna metricas de pagamentos para o dashboard."""
-    with conectar() as conexao:
-        total_recebido = conexao.execute(
-            f"SELECT {_SOMA_EM_CENTAVOS} FROM pagamentos WHERE status='Recebido'"
-        ).fetchone()[0]
-        total_pendente = conexao.execute(
-            f"SELECT {_SOMA_EM_CENTAVOS} FROM pagamentos "
-            f"WHERE status IN {_STATUS_A_RECEBER}"
-        ).fetchone()[0]
-        total_atrasado = conexao.execute(
-            f"SELECT {_SOMA_EM_CENTAVOS} FROM pagamentos "
-            f"WHERE status IN {_STATUS_A_RECEBER} "
-            "AND data_vencimento != '' AND date(data_vencimento) < date('now', 'localtime')"
-        ).fetchone()[0]
-        qtd_recebido = conexao.execute(
-            "SELECT COUNT(*) FROM pagamentos WHERE status='Recebido'"
-        ).fetchone()[0]
-        qtd_pendente = conexao.execute(
-            "SELECT COUNT(*) FROM pagamentos "
-            f"WHERE status IN {_STATUS_A_RECEBER}"
-        ).fetchone()[0]
-    return {
-        'total_recebido': _reais(total_recebido),
-        'total_pendente': _reais(total_pendente),
-        'total_atrasado': _reais(total_atrasado),
-        'qtd_recebido': qtd_recebido or 0,
-        'qtd_pendente': qtd_pendente or 0,
-    }
-
-
-
-# A data efetiva de um recebimento e a de pagamento; quando ela nao foi
-# preenchida, cai para a criacao da cobranca. `date()` normaliza os dois
-# formatos que convivem na coluna: 'AAAA-MM-DD' (confirmacao manual) e
-# 'AAAA-MM-DD HH:MM:SS' (webhook do Asaas).
-_DATA_RECEBIMENTO = "date(COALESCE(NULLIF(data_pagamento, ''), criado_em))"
-
-
-def obter_metricas_financeiras(meses_historico=6):
-    """
-    Indicadores financeiros do dashboard: faturamento do mes corrente
-    comparado ao anterior, valores a receber e em atraso, ticket medio e a
-    serie mensal de receita.
-    """
-    with conectar() as conexao:
-        def receita_do_mes(deslocamento):
-            """Soma recebida no mes com `deslocamento` meses a partir do atual."""
-            return conexao.execute(
-                f"SELECT {_SOMA_EM_CENTAVOS} FROM pagamentos "
-                f"WHERE status = 'Recebido' AND strftime('%Y-%m', {_DATA_RECEBIMENTO}) = "
-                f"strftime('%Y-%m', date('now', 'localtime', ?))",
-                (f'{deslocamento} months',),
-            ).fetchone()[0] or 0
-
-        faturamento_mes = receita_do_mes(0)
-        faturamento_anterior = receita_do_mes(-1)
-
-        qtd_mes = conexao.execute(
-            f"SELECT COUNT(*) FROM pagamentos WHERE status = 'Recebido' "
-            f"AND strftime('%Y-%m', {_DATA_RECEBIMENTO}) = strftime('%Y-%m', date('now', 'localtime'))"
-        ).fetchone()[0] or 0
-
-        a_receber = conexao.execute(
-            f"SELECT {_SOMA_EM_CENTAVOS} FROM pagamentos "
-            f"WHERE status IN {_STATUS_A_RECEBER}"
-        ).fetchone()[0] or 0
-
-        em_atraso = conexao.execute(
-            f"SELECT {_SOMA_EM_CENTAVOS} FROM pagamentos "
-            "WHERE status IN ('Pendente', 'Atrasado') "
-            "AND data_vencimento != '' AND date(data_vencimento) < date('now', 'localtime')"
-        ).fetchone()[0] or 0
-
-        qtd_atraso = conexao.execute(
-            "SELECT COUNT(*) FROM pagamentos "
-            "WHERE status IN ('Pendente', 'Atrasado') "
-            "AND data_vencimento != '' AND date(data_vencimento) < date('now', 'localtime')"
-        ).fetchone()[0] or 0
-
-        # Serie mensal: consulta uma vez e preenche os meses sem receita com
-        # zero, para o grafico nao pular periodos.
-        linhas = conexao.execute(
-            f"SELECT strftime('%Y-%m', {_DATA_RECEBIMENTO}) AS mes, "
-            f"{_SOMA_EM_CENTAVOS} AS total "
-            f"FROM pagamentos WHERE status = 'Recebido' "
-            f"AND {_DATA_RECEBIMENTO} >= date('now', 'localtime', ?) "
-            f"GROUP BY mes",
-            (f'-{meses_historico - 1} months',),
-        ).fetchall()
-        por_mes = {linha['mes']: linha['total'] or 0 for linha in linhas}
-
-        meses = conexao.execute(
-            "WITH RECURSIVE seq(n) AS (SELECT 0 UNION ALL SELECT n + 1 FROM seq WHERE n < ?) "
-            "SELECT strftime('%Y-%m', date('now', 'localtime', '-' || (? - n) || ' months')) AS mes FROM seq",
-            (meses_historico - 1, meses_historico - 1),
-        ).fetchall()
-        serie = [{'mes': m['mes'], 'total': _reais(por_mes.get(m['mes'], 0))} for m in meses]
-
-    # A variacao e uma razao entre dois totais: calcula-la em centavos evita
-    # que o arredondamento para reais entre no denominador.
-    variacao = None
-    if faturamento_anterior:
-        variacao = round(((faturamento_mes - faturamento_anterior) / faturamento_anterior) * 100, 1)
-    elif faturamento_mes:
-        variacao = 100.0
-
-    return {
-        'faturamento_mes': _reais(faturamento_mes),
-        'faturamento_mes_anterior': _reais(faturamento_anterior),
-        'variacao_percentual': variacao,
-        'qtd_recebimentos_mes': qtd_mes,
-        # Divide em centavos e converte uma vez so.
-        'ticket_medio_mes': _reais(faturamento_mes // qtd_mes) if qtd_mes else 0,
-        'a_receber': _reais(a_receber),
-        'em_atraso': _reais(em_atraso),
-        'qtd_em_atraso': qtd_atraso,
-        'serie_mensal': serie,
-    }
-
 
 def obter_dados_grafico_por_tipo():
     """Retorna contagem de clientes por tipo (Entrega/Retirada) para gráfico de pizza."""
@@ -814,50 +587,6 @@ def obter_clientes_para_mapa():
             "cidade": row["cidade"] or '',
             "tipo": row["entrega_retirada"]
         } for row in linhas]
-
-
-def listar_clientes_filtrados(tipo='', cidade='', data_inicio='', data_fim=''):
-    """Retorna clientes filtrados por tipo, cidade e período para relatórios."""
-    query = 'SELECT * FROM clientes WHERE ativo=1'
-    params = []
-    if tipo:
-        query += ' AND entrega_retirada=?'
-        params.append(tipo)
-    if cidade:
-        query += ' AND cidade LIKE ?'
-        params.append(f'%{cidade}%')
-    if data_inicio:
-        query += ' AND criado_em >= ?'
-        params.append(data_inicio)
-    if data_fim:
-        query += ' AND criado_em <= ?'
-        params.append(data_fim + ' 23:59:59')
-    query += ' ORDER BY id DESC'
-    with conectar() as conexao:
-        linhas = conexao.execute(query, params).fetchall()
-    return [{
-        "id": row["id"], "nome": row["nome"], "cep": row["cep"],
-        "rua": row["rua"] or '', "bairro": row["bairro"] or '',
-        "cidade": row["cidade"] or '', "entrega_retirada": row["entrega_retirada"],
-        "observacoes": row["observacoes"] or '',
-        "criado_em": row["criado_em"] or '', "atualizado_em": row["atualizado_em"] or '',
-    } for row in linhas]
-
-
-def obter_perfis_regiao():
-    """Retorna contagem de clientes por cidade para relatório de performance."""
-    with conectar() as conexao:
-        linhas = conexao.execute(
-            "SELECT cidade, COUNT(*) as total, "
-            "SUM(CASE WHEN entrega_retirada='Entrega' THEN 1 ELSE 0 END) as entregas, "
-            "SUM(CASE WHEN entrega_retirada='Retirada' THEN 1 ELSE 0 END) as retiradas "
-            "FROM clientes WHERE ativo=1 AND cidade IS NOT NULL AND cidade != '' "
-            "GROUP BY cidade ORDER BY total DESC"
-        ).fetchall()
-    return [{
-        "cidade": row["cidade"], "total": row["total"],
-        "entregas": row["entregas"], "retiradas": row["retiradas"]
-    } for row in linhas]
 
 
 def obter_ultimos_clientes(limite=5):

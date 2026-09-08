@@ -1,13 +1,16 @@
 """
 Cliente do Mercado Pago -- usado APENAS para a licenca do proprio aplicativo.
 
-Nao confundir com `asaas.py`
-----------------------------
-O Asaas cobra os CLIENTES da Adri: locacao de poltrona, Pix e boleto do
-negocio. Este modulo cobra UMA coisa so, uma vez so: a licenca de uso do
-aplicativo, paga pela Adri ao autor. Sao contas, credenciais e ciclos de vida
-diferentes, e junta-los num modulo so significaria que um erro na cobranca da
-licenca poderia derrubar a cobranca do negocio.
+O que este modulo NAO faz
+-------------------------
+Ele nao cobra os clientes da Adri. Cobra UMA coisa so, uma vez so: a licenca
+de uso do aplicativo, paga pela Adri ao autor.
+
+A distincao importa porque ate a 1.4.2 existiu um segundo modulo (`asaas.py`)
+que cobrava o negocio -- locacao de poltrona, Pix e boleto dos clientes dela.
+Ele saiu na 1.5.0 junto com a integracao inteira. Se um dia voltar a existir
+uma cobranca do negocio, ela merece modulo, conta e credencial proprios: um
+erro na cobranca da licenca nao pode derrubar o faturamento da operacao.
 
 O limite honesto desta integracao
 ---------------------------------
@@ -26,10 +29,9 @@ fim, e nao o token principal da conta.
 
 Por que consulta, e nao webhook
 -------------------------------
-Pelo mesmo motivo que `erp/financeiro/reconciliacao.py` documenta para o
-Asaas: o Flask escuta em 127.0.0.1 e um servidor na internet nao alcanca o
-loopback da maquina do usuario. Perguntar de dentro para fora atravessa
-qualquer firewall e nao expoe nada.
+O Flask escuta em 127.0.0.1 e um servidor na internet nao alcanca o loopback
+da maquina do usuario -- nao ha endereco para o Mercado Pago chamar de volta.
+Perguntar de dentro para fora atravessa qualquer firewall e nao expoe nada.
 """
 from __future__ import annotations
 
@@ -53,10 +55,9 @@ TIMEOUT_S = 15
 
 def url_base() -> str:
     """
-    Endereco da API. Configuravel pelo mesmo motivo que `asaas.py` alterna
-    entre sandbox e producao: para conseguir exercitar o fluxo inteiro --
-    gerar a cobranca, esperar, receber a confirmacao -- sem mexer com dinheiro
-    de verdade.
+    Endereco da API. Configuravel para conseguir exercitar o fluxo inteiro --
+    gerar a cobranca, esperar, receber a confirmacao -- apontando para um
+    duble local, sem mexer com dinheiro de verdade.
 
     Vazio ou ausente significa producao. Nao ha "modo de teste" implicito: uma
     instalacao que nao configurou nada fala com o Mercado Pago de verdade, que
@@ -103,8 +104,8 @@ def _resumo_do_erro(corpo: str) -> str:
     """
     O que vai para o log quando o Mercado Pago recusa.
 
-    Mesma regra adotada em `asaas.py`: codigo e mensagem curta, nunca o corpo
-    bruto, que repete o que foi enviado.
+    Codigo e mensagem curta, nunca o corpo bruto: ele repete o que foi
+    enviado, e o que foi enviado carrega identificadores da cobranca.
     """
     try:
         detalhe = json.loads(corpo)
@@ -119,7 +120,7 @@ def _resumo_do_erro(corpo: str) -> str:
 
 def _executar(requisicao, descricao: str) -> dict:
     try:
-        with urllib.request.urlopen(requisicao, timeout=TIMEOUT_S) as resposta:
+        with urllib.request.urlopen(requisicao, timeout=TIMEOUT_S) as resposta:  # noqa: S310 - URL montada de constante do proprio codigo, sempre https
             bruto = resposta.read().decode("utf-8")
             return json.loads(bruto) if bruto else {}
     except urllib.error.HTTPError as erro:
@@ -151,7 +152,7 @@ def criar_cobranca_pix(valor_centavos: int, descricao: str, referencia: str,
         "external_reference": referencia,
         "payer": {"email": email_do_pagador or "licenca@adripoltronas.local"},
     }
-    requisicao = urllib.request.Request(
+    requisicao = urllib.request.Request(  # noqa: S310 - URL montada de constante do proprio codigo, sempre https
         f"{url_base()}/v1/payments",
         data=json.dumps(corpo).encode("utf-8"),
         # A chave de idempotencia deriva da referencia da instalacao mais um
@@ -182,7 +183,7 @@ def obter_pagamento(pagamento_id: str) -> dict:
         return {"_erro": True, "_detalhe": "Sem pagamento a consultar."}
 
     caminho = urllib.parse.quote(str(pagamento_id), safe="")
-    requisicao = urllib.request.Request(
+    requisicao = urllib.request.Request(  # noqa: S310 - URL montada de constante do proprio codigo, sempre https
         f"{url_base()}/v1/payments/{caminho}",
         headers=_cabecalhos(),
         method="GET",

@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'backend'))
 from database import (
     criar_tabela, salvar_cliente, listar_clientes, obter_cliente_por_id,
     atualizar_cliente, excluir_cliente, importar_clientes_em_lote,
-    excluir_sessao, salvar_sessao, obter_sessao, listar_pagamentos,
+    excluir_sessao, salvar_sessao, obter_sessao,
 )
 
 
@@ -82,6 +82,3 @@ def test_sessao():
     excluir_sessao()
     assert obter_sessao() is None
 
-
-def test_listar_pagamentos():
-    assert listar_pagamentos() == []

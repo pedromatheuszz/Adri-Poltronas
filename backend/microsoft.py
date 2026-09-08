@@ -40,6 +40,13 @@ VALIDADE_PADRAO_S = 3600
 
 TIMEOUT_S = 20
 
+# Desfecho de uma tentativa de renovacao. A distincao entre RECUSADO e
+# INDISPONIVEL e a razao de este modulo existir com esta forma: so a primeira
+# autoriza apagar a sessao local.
+RENOVADO = 'renovado'
+RECUSADO = 'recusado'
+INDISPONIVEL = 'indisponivel'
+
 
 def _agora() -> int:
     return int(time.time())
@@ -72,9 +79,20 @@ def renovar_token(refresh_token: str):
     """
     Troca o refresh_token por um access_token novo.
 
-    Devolve o dicionario da Microsoft em caso de sucesso, ou `None` quando a
-    renovacao e recusada (refresh_token revogado, expirado ou consentimento
-    retirado) -- situacao em que so um login novo resolve.
+    Devolve o par `(dados, motivo)`:
+
+    * `(dict, RENOVADO)`    -- a Microsoft respondeu com um token novo;
+    * `(None, RECUSADO)`    -- a Microsoft respondeu NEGANDO (refresh_token
+                               revogado, expirado, consentimento retirado).
+                               A sessao morreu de fato; so um login novo resolve;
+    * `(None, INDISPONIVEL)` -- nao houve resposta (sem rede, DNS, timeout).
+                               A sessao NAO morreu: nao da para confirmar agora.
+
+    O par existe porque o chamador precisava dessa distincao e nao a tinha: com
+    um `None` unico para os dois casos, uma queda de rede de dez segundos
+    apagava a sessao local e trancava o operador fora do proprio banco ate
+    refazer o fluxo OAuth no navegador -- justamente o oposto do funcionamento
+    offline que o produto anuncia.
     """
     payload = {
         'client_id': config.CLIENT_ID,
@@ -84,34 +102,47 @@ def renovar_token(refresh_token: str):
         'redirect_uri': config.REDIRECT_URI,
     }
     dados = urllib.parse.urlencode(payload).encode('utf-8')
-    requisicao = urllib.request.Request(config.URL_TOKEN_MICROSOFT, data=dados, method='POST')
+    requisicao = urllib.request.Request(config.URL_TOKEN_MICROSOFT, data=dados, method='POST')  # noqa: S310 - URL montada de constante do proprio codigo, sempre https
 
     try:
-        with urllib.request.urlopen(requisicao, timeout=TIMEOUT_S) as resposta:
-            return json.loads(resposta.read().decode('utf-8'))
+        with urllib.request.urlopen(requisicao, timeout=TIMEOUT_S) as resposta:  # noqa: S310 - URL montada de constante do proprio codigo, sempre https
+            return json.loads(resposta.read().decode('utf-8')), RENOVADO
     except urllib.error.HTTPError as erro:
         corpo = erro.read().decode('utf-8', errors='replace')
         # O corpo traz o motivo (invalid_grant, consent_required...). Vai para
         # o log, nunca para a resposta HTTP: ele cita identificadores da conta.
         log.warning("[RENOVACAO] Microsoft recusou (HTTP %s): %s", erro.code, corpo[:400])
-        return None
+        # HTTPError e subclasse de URLError, entao precisa vir ANTES dela.
+        # A Microsoft respondeu: a recusa e definitiva.
+        return None, RECUSADO
     except urllib.error.URLError as erro:
         # Sem rede a sessao nao morreu -- so nao da para confirmar agora.
         log.warning("[RENOVACAO] Sem conexao com a Microsoft: %s", erro.reason)
-        return None
-    except (ValueError, TimeoutError) as erro:
+        return None, INDISPONIVEL
+    except TimeoutError as erro:
+        # Estourar o timeout tambem e ausencia de resposta, nao recusa.
+        log.warning("[RENOVACAO] Microsoft nao respondeu a tempo: %s", erro)
+        return None, INDISPONIVEL
+    except ValueError as erro:
+        # Corpo 200 que nao e JSON: a Microsoft respondeu, mas com algo que nao
+        # da para usar. Nao e recusa -- tratar como recusa apagaria a sessao por
+        # causa de um portal cativo devolvendo HTML no lugar da resposta.
         log.warning("[RENOVACAO] Resposta inesperada da Microsoft: %s", erro)
-        return None
+        return None, INDISPONIVEL
 
 
 def obter_token_valido():
     """
     Devolve um access_token utilizavel, renovando quando necessario.
 
-    `None` quando nao ha sessao, quando ela expirou sem refresh_token, ou
-    quando a renovacao foi recusada. Nos dois ultimos casos a sessao local e
-    apagada, porque manter uma sessao que nao autentica e o que fazia a tela
-    mentir para o operador.
+    `None` quando nao ha sessao, quando ela expirou sem refresh_token, quando a
+    renovacao foi recusada, ou quando nao foi possivel falar com a Microsoft.
+
+    A sessao local so e apagada nos dois primeiros casos, em que se SABE que ela
+    nao autentica mais -- manter uma sessao morta e o que fazia a tela mentir
+    para o operador. Quando a Microsoft simplesmente nao responde, a sessao
+    fica de pe: o app volta a tentar na proxima chamada, e uma queda de rede
+    passageira deixa de custar um login novo no navegador.
     """
     sessao = database.obter_sessao()
     if not sessao:
@@ -127,8 +158,15 @@ def obter_token_valido():
         database.excluir_sessao()
         return None
 
-    renovado = renovar_token(refresh_token)
+    renovado, motivo = renovar_token(refresh_token)
     if not renovado or not renovado.get('access_token'):
+        if motivo == INDISPONIVEL:
+            # Nao houve resposta. Nao da para afirmar que a sessao morreu, e
+            # apagar por via das duvidas tranca o operador fora do banco local.
+            log.info("[RENOVACAO] Sem resposta da Microsoft; sessao preservada.")
+            return None
+        # Resposta HTTP 200 sem access_token e tao definitiva quanto um erro:
+        # a Microsoft respondeu e nao entregou token.
         database.excluir_sessao()
         return None
 

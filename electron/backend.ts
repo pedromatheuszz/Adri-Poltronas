@@ -1,8 +1,8 @@
 /**
  * Ciclo de vida do backend Flask.
  *
- * O Python continua sendo o backend: ele detem o schema, as migrations, a
- * integracao com o Asaas e a suite de testes. O Electron troca apenas o motor
+ * O Python continua sendo o backend: ele detem o schema, as migrations, as
+ * integracoes externas e a suite de testes. O Electron troca apenas o motor
  * de exibicao -- antes o WebView2 embutido pelo pywebview.
  */
 import { spawn, ChildProcess } from 'node:child_process';
