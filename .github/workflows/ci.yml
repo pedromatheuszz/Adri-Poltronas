@@ -431,8 +431,19 @@ jobs:
         echo "::error title=electron-builder falhou (codigo $CODIGO)::$MENSAGEM"
         exit 1
 
+    # `continue-on-error` porque este upload e DIAGNOSTICO, nao verificacao.
+    #
+    # Ele existe para que, quando o empacotamento quebrar, o log esteja
+    # disponivel. Sem esta linha ele fazia o oposto: a cota de armazenamento de
+    # artefatos da conta estourou, o upload falhou, o job foi dado como
+    # reprovado e o passo SEGUINTE -- que instala o .exe de verdade e confere
+    # que ele abre -- foi PULADO. O unico job que prova que o cliente recebe
+    # algo funcional deixou de rodar por causa de um anexo de depuracao.
+    #
+    # Um passo que so ajuda a investigar nao pode decidir se a entrega passa.
     - name: Publicar log do empacotamento
       if: always()
+      continue-on-error: true
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4  # v5.0.0
       with:
         name: log-do-empacotamento
@@ -547,7 +558,15 @@ jobs:
           throw "o app instalado nao aplicou as migrations (esta em '$revisao', deveria estar em '$cabeca')"
         }
 
+    # Tambem `continue-on-error`, e pelo mesmo motivo -- mas com uma diferenca
+    # que vale registrar: aqui a prova ja aconteceu. Este passo roda DEPOIS de
+    # instalar o .exe e conferir que ele abre, entao o que se perde numa falha
+    # de cota e a conveniencia de baixar o instalador, nao a garantia.
+    #
+    # `if-no-files-found: error` continua valendo: instalador ausente e um
+    # defeito de verdade, e esse erro nao e de upload.
     - name: Publicar instalador como artefato
+      continue-on-error: true
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4  # v5.0.0
       with:
         name: instalador-windows
