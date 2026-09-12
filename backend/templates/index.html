@@ -238,6 +238,11 @@
                         <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
                     </svg>
                     <h2>Conecte sua conta Microsoft</h2>
+                    <!-- Preenchido so quando ha um motivo especifico (conta fora
+                         da allowlist, por exemplo). Sem ele o operador via um
+                         "conecte sua conta" generico logo depois de conectar,
+                         sem nada dizendo por que a conta dele nao serve. -->
+                    <p class="painel-sem-conexao__motivo" id="painelSemConexaoMotivo" hidden></p>
                     <p>
                         O sistema usa a sua conta Microsoft para saber quem esta
                         usando o computador. Enquanto ela nao estiver conectada,

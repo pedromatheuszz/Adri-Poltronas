@@ -72,11 +72,32 @@ function registrarSessaoPresente() {
 //
 // Alem disso as duas informacoes sao diferentes e ambas verdadeiras: o titulo
 // diz onde o operador esta, o painel diz por que nao ha numero ali.
-function mostrarPainelSemConexao() {
+function mostrarPainelSemConexao(motivo) {
     var painel = document.getElementById('painelSemConexao');
     var casca = document.getElementById('appShell');
+    var linhaMotivo = document.getElementById('painelSemConexaoMotivo');
+    if (linhaMotivo) {
+        // `textContent` e nao `innerHTML`: a mensagem vem do backend, e o
+        // resto do arquivo escapa tudo que vem de fora.
+        linhaMotivo.textContent = motivo || '';
+        linhaMotivo.hidden = !motivo;
+    }
     if (painel) painel.hidden = false;
     if (casca) casca.classList.add('sem-conexao');
+}
+
+// Conta fora da allowlist.
+//
+// O backend responde 403 e APAGA a sessao -- entao, sem este tratamento, a
+// primeira requisicao dava um erro sem explicacao e todas as seguintes viravam
+// 401 generico, mandando o operador "conectar" a mesma conta que acabou de ser
+// recusada. Ele so descobriria o motivo abrindo o navegador e lendo a pagina
+// de callback.
+function registrarContaNaoAutorizada(mensagem) {
+    _semSessao = true;
+    _dadosJaCarregados = false;
+    mostrarPainelSemConexao(
+        mensagem || 'Esta conta nao tem permissao para usar o sistema.');
 }
 
 function esconderPainelSemConexao() {
@@ -132,6 +153,17 @@ window.fetch = function(url, options) {
             // o app nao dependa de alguem lembrar do assunto ao escrever a
             // proxima rota.
             if (resposta.status === 402) registrarLicencaVencida();
+            // 403 chega de dois lugares: a capacidade ("Acesso negado.") e a
+            // allowlist de contas. So o segundo tem o que explicar ao
+            // operador, e o `codigo` do corpo separa os dois sem depender da
+            // prosa. `clone()` porque quem chamou ainda vai ler o corpo.
+            if (resposta.status === 403) {
+                resposta.clone().json().then(function(corpo) {
+                    if (corpo && corpo.codigo === 'conta_nao_autorizada') {
+                        registrarContaNaoAutorizada(corpo.erro);
+                    }
+                }, function() { /* corpo nao-JSON: nada a explicar */ });
+            }
         }, function() { /* rede fora: e outro assunto, tratado em tentarBackend */ });
     }
     return promessa;
@@ -2280,6 +2312,17 @@ function carregarGeocache() {
 }
 
 function guardarGeocache() {
+    // O consentimento e conferido AQUI, e nao so em quem chama.
+    //
+    // A geocodificacao roda num laco com `await` de ~1,1 s por cliente. Quem
+    // revoga no meio dele deixa uma chamada em voo, e ela resolvia DEPOIS --
+    // regravando em disco as coordenadas que o operador acabou de mandar
+    // apagar. O guarda de geracao do laco nao alcanca isso: ele so e
+    // consultado depois do `await`, e a gravacao acontece antes.
+    //
+    // Checar no ponto de escrita fecha o caso para qualquer caminho, inclusive
+    // os que alguem escrever depois.
+    if (!mapaAutorizado()) return;
     try {
         localStorage.setItem(CHAVE_GEOCACHE, JSON.stringify(_geocacheCoords));
     } catch (e) {
@@ -2341,10 +2384,25 @@ function revogarMapa() {
     try {
         localStorage.removeItem(CHAVE_CONSENTIMENTO_MAPA);
     } catch (e) { /* nada a fazer */ }
+
+    // Invalida a geracao ANTES de qualquer outra coisa: o laco de
+    // geocodificacao consulta `_geracaoMapa` depois de cada `await` e sai
+    // sozinho. Sem isto ele seguiria consultando servico externo sobre
+    // enderecos que o operador acabou de proibir.
+    _geracaoMapa++;
+
     // Revogar sem apagar o que ja foi buscado deixaria as coordenadas de todos
     // os clientes guardadas numa maquina onde o operador acabou de dizer que
     // nao quer isso.
     limparCacheDoMapa({ silencioso: true });
+
+    // Esconder o painel nao basta: os marcadores continuam no DOM, cada um com
+    // o nome e o endereco do cliente no popup. Quem revoga espera que sumam.
+    if (mapaInstance) {
+        mapaMarcadores.forEach(function (m) { mapaInstance.removeLayer(m); });
+    }
+    mapaMarcadores = [];
+
     _mostrarEstadoDoMapa();
     exibirToast('Autorizacao revogada e coordenadas apagadas.');
 }

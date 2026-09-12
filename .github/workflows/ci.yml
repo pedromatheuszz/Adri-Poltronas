@@ -358,7 +358,26 @@ jobs:
     - name: Verificar conteudo do bundle
       shell: bash
       run: |
-        for RECURSO in alembic.ini migrations templates; do
+        # `frontend/vendor` entrou nesta lista na 1.5.1, quando o Leaflet e o
+        # Chart.js deixaram de vir de CDN. A CSP passou a `script-src 'self'`
+        # e o service worker perdeu o precache externo, entao nao existe mais
+        # nenhum fallback: se a pasta nao chegar ao bundle, o app instalado
+        # abre normal e o mapa e os graficos ficam em branco EM SILENCIO --
+        # o navegador embutido bloqueia sem avisar, e o unico rastro e o
+        # console, que ninguem abre.
+        RECURSOS="
+          alembic.ini
+          migrations
+          templates
+          frontend/js/app.js
+          frontend/js/comercial.js
+          frontend/sw.js
+          frontend/vendor/leaflet/leaflet.js
+          frontend/vendor/leaflet/leaflet.css
+          frontend/vendor/leaflet/images/marker-icon.png
+          frontend/vendor/chartjs/chart.umd.min.js
+        "
+        for RECURSO in $RECURSOS; do
           if [ ! -e "dist/AdriPoltronasBackend/_internal/$RECURSO" ]; then
             echo "::error::O bundle nao levou '$RECURSO'."
             exit 1

@@ -107,3 +107,79 @@ def test_as_variaveis_essenciais_continuam_documentadas():
 
     assert essenciais <= documentadas, (
         f"sumiram do .env.example: {sorted(essenciais - documentadas)}")
+
+
+# =============================================================================
+# O modelo do repositorio e o modelo da instalacao precisam concordar
+# =============================================================================
+# `.env.example` fica no repositorio e NAO entra no bundle -- o `.spec` empacota
+# `frontend`, `templates`, `alembic.ini`, `migrations` e `package.json`, mais
+# nada. O unico arquivo de configuracao que existe numa maquina instalada e o
+# que `config.garantir_modelo_env()` escreve em %APPDATA% na primeira execucao.
+#
+# A allowlist de contas nasceu documentada so no `.env.example`. O resultado e
+# pior que nao ter o recurso: o codigo da a impressao de que a autorizacao esta
+# resolvida, e na maquina onde ela importa nao ha nada que revele que existe.
+CONFIGURAVEIS_NA_INSTALACAO = {
+    'ADRI_FLASK_SECRET',
+    'ADRI_CONTAS_AUTORIZADAS',
+    'ADRI_BACKUP_EXTRA',
+    'GEMINI_API_KEY',
+    'MP_ACCESS_TOKEN',
+}
+
+# Variaveis que existem so para desenvolvimento ou teste e nao fazem sentido no
+# modelo da cliente. Ficam listadas para que a ausencia seja deliberada, e nao
+# esquecimento.
+SO_PARA_DESENVOLVIMENTO = {
+    'ADRI_DB_PATH',            # aponta o banco para outro lugar
+    'MP_API_URL',              # duble local do Mercado Pago
+    'ADRI_MICROSOFT_CLIENT_ID',  # troca a aplicacao Azure
+    'ADRI_API_SEM_TOKEN',      # desliga a capacidade, para o `make dev`
+    'FERNET_KEY',              # chave injetada pela suite
+}
+
+
+def _modelo_da_instalacao() -> set:
+    import sys
+    sys.path.insert(0, BACKEND)
+    import config
+
+    nomes = set()
+    for linha in config._MODELO_ENV.splitlines():
+        achado = re.match(r'\s*#?\s*([A-Z][A-Z0-9_]*)\s*=', linha)
+        if achado:
+            nomes.add(achado.group(1))
+    return nomes
+
+
+def test_o_modelo_da_instalacao_oferece_o_que_a_cliente_precisa_configurar():
+    faltando = CONFIGURAVEIS_NA_INSTALACAO - _modelo_da_instalacao()
+    assert not faltando, (
+        f"{sorted(faltando)} so existe no .env.example, que nao vai para a maquina "
+        "instalada. Acrescente ao config._MODELO_ENV."
+    )
+
+
+def test_o_modelo_da_instalacao_nao_inventa_variavel():
+    """O caminho inverso: nada no modelo que o backend nao leia."""
+    fonte = _fonte_do_backend()
+    orfas = {
+        nome for nome in _modelo_da_instalacao()
+        if nome.startswith(PREFIXOS_DO_PROJETO) and nome not in fonte
+    }
+    assert not orfas, f"o modelo da instalacao documenta o que ninguem le: {sorted(orfas)}"
+
+
+def test_toda_variavel_do_env_example_esta_classificada():
+    """
+    Impede o esquecimento silencioso: uma variavel nova no `.env.example` tem de
+    ser declarada como configuravel na instalacao OU como so-para-desenvolvimento.
+    Sem isso, a proxima allowlist repete a mesma historia.
+    """
+    documentadas = {n for n in _nomes_documentados() if n.startswith(PREFIXOS_DO_PROJETO)}
+    classificadas = CONFIGURAVEIS_NA_INSTALACAO | SO_PARA_DESENVOLVIMENTO
+    assert not (documentadas - classificadas), (
+        f"{sorted(documentadas - classificadas)} nao foi classificada. Decida se vai "
+        "para o modelo da instalacao e acrescente ao conjunto correspondente."
+    )

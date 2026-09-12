@@ -474,8 +474,14 @@ def _verificar_autenticacao():
             security.log_evento_seguro(
                 "AUTH_CONTA_NAO_AUTORIZADA", f"Conta: {conta}", "warning")
             database.excluir_sessao()
+            # `codigo` existe para a tela nao ter de casar prosa em portugues:
+            # este 403 e o MESMO status que `_exigir_capacidade` usa para dizer
+            # "Acesso negado.", e sem um discriminador a interface so poderia
+            # separar os dois comparando a mensagem -- que muda quando alguem
+            # reescreve o texto.
             return jsonify({
-                "erro": "Esta conta nao tem permissao para usar o sistema."
+                "erro": "Esta conta nao tem permissao para usar o sistema.",
+                "codigo": "conta_nao_autorizada",
             }), 403
         g.erp_usuario_identificador = conta
         return None

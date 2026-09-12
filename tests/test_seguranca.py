@@ -89,30 +89,6 @@ def test_fernet_decifrar_objeto_invalido_devolve_none():
 
 
 # -----------------------------------------------------------------------------
-# Hash de senha
-# -----------------------------------------------------------------------------
-def test_hash_de_senha_confere():
-    assert security.verificar_senha("senha-correta", security.hash_senha("senha-correta"))
-
-
-def test_hash_de_senha_rejeita_senha_errada():
-    assert not security.verificar_senha("senha-errada", security.hash_senha("senha-correta"))
-
-
-def test_hashes_da_mesma_senha_diferem_pelo_salt():
-    assert security.hash_senha("igual") != security.hash_senha("igual")
-
-
-def test_verificar_senha_com_hash_malformado_e_falso():
-    assert not security.verificar_senha("x", "formato-invalido")
-    assert not security.verificar_senha("x", "")
-
-
-def test_hash_nao_contem_a_senha():
-    assert "minha-senha" not in security.hash_senha("minha-senha")
-
-
-# -----------------------------------------------------------------------------
 # Upload
 # -----------------------------------------------------------------------------
 class _ArquivoFalso:

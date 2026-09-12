@@ -2481,6 +2481,13 @@ button, [role="tab"], summary { touch-action: manipulation; }
 
 .painel-sem-conexao__nota { font-size: 0.9rem; color: var(--cor-texto-3); }
 
+/* Motivo especifico da recusa (conta fora da allowlist). Fica em destaque
+   porque e a unica coisa na tela que explica POR QUE aquela conta nao serve. */
+.painel-sem-conexao__motivo {
+    font-weight: 600;
+    color: var(--cor-perigo, #A63D2E);
+}
+
 .painel-sem-conexao__caixa .btn { margin-top: var(--esp-2); }
 
 

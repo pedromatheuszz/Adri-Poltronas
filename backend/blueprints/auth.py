@@ -66,6 +66,17 @@ def auth_status():
     if not sessao:
         return jsonify({"logado": False})
 
+    # A allowlist e conferida aqui tambem, e nao so no guarda de `/api/`.
+    #
+    # Esta rota esta em ROTAS_SEM_AUTH -- precisa estar, e a tela consulta
+    # justamente para saber se ha sessao --, entao `_verificar_autenticacao`
+    # retorna antes de rodar e leva `conta_autorizada` junto. Sem esta
+    # checagem, uma sessao gravada antes de a allowlist passar a valer fazia a
+    # tela anunciar "Conectado (fulano)" e a primeira requisicao de dados
+    # recusar aquela mesma conta. O app dizia o contrario do que ia fazer.
+    if not config.conta_autorizada(sessao.get("conta", "")):
+        return jsonify({"logado": False, "motivo": "conta_nao_autorizada"})
+
     if microsoft.obter_token_valido() is None:
         return jsonify({"logado": False, "motivo": "sessao_expirada"})
 
