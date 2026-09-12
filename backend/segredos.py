@@ -287,7 +287,24 @@ def _descartar_copia_em_claro(caminho_bak: str, migradas: dict) -> None:
     # confirmaria o valor que temos em memoria, nao o que ficou no arquivo.
     _cache = None
     try:
-        divergentes = [nome for nome, valor in migradas.items() if obter(nome) != valor]
+        # `_ler_cofre()` e nao `obter()`, e a diferenca e a razao de este
+        # arquivo poder ser apagado com seguranca.
+        #
+        # `obter()` percorre a precedencia inteira e termina em
+        # `return do_ambiente_real or padrao`. Em producao o `load_dotenv()` ja
+        # colocou MP_ACCESS_TOKEN e GEMINI_API_KEY em `os.environ` -- com
+        # exatamente o valor que esta sendo migrado. Entao, se o DPAPI cifrasse
+        # e NAO conseguisse decifrar de volta, o cofre devolvia vazio, a funcao
+        # caia nesse ultimo degrau, entregava o valor do ambiente e a
+        # conferencia "passava". O `.env` ja reescrito sem as chaves mais a
+        # copia apagada = credencial perdida sem volta.
+        #
+        # A pergunta que esta conferencia precisa responder e estreita: o COFRE
+        # devolve o que foi gravado? Qualquer outra fonte responde outra
+        # pergunta.
+        do_cofre = _ler_cofre()
+        divergentes = [nome for nome, valor in migradas.items()
+                       if do_cofre.get(nome) != valor]
     except Exception as erro:  # noqa: BLE001 - qualquer falha aqui e motivo de nao apagar
         log.warning("[SEGREDOS] Cofre nao pode ser conferido (%s); "
                     "mantendo %s por seguranca.", erro, os.path.basename(caminho_bak))

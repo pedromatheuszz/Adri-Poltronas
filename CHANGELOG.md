@@ -5,7 +5,7 @@ Versionamento [semântico](https://semver.org/lang/pt-BR/).
 
 ---
 
-## [1.5.1-beta] — 2026-09-06
+## [1.5.1-beta] — 2026-09-12
 
 Correções da auditoria técnica da 1.5.0 (41 achados: 2 altos, 18 médios,
 17 baixos, 4 informativos). Nenhuma funcionalidade nova além do destino das
@@ -121,14 +121,50 @@ parcelas, que fecha um ciclo que a 1.5.0 deixou pela metade.
   duas passaram para `frontend/vendor/`, conferidas byte a byte contra os
   hashes SRI que já estavam no HTML, e `script-src` voltou a ser só `'self'`.
 
+- **A conferência que autorizava apagar o `.env.bak` não lia o cofre.** Ela
+  usava `obter()`, cujo último degrau é `return do_ambiente_real or padrao` — e
+  em produção o `load_dotenv()` já colocou as chaves em `os.environ` com o
+  mesmo valor que está sendo migrado. Se o DPAPI cifrasse e **não** conseguisse
+  decifrar de volta, o cofre devolvia vazio, a função caía nesse último degrau
+  e a conferência "passava": o `.env` já reescrito sem as chaves, mais a cópia
+  apagada, davam perda irrecuperável das credenciais. Agora a conferência
+  consulta `_ler_cofre()` diretamente, que é a única fonte que responde a
+  pergunta certa.
+
+- **Revogar o mapa não desfazia o que já estava na tela.** Os marcadores
+  continuavam no DOM, cada um com nome e endereço no popup, e uma
+  geocodificação já em voo regravava em disco as coordenadas que o operador
+  acabara de mandar apagar — o guarda de geração do laço só é consultado
+  *depois* do `await`, e a gravação acontece antes. A revogação agora invalida
+  a geração, remove os marcadores, e `guardarGeocache()` recusa gravar sem
+  consentimento, fechando o caso para qualquer caminho futuro.
+
+- **A allowlist não existia no `.env` da máquina instalada.** Ela estava só no
+  `.env.example`, que fica no repositório e não entra no bundle. O controle
+  nascia desligado e sem nenhum lugar onde a operadora descobrisse que existe.
+  Foi para o `config._MODELO_ENV`, junto de `ADRI_BACKUP_EXTRA`, e um teste
+  agora exige que toda variável do `.env.example` seja classificada como
+  configurável na instalação ou como só-para-desenvolvimento.
+
+- **`/api/auth/status` dizia "conectado" para conta que a allowlist recusaria.**
+  A rota está em `ROTAS_SEM_AUTH` — precisa estar —, então o guarda de `/api/`
+  não roda nela. A tela anunciava "Conectado (fulano)" no boot e a primeira
+  requisição de dados recusava aquela mesma conta.
+
+- **O 403 da allowlist chegava como erro genérico.** É o mesmo status que a
+  capacidade usa para "Acesso negado.", então a tela não tinha como separá-los.
+  O backend passou a enviar `codigo: "conta_nao_autorizada"` e a interface
+  explica o motivo em vez de mandar reconectar a conta recusada.
+
 - `.capacidade` entrou no `.gitignore`; `ci.yml` declara `permissions: contents: read`;
   a cópia do banco para download usa `tempfile.mkstemp()`.
 
 ### Removido
 
-- **Cerca de 60% de `security.py`**: CSRF de uso único, gerenciador de sessão,
-  sanitizadores, `validar_sql_safe`, assinatura HMAC, detecção de anomalia e
-  detecção de força bruta. Nada disso era chamado por rota nenhuma. O ritual do
+- **Quase metade de `security.py`** (165 dos 342 comandos): CSRF de uso único,
+  gerenciador de sessão, sanitizadores, `validar_sql_safe`, assinatura HMAC,
+  detecção de anomalia, detecção de força bruta e o par PBKDF2
+  `hash_senha`/`verificar_senha`. Nada disso era chamado por rota nenhuma. O ritual do
   CSRF existia completo nas duas pontas para uma validação que nunca acontecia
   — quem protege é a checagem de `Origin`/`Referer` —, e
   `esta_bloqueado_bruteforce()` sempre devolvia `False` porque o contador nunca
@@ -144,7 +180,7 @@ parcelas, que fecha um ciclo que a 1.5.0 deixou pela metade.
   de cobrança removida.
 
 - **Dez funções de `database.py` sem chamador em produção**, mais os três
-  auxiliares que só elas usavam. O arquivo caiu de 988 para 681 linhas, e a
+  auxiliares que só elas usavam. O arquivo caiu de 988 para 717 linhas, e a
   cobertura global subiu de 82% para 84% — o código morto era testado, e era
   ele que puxava o número para baixo. As últimas três (`listar_pagamentos`,
   `salvar_pagamento`, `obter_metricas_pagamentos`) tinham sido preservadas
@@ -165,6 +201,19 @@ parcelas, que fecha um ciclo que a 1.5.0 deixou pela metade.
   produto de duas versões atrás — abas, integrações e rotas removidas na 1.5.0.
   O `PRIVACIDADE.md` era o mais grave: declarava o gateway como destino de dado
   pessoal e listava uma tabela que a migration já havia apagado.
+
+### Build e CI
+
+- **A verificação de conteúdo do bundle não olhava para `frontend/`.** Conferia
+  `alembic.ini`, `migrations` e `templates` — e nada mais. Com `script-src
+  'self'` e o precache de CDN removido, não há mais fallback: se
+  `frontend/vendor/` não chegasse ao instalador, o app abriria normal e o mapa
+  e os gráficos ficariam em branco **em silêncio**. Os arquivos do frontend
+  entraram na lista.
+
+- `python build.py lint` lintava `backend/` e `tests/` mas não `build.py`, então
+  passava verde num arquivo que o job de teste reprovaria — exatamente o que o
+  comando local existe para evitar.
 
 ### Testes
 

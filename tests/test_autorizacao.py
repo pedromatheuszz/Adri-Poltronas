@@ -28,6 +28,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'backend'))
 
 import config  # noqa: E402
 
+RAIZ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+
 
 @pytest.fixture
 def allowlist(monkeypatch):
@@ -109,3 +111,74 @@ def test_leitura_da_variavel_de_ambiente(bruto, esperado, monkeypatch):
     finally:
         monkeypatch.delenv('ADRI_CONTAS_AUTORIZADAS', raising=False)
         importlib.reload(config)
+
+
+# =============================================================================
+# A allowlist na borda HTTP
+# =============================================================================
+# Nao basta `conta_autorizada()` estar certa: ela precisa ser consultada em
+# TODO lugar que afirma algo sobre a sessao. `/api/auth/status` esta em
+# ROTAS_SEM_AUTH -- precisa estar, porque e ela que a tela consulta para saber
+# se ha sessao --, entao o guarda de `/api/` nao roda ali e a checagem tinha de
+# ser feita na propria rota.
+@pytest.fixture
+def cliente_http(tmp_path, monkeypatch):
+    import app as app_module
+    import database
+
+    monkeypatch.setattr(database, 'DB_PATH', str(tmp_path / 'auth.db'))
+    app_module.app.config['TESTING'] = True
+    with app_module.app.app_context():
+        database.criar_tabela()
+    return app_module.app.test_client()
+
+
+def test_status_nao_diz_conectado_para_conta_fora_da_allowlist(cliente_http, allowlist):
+    """
+    Antes desta checagem a tela anunciava "Conectado (fulano)" no boot e a
+    primeira requisicao de dados recusava aquela mesma conta. O app dizia o
+    contrario do que ia fazer.
+    """
+    import database
+    import microsoft
+
+    database.salvar_sessao('token-vivo', 'intruso@exemplo.com',
+                           refresh_token='r', expira_em=2 ** 31 - 1)
+    allowlist('dona@exemplo.com')
+
+    dados = cliente_http.get('/api/auth/status').get_json()
+
+    assert dados['logado'] is False
+    assert dados['motivo'] == 'conta_nao_autorizada'
+    # A sessao NAO e apagada aqui: quem apaga e o guarda de `/api/`, e uma rota
+    # de consulta nao deveria ter efeito colateral destrutivo.
+    assert database.obter_sessao() is not None
+    assert microsoft is not None  # import usado pela rota; falha cedo se sumir
+
+
+def test_status_diz_conectado_para_conta_da_allowlist(cliente_http, allowlist):
+    import database
+
+    database.salvar_sessao('token-vivo', 'dona@exemplo.com',
+                           refresh_token='r', expira_em=2 ** 31 - 1)
+    allowlist('dona@exemplo.com')
+
+    dados = cliente_http.get('/api/auth/status').get_json()
+
+    assert dados['logado'] is True
+    assert dados['conta'] == 'dona@exemplo.com'
+
+
+def test_o_403_da_allowlist_carrega_codigo_legivel_por_maquina():
+    """
+    403 chega de dois lugares: a capacidade ("Acesso negado.") e a allowlist.
+    A tela precisa separar os dois sem comparar prosa em portugues, que muda
+    quando alguem reescreve o texto.
+    """
+    fonte = open(os.path.join(RAIZ, 'backend', 'app.py'), encoding='utf-8').read()
+    assert '"codigo": "conta_nao_autorizada"' in fonte
+
+    js = open(os.path.join(RAIZ, 'frontend', 'js', 'app.js'), encoding='utf-8').read()
+    assert "codigo === 'conta_nao_autorizada'" in js, (
+        "o backend emite o codigo e a tela nao o le -- o operador volta a ver erro generico"
+    )

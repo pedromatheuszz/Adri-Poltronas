@@ -66,10 +66,15 @@ def lint():
     # e o executavel podem viver em prefixes diferentes. O binario presente
     # no PATH e o mesmo entrypoint usado pela CI.
     ruff_executavel = shutil.which("ruff")
+    # Os mesmos alvos que a CI e o CONTRIBUTING.md mandam rodar, `build.py`
+    # incluido. Ele ficava de fora, entao `python build.py lint` passava verde
+    # num arquivo que o job de teste reprovaria -- e o comando local existe
+    # justamente para evitar descobrir isso depois de abrir o PR.
+    alvos = ["backend/", "tests/", "build.py"]
     cmd = (
-        [ruff_executavel, "check", "backend/", "tests/"]
+        [ruff_executavel, "check", *alvos]
         if ruff_executavel
-        else [sys.executable, "-m", "ruff", "check", "backend/", "tests/"]
+        else [sys.executable, "-m", "ruff", "check", *alvos]
     )
     return run_command(cmd, None, "Lint com ruff")
 

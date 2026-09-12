@@ -19,6 +19,17 @@ _MODELO_ENV = """# Configuracao do Adri Poltronas.
 # Gere com: python -c "import secrets; print(secrets.token_hex(32))"
 ADRI_FLASK_SECRET=
 
+# Contas autorizadas a usar o sistema, separadas por virgula.
+#
+# VAZIO = qualquer conta Microsoft entra, que e o comportamento historico. O
+# fluxo OAuth usa o endpoint /common e aceita conta pessoal ou de qualquer
+# tenant, entao sem esta lista um colaborador que conecte a conta dele passa a
+# ser, para o sistema, o mesmo que o dono.
+#
+# Preencha com o e-mail de quem realmente opera. A comparacao ignora
+# maiusculas e espacos sobrando.
+ADRI_CONTAS_AUTORIZADAS=
+
 # IA - Gemini (fallback de sugestao de bairro quando o ViaCEP falha).
 GEMINI_API_KEY=
 
@@ -26,6 +37,10 @@ GEMINI_API_KEY=
 # Access Token da SUA aplicacao (nao a Public Key). Ver
 # LICENCA_E_PAGAMENTO.md para como grava-lo sem passar por arquivo de texto.
 MP_ACCESS_TOKEN=
+
+# Pasta extra para onde copiar os backups (opcional). Um pendrive ou uma pasta
+# sincronizada resolve o caso em que a maquina inteira se perde.
+ADRI_BACKUP_EXTRA=
 """
 
 

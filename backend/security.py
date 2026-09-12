@@ -15,15 +15,12 @@ Em produção (PyInstaller), o fallback PLAIN é recusado por segurança.
 import base64
 import sys
 import os
-import hmac
 import secrets
 import json
 import logging
 from typing import Any
 
 from cryptography.fernet import Fernet
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 # O DPAPI (win32crypt) só existe no Windows e é importado sob demanda por
 # _importar_win32crypt(), definida abaixo.
@@ -237,51 +234,20 @@ def fernet_decifrar_objeto(valor: str) -> Any | None:
         return None
 
 
-# ---------------------------------------------------------------------------
-# Hashing seguro (PBKDF2-HMAC-SHA256)
-# ---------------------------------------------------------------------------
-
-def hash_senha(senha: str, salt: bytes | None = None) -> str:
-    """
-    Gera hash PBKDF2-HMAC-SHA256 da senha.
-    Retorna string formatada: algorithm$iterations$salt$hash
-    """
-    if salt is None:
-        salt = os.urandom(32)
-
-    iterations = 600_000
-    kdf = PBKDF2HMAC(
-        algorithm=hashes.SHA256(),
-        length=32,
-        salt=salt,
-        iterations=iterations,
-    )
-    hash_bytes = kdf.derive(senha.encode("utf-8"))
-    return f"pbkdf2_sha256${iterations}${salt.hex()}${hash_bytes.hex()}"
-
-
-def verificar_senha(senha: str, hash_armazenado: str) -> bool:
-    """Verifica se uma senha corresponde ao hash armazenado."""
-    try:
-        parts = hash_armazenado.split("$")
-        if len(parts) != 4 or parts[0] != "pbkdf2_sha256":
-            return False
-        iterations = int(parts[1])
-        salt = bytes.fromhex(parts[2])
-        hash_esperado = parts[3]
-
-        kdf = PBKDF2HMAC(
-            algorithm=hashes.SHA256(),
-            length=32,
-            salt=salt,
-            iterations=iterations,
-        )
-        hash_calculado = kdf.derive(senha.encode("utf-8")).hex()
-        return hmac.compare_digest(hash_calculado, hash_esperado)
-    except (ValueError, IndexError, TypeError):
-        return False
-
-
+# Aqui viviam `hash_senha` e `verificar_senha` (PBKDF2-HMAC-SHA256, 600 mil
+# iteracoes). Sairam pelo mesmo criterio que tirou os outros 40% deste
+# modulo: nenhuma rota as chamava.
+#
+# Elas tinham sobrevivido a limpeza anterior por um motivo que deixou de
+# valer. A auditoria as apontava como a peca pronta para o degrau 2 do
+# SEG-01 -- identidade propria do ERP, em vez de reaproveitar o OAuth da
+# Microsoft como identidade. Esse degrau foi descartado junto com a decisao
+# de congelar o escopo do produto.
+#
+# Criptografia forte que ninguem chama nao protege nada; so sugere ao
+# proximo leitor que existe login local. Se a identidade propria voltar a
+# ser prioridade, o codigo esta no historico (`git log -S hash_senha`), e
+# reescreve-lo custa menos do que o risco de mante-lo vivo e sem exercicio.
 # ---------------------------------------------------------------------------
 # Seguranca de Upload de Arquivos
 # ---------------------------------------------------------------------------
