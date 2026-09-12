@@ -82,8 +82,8 @@ def verificar():
     Pergunta ao Mercado Pago se a cobranca em aberto foi paga.
 
     E o que substitui o webhook: o Flask escuta em loopback e um servidor na
-    internet nao alcanca este endereco. Mesma inversao que
-    `erp/financeiro/reconciliacao.py` faz para o Asaas.
+    internet nao alcanca este endereco. Quem pergunta e o app, sempre -- nunca
+    o contrario.
 
     A licenca so e liberada pelo que o Mercado Pago RESPONDE. O cliente nao
     tem como afirmar que pagou.

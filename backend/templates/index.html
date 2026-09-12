@@ -19,11 +19,10 @@
           href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 
     <!-- Ordem obrigatoria: tokens.css declara as variaveis que style.css usa. -->
-    <link rel="stylesheet" href="/css/tokens.css?v=v83">
-    <link rel="stylesheet" href="/css/style.css?v=v83">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-          integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H"
-          crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <link rel="stylesheet" href="/css/tokens.css?v=v87">
+    <link rel="stylesheet" href="/css/style.css?v=v87">
+    <!-- Leaflet 1.9.4, servido pelo proprio backend. Ver frontend/vendor/README.md. -->
+    <link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
 </head>
 <body>
     <div class="app-shell" id="appShell">
@@ -239,6 +238,11 @@
                         <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
                     </svg>
                     <h2>Conecte sua conta Microsoft</h2>
+                    <!-- Preenchido so quando ha um motivo especifico (conta fora
+                         da allowlist, por exemplo). Sem ele o operador via um
+                         "conecte sua conta" generico logo depois de conectar,
+                         sem nada dizendo por que a conta dele nao serve. -->
+                    <p class="painel-sem-conexao__motivo" id="painelSemConexaoMotivo" hidden></p>
                     <p>
                         O sistema usa a sua conta Microsoft para saber quem esta
                         usando o computador. Enquanto ela nao estiver conectada,
@@ -695,6 +699,37 @@
                         externos. Os resultados ficam guardados neste computador.
                     </p>
 
+                    <!-- Consentimento antes da primeira consulta.
+                         O aviso acima ja existia e e claro, mas era so aviso: a
+                         consulta acontecia de qualquer forma ao abrir a aba. O
+                         endereco completo de TODOS os clientes ativos saia para
+                         um servico fora do pais sem que houvesse como recusar.
+                         Agora o mapa espera. -->
+                    <div id="mapaConsentimento" class="mapa-consentimento" hidden>
+                        <p>
+                            O mapa precisa enviar o endereco dos clientes (rua, bairro,
+                            cidade e CEP) ao Nominatim/OpenStreetMap para descobrir as
+                            coordenadas. Sao servidores fora do Brasil, e o envio so
+                            acontece se voce autorizar.
+                        </p>
+                        <p class="mapa-consentimento-detalhe">
+                            As coordenadas ficam guardadas neste computador, entao a
+                            consulta acontece uma vez por endereco. Voce pode revogar e
+                            apagar o que foi guardado a qualquer momento.
+                        </p>
+                        <div class="mapa-consentimento-acoes">
+                            <button type="button" class="btn btn-primario"
+                                    data-comando="autorizarMapa">Autorizar e carregar o mapa</button>
+                        </div>
+                    </div>
+
+                    <div id="mapaControles" class="mapa-controles" hidden>
+                        <button type="button" class="btn btn-secundario btn-sm"
+                                data-comando="limparCacheDoMapa">Apagar coordenadas guardadas</button>
+                        <button type="button" class="btn btn-secundario btn-sm"
+                                data-comando="revogarMapa">Revogar autorizacao</button>
+                    </div>
+
                     <div id="mapaClientes" class="mapa-container" role="application"
                          aria-label="Mapa com a localizacao dos clientes"></div>
                 </section>
@@ -992,6 +1027,33 @@
                 <dl class="pedido-totais" id="pedidoTotais"></dl>
             </section>
 
+            <!-- Recebiveis do pedido.
+                 Ate a 1.5.0 o faturamento emitia parcelas e nao havia tela
+                 nenhuma que as lesse: o operador faturava, o sistema registrava
+                 o valor a receber, e o pedido virava terminal com o dinheiro
+                 invisivel. Elas moram aqui, dentro do proprio pedido, porque e
+                 onde nascem -- e nao numa aba financeira, que a 1.5.0 removeu
+                 de proposito. -->
+            <section id="pedidoBlocoParcelas" class="pedido-itens" hidden>
+                <h3 class="secao-titulo">Parcelas a receber</h3>
+                <div class="tabela-rolagem">
+                    <table class="tabela-simples">
+                        <caption class="visually-hidden">Parcelas a receber do pedido</caption>
+                        <thead>
+                            <tr>
+                                <th scope="col" class="centro">#</th>
+                                <th scope="col">Vencimento</th>
+                                <th scope="col" class="direita">Valor</th>
+                                <th scope="col">Situacao</th>
+                                <th scope="col" class="col-acoes"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="tabelaParcelasPedido"></tbody>
+                    </table>
+                </div>
+                <dl class="pedido-totais" id="pedidoResumoParcelas"></dl>
+            </section>
+
             <div class="modal-actions" id="pedidoAcoes">
                 <button type="button" class="modal-btn modal-btn-cancelar"
                         data-comando="fecharModal" data-arg="modalPedido">Fechar</button>
@@ -1096,16 +1158,15 @@
         </div>
     </dialog>
 
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-            integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH"
-            crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"
-            integrity="sha384-e6nUZLBkQ86NJ6TVVKAeSaK8jWa3NhkYWZFomE39AvDbQWeie9PlQqM3pmYW5d1g"
-            crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-    <script src="/js/offline.js?v=v83"></script>
-    <script src="/js/app.js?v=v83"></script>
+    <!-- Sem SRI e sem crossorigin: os arquivos sao da mesma origem agora, e
+         `integrity` em recurso proprio so adicionaria um jeito de o app
+         parar de funcionar depois de uma atualizacao legitima. -->
+    <script src="/vendor/leaflet/leaflet.js"></script>
+    <script src="/vendor/chartjs/chart.umd.min.js"></script>
+    <script src="/js/offline.js?v=v87"></script>
+    <script src="/js/app.js?v=v87"></script>
     <!-- Modulo comercial: Produtos, Pedidos e Agenda de Entregas.
          Arquivo separado porque app.js ja passa de 2.000 linhas. -->
-    <script src="/js/comercial.js?v=v83"></script>
+    <script src="/js/comercial.js?v=v87"></script>
 </body>
 </html>

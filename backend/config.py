@@ -19,6 +19,17 @@ _MODELO_ENV = """# Configuracao do Adri Poltronas.
 # Gere com: python -c "import secrets; print(secrets.token_hex(32))"
 ADRI_FLASK_SECRET=
 
+# Contas autorizadas a usar o sistema, separadas por virgula.
+#
+# VAZIO = qualquer conta Microsoft entra, que e o comportamento historico. O
+# fluxo OAuth usa o endpoint /common e aceita conta pessoal ou de qualquer
+# tenant, entao sem esta lista um colaborador que conecte a conta dele passa a
+# ser, para o sistema, o mesmo que o dono.
+#
+# Preencha com o e-mail de quem realmente opera. A comparacao ignora
+# maiusculas e espacos sobrando.
+ADRI_CONTAS_AUTORIZADAS=
+
 # IA - Gemini (fallback de sugestao de bairro quando o ViaCEP falha).
 GEMINI_API_KEY=
 
@@ -26,6 +37,10 @@ GEMINI_API_KEY=
 # Access Token da SUA aplicacao (nao a Public Key). Ver
 # LICENCA_E_PAGAMENTO.md para como grava-lo sem passar por arquivo de texto.
 MP_ACCESS_TOKEN=
+
+# Pasta extra para onde copiar os backups (opcional). Um pendrive ou uma pasta
+# sincronizada resolve o caso em que a maquina inteira se perde.
+ADRI_BACKUP_EXTRA=
 """
 
 
@@ -107,11 +122,52 @@ ESCOPOS_MICROSOFT = "User.Read Files.ReadWrite offline_access"
 
 URL_TOKEN_MICROSOFT = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
 URL_AUTORIZACAO_MICROSOFT = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
+
+
+# ---------------------------------------------------------------------------
+# Quem pode destravar a base
+# ---------------------------------------------------------------------------
+# O fluxo OAuth usa o endpoint `/common`, que aceita QUALQUER conta Microsoft
+# -- pessoal ou de qualquer tenant. Ate a 1.5.0 o guarda de autenticacao
+# aceitava qualquer linha na tabela `sessao` com token nao vazio, sem olhar de
+# quem era a conta. Um colaborador que conectasse a conta pessoal dele passava
+# a ser, para todos os efeitos do sistema, o mesmo que o dono: faturar,
+# restaurar backup e baixar o banco completo tem exatamente a mesma permissao
+# que listar clientes.
+#
+# A explorabilidade sempre foi baixa, e vale registrar o motivo: quem chega a
+# `/api/auth/login` ja precisa do token de capacidade, que vive em %APPDATA%,
+# e quem le esse arquivo ja poderia abrir o SQLite direto. Quem protege de fato
+# e a capacidade. O risco real e operacional, nao remoto.
+#
+# VAZIO SIGNIFICA "QUALQUER CONTA", e a escolha e deliberada. Uma allowlist
+# ligada por padrao trancaria o dono fora do proprio aplicativo na primeira
+# atualizacao, com a unica saida sendo editar um arquivo de configuracao que
+# ele nao sabe que existe. Quem quer a restricao a declara.
+_CONTAS_AUTORIZADAS_BRUTO = os.environ.get('ADRI_CONTAS_AUTORIZADAS', '')
+
+CONTAS_AUTORIZADAS = frozenset(
+    parte.strip().casefold()
+    for parte in _CONTAS_AUTORIZADAS_BRUTO.replace(';', ',').split(',')
+    if parte.strip()
+)
+
+
+def conta_autorizada(conta: str) -> bool:
+    """
+    A conta pode usar o sistema?
+
+    `casefold` e nao `lower`: e-mail nao diferencia maiuscula de minuscula, e
+    `lower` erra em alfabetos que o operador pode usar no proprio nome. Sem
+    allowlist declarada, tudo passa -- ver o comentario acima.
+    """
+    if not CONTAS_AUTORIZADAS:
+        return True
+    return (conta or '').strip().casefold() in CONTAS_AUTORIZADAS
 # Credenciais de integracao. Vem do cofre cifrado quando ele as tem; do
 # ambiente ou do .env quando nao. Ver `segredos.py` para a precedencia e para
 # o limite honesto do que o DPAPI protege.
 GEMINI_API_KEY = segredos.obter('GEMINI_API_KEY')
-# Token que o Asaas envia no header `asaas-access-token` dos webhooks.
 
 # Versao do aplicativo. Lida do package.json para nao existirem duas verdades:
 # o instalador, o titulo da janela e a sonda de identidade precisam concordar,
@@ -123,7 +179,7 @@ def _versao_do_package_json() -> str:
             continue
         caminho = os.path.join(base, 'package.json')
         try:
-            with open(caminho, 'r', encoding='utf-8') as arquivo:
+            with open(caminho, encoding='utf-8') as arquivo:
                 versao = json.load(arquivo).get('version')
             if versao:
                 return str(versao)

@@ -196,7 +196,12 @@ def atualizar_cliente(id_cliente):
 @clientes_bp.route('/<int:id_cliente>', methods=['DELETE'])
 @idempotente
 def excluir_cliente(id_cliente):
-    linhas = database.excluir_cliente(id_cliente)
+    try:
+        linhas = database.excluir_cliente(id_cliente)
+    except database.ClienteTemVinculos as erro:
+        # 409 e nao 400: os dados da requisicao estao corretos; o que impede e
+        # o estado atual do cliente, e ele muda sem o operador reenviar nada.
+        return jsonify({"erro": str(erro)}), 409
     if linhas == 0:
         return jsonify({"erro": "Cliente nao encontrado."}), 404
     return jsonify({"mensagem": "Cliente excluido!"}), 200
@@ -222,6 +227,11 @@ def importar_clientes():
             conteudo = arquivo.read().decode('utf-8-sig')
             leitor = csv.DictReader(io.StringIO(conteudo), delimiter=',')
             for linha in leitor:
+                if len(clientes) >= MAX_LINHAS_IMPORTACAO:
+                    return jsonify({
+                        "erro": f"Arquivo excede o limite de {MAX_LINHAS_IMPORTACAO} "
+                                "linhas por importacao. Divida em partes.",
+                    }), 400
                 clientes.append({
                     'nome': linha.get('nome') or linha.get('Nome') or linha.get('name') or '',
                     'cep': linha.get('cep') or linha.get('CEP') or linha.get('zip') or '',
@@ -241,20 +251,46 @@ def importar_clientes():
             # extensao com a instrucao de converter. Antes ela era aceita, o
             # arquivo ia direto para `load_workbook` e o usuario recebia
             # "nao foi possivel ler o arquivo" sem saber o que fazer.
-            wb = openpyxl.load_workbook(arquivo)
-            ws = wb.active
-            headers = [str(cell.value or '').strip().lower() for cell in ws[1]]
-            for row in ws.iter_rows(min_row=2, values_only=True):
-                d = {headers[i]: str(row[i] or '') for i in range(len(headers)) if i < len(row)}
-                clientes.append({
-                    'nome': d.get('nome', ''),
-                    'cep': d.get('cep', d.get('zip', '')),
-                    'rua': d.get('rua', d.get('logradouro', '')),
-                    'bairro': d.get('bairro', d.get('neighborhood', '')),
-                    'cidade': d.get('cidade', d.get('city', '')),
-                    'entrega_retirada': d.get('entrega_retirada', d.get('tipo', 'Entrega')),
-                    'observacoes': d.get('observacoes', ''),
-                })
+            # `read_only=True` e o que impede a planilha inteira de virar
+            # objetos Python de uma vez. Um XLSX e um ZIP: 10 MB comprimidos
+            # viram centenas de MB de XML e depois de celulas. Como o backend e
+            # um processo so servindo a janela, "travou o backend" e "travou o
+            # aplicativo" -- e nao precisa de arquivo malicioso, uma exportacao
+            # de outro sistema basta.
+            #
+            # `data_only=True` pega o valor calculado das formulas em vez do
+            # texto da formula, que e o que interessa numa importacao.
+            wb = openpyxl.load_workbook(arquivo, read_only=True, data_only=True)
+            try:
+                ws = wb.active
+                # No modo read-only o iterador nao volta atras, entao o
+                # cabecalho sai da primeira iteracao em vez de `ws[1]`.
+                linhas = ws.iter_rows(values_only=True)
+                headers = [str(v or '').strip().lower() for v in next(linhas, ())]
+                for row in linhas:
+                    if len(clientes) >= MAX_LINHAS_IMPORTACAO:
+                        # Recusa AO ULTRAPASSAR, e nao depois de acumular tudo:
+                        # o teto so era conferido apos o parse completo, entao
+                        # um arquivo grande demais ja tinha custado a memoria
+                        # inteira antes de ser rejeitado.
+                        return jsonify({
+                            "erro": f"Arquivo excede o limite de {MAX_LINHAS_IMPORTACAO} "
+                                    "linhas por importacao. Divida em partes.",
+                        }), 400
+                    d = {headers[i]: str(row[i] or '')
+                         for i in range(len(headers)) if i < len(row)}
+                    clientes.append({
+                        'nome': d.get('nome', ''),
+                        'cep': d.get('cep', d.get('zip', '')),
+                        'rua': d.get('rua', d.get('logradouro', '')),
+                        'bairro': d.get('bairro', d.get('neighborhood', '')),
+                        'cidade': d.get('cidade', d.get('city', '')),
+                        'entrega_retirada': d.get('entrega_retirada', d.get('tipo', 'Entrega')),
+                        'observacoes': d.get('observacoes', ''),
+                    })
+            finally:
+                # O modo read-only mantem o zip aberto ate o `close()`.
+                wb.close()
         else:
             return jsonify({"erro": "Formato nao suportado. Use CSV, JSON ou XLSX."}), 400
     except Exception as e:

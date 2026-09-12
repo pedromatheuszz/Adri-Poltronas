@@ -245,12 +245,87 @@ def test_sessao_vencida_sem_refresh_token_e_encerrada(client, urlopen_falso):
 
 
 def test_queda_de_rede_nao_confirma_nem_nega_e_pede_reconexao(client, urlopen_falso):
+    """
+    O nome deste teste sempre esteve certo e a assercao que importa faltava.
+
+    "Nao confirma nem nega" quer dizer duas coisas, e so a primeira era
+    verificada: nao devolve token E NAO APAGA A SESSAO. Sem a segunda, uma
+    queda de rede de dez segundos deixava o operador trancado fora do proprio
+    banco -- 401 em todo /api/, sem caminho de volta a nao ser refazer o fluxo
+    OAuth no navegador.
+    """
     database.salvar_sessao('token-velho', 'maria@exemplo.com',
                            refresh_token='refresh-1',
                            expira_em=int(time.time()) - 10)
     urlopen_falso['respostas'] = [urllib.error.URLError('sem rota')]
 
     assert microsoft.obter_token_valido() is None
+    assert database.obter_sessao() is not None
+    # E o refresh_token continua la, para a proxima tentativa valer de algo.
+    assert database.obter_sessao()['refresh_token'] == 'refresh-1'
+
+
+def test_a_rede_volta_e_a_sessao_preservada_renova_normalmente(client, urlopen_falso):
+    """
+    O par do teste acima: preservar a sessao so vale se ela ainda servir depois.
+    Uma queda seguida de reconexao tem de terminar em token novo, sem login.
+    """
+    database.salvar_sessao('token-velho', 'maria@exemplo.com',
+                           refresh_token='refresh-1',
+                           expira_em=int(time.time()) - 10)
+    urlopen_falso['respostas'] = [
+        urllib.error.URLError('sem rota'),
+        _RespostaFalsa({'access_token': 'token-novo', 'expires_in': 3600}),
+    ]
+
+    assert microsoft.obter_token_valido() is None
+    assert microsoft.obter_token_valido() == 'token-novo'
+    assert database.obter_sessao()['token'] == 'token-novo'
+
+
+def test_timeout_preserva_a_sessao(client, urlopen_falso):
+    """Estourar o tempo tambem e ausencia de resposta, nao recusa."""
+    database.salvar_sessao('token-velho', 'maria@exemplo.com',
+                           refresh_token='refresh-1',
+                           expira_em=int(time.time()) - 10)
+    urlopen_falso['respostas'] = [TimeoutError('demorou')]
+
+    assert microsoft.obter_token_valido() is None
+    assert database.obter_sessao() is not None
+
+
+def test_resposta_ilegivel_preserva_a_sessao(client, urlopen_falso):
+    """
+    Portal cativo de wi-fi publico: HTTP 200 com HTML no lugar do JSON.
+
+    Antes isso caia no mesmo `return None` da recusa e apagava a sessao -- o
+    operador perdia o acesso local por causa da tela de login do hotel.
+    """
+    database.salvar_sessao('token-velho', 'maria@exemplo.com',
+                           refresh_token='refresh-1',
+                           expira_em=int(time.time()) - 10)
+    urlopen_falso['respostas'] = [_RespostaFalsa(b'<html>Faca login na rede</html>')]
+
+    assert microsoft.obter_token_valido() is None
+    assert database.obter_sessao() is not None
+
+
+def test_renovar_token_devolve_o_motivo_do_desfecho(client, urlopen_falso):
+    """
+    Contrato de `renovar_token`. Esta e a distincao que o chamador precisa: sem
+    ela, "a Microsoft me negou" e "nao consegui falar com a Microsoft" chegam
+    identicos e o chamador so pode errar num dos dois.
+    """
+    urlopen_falso['respostas'] = [_erro_http(400, {'error': 'invalid_grant'})]
+    assert microsoft.renovar_token('r') == (None, microsoft.RECUSADO)
+
+    urlopen_falso['respostas'] = [urllib.error.URLError('sem rota')]
+    assert microsoft.renovar_token('r') == (None, microsoft.INDISPONIVEL)
+
+    urlopen_falso['respostas'] = [_RespostaFalsa({'access_token': 'tk'})]
+    dados, motivo = microsoft.renovar_token('r')
+    assert motivo == microsoft.RENOVADO
+    assert dados['access_token'] == 'tk'
 
 
 # =============================================================================

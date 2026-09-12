@@ -27,15 +27,15 @@ Revises: c9f4e2a71b83
 Create Date: 2026-09-01 15:10:00.000000
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
 
 revision: str = "d1e7b3f5620a"
-down_revision: Union[str, None] = "c9f4e2a71b83"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "c9f4e2a71b83"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 # O valor errado: dois apostrofos literais.
 VALOR_ERRADO = "''"
@@ -80,7 +80,7 @@ def upgrade() -> None:
             if coluna not in presentes:
                 continue
             resultado = conexao.execute(
-                sa.text(f"UPDATE {tabela} SET {coluna} = '' WHERE {coluna} = :errado"),
+                sa.text(f"UPDATE {tabela} SET {coluna} = '' WHERE {coluna} = :errado"),  # noqa: S608 - fragmento constante do proprio codigo, nunca entrada do usuario
                 {"errado": VALOR_ERRADO},
             )
             total += resultado.rowcount or 0

@@ -15,18 +15,12 @@ Em produção (PyInstaller), o fallback PLAIN é recusado por segurança.
 import base64
 import sys
 import os
-import hmac
-import hashlib
-import re
 import secrets
 import json
-import time
 import logging
-from typing import Optional, Any
+from typing import Any
 
 from cryptography.fernet import Fernet
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 # O DPAPI (win32crypt) só existe no Windows e é importado sob demanda por
 # _importar_win32crypt(), definida abaixo.
@@ -39,7 +33,7 @@ PRODUCAO = bool(getattr(sys, 'frozen', False))
 
 log = logging.getLogger("adri.security")
 
-_fernet_key_cache: Optional[bytes] = None
+_fernet_key_cache: bytes | None = None
 
 def _obter_chave_fernet() -> bytes:
     """
@@ -73,7 +67,7 @@ def _obter_chave_fernet() -> bytes:
             pass
         if os.path.exists(storage_path):
             try:
-                with open(storage_path, 'r') as f:
+                with open(storage_path) as f:
                     stored = f.read().strip()
                 decrypted = win32.CryptUnprotectData(
                     base64.b64decode(stored), None, None, None, 0
@@ -205,7 +199,7 @@ def fernet_cifrar(texto: str) -> str:
     return PREFIXO_FERNET + f.encrypt(dado).decode("ascii")
 
 
-def fernet_decifrar(valor: str) -> Optional[str]:
+def fernet_decifrar(valor: str) -> str | None:
     """Decifra um valor Fernet. Retorna None se invalido."""
     if not valor or not valor.startswith(PREFIXO_FERNET):
         return None
@@ -229,7 +223,7 @@ def fernet_cifrar_objeto(objeto: Any) -> str:
     return fernet_cifrar(json_str)
 
 
-def fernet_decifrar_objeto(valor: str) -> Optional[Any]:
+def fernet_decifrar_objeto(valor: str) -> Any | None:
     """Decifra e deserializa um objeto JSON Fernet."""
     json_str = fernet_decifrar(valor)
     if json_str is None:
@@ -240,210 +234,20 @@ def fernet_decifrar_objeto(valor: str) -> Optional[Any]:
         return None
 
 
-# ---------------------------------------------------------------------------
-# Hashing seguro (PBKDF2-HMAC-SHA256)
-# ---------------------------------------------------------------------------
-
-def hash_senha(senha: str, salt: Optional[bytes] = None) -> str:
-    """
-    Gera hash PBKDF2-HMAC-SHA256 da senha.
-    Retorna string formatada: algorithm$iterations$salt$hash
-    """
-    if salt is None:
-        salt = os.urandom(32)
-
-    iterations = 600_000
-    kdf = PBKDF2HMAC(
-        algorithm=hashes.SHA256(),
-        length=32,
-        salt=salt,
-        iterations=iterations,
-    )
-    hash_bytes = kdf.derive(senha.encode("utf-8"))
-    return f"pbkdf2_sha256${iterations}${salt.hex()}${hash_bytes.hex()}"
-
-
-def verificar_senha(senha: str, hash_armazenado: str) -> bool:
-    """Verifica se uma senha corresponde ao hash armazenado."""
-    try:
-        parts = hash_armazenado.split("$")
-        if len(parts) != 4 or parts[0] != "pbkdf2_sha256":
-            return False
-        iterations = int(parts[1])
-        salt = bytes.fromhex(parts[2])
-        hash_esperado = parts[3]
-
-        kdf = PBKDF2HMAC(
-            algorithm=hashes.SHA256(),
-            length=32,
-            salt=salt,
-            iterations=iterations,
-        )
-        hash_calculado = kdf.derive(senha.encode("utf-8")).hex()
-        return hmac.compare_digest(hash_calculado, hash_esperado)
-    except (ValueError, IndexError, TypeError):
-        return False
-
-
-# ---------------------------------------------------------------------------
-# CSRF Token
-# ---------------------------------------------------------------------------
-
-_csrf_store: dict = {}
-_csrf_expiry_seconds = 3600
-
-
-def gerar_csrf_token(usuario_id: str = "default") -> str:
-    """Gera um token CSRF unico com timestamp de expiracao."""
-    token = secrets.token_urlsafe(32)
-    _csrf_store[token] = {
-        "usuario_id": usuario_id,
-        "criado_em": time.time(),
-        "usado": False,
-    }
-    _limpar_csrf_expirados()
-    return token
-
-
-def validar_csrf_token(token: str, usuario_id: str = "default") -> bool:
-    """Valida um token CSRF. Retorna True se valido e nao expirado."""
-    _limpar_csrf_expirados()
-    if token not in _csrf_store:
-        log.warning("[CSRF] Token nao encontrado.")
-        return False
-    dado = _csrf_store[token]
-    if dado["usado"]:
-        log.warning("[CSRF] Token ja utilizado (replay).")
-        return False
-    if time.time() - dado["criado_em"] > _csrf_expiry_seconds:
-        del _csrf_store[token]
-        log.warning("[CSRF] Token expirado.")
-        return False
-    if dado["usuario_id"] != usuario_id:
-        log.warning("[CSRF] Token para usuario diferente.")
-        return False
-    dado["usado"] = True
-    return True
-
-
-def _limpar_csrf_expirados():
-    agora = time.time()
-    expirados = [k for k, v in _csrf_store.items()
-                 if agora - v["criado_em"] > _csrf_expiry_seconds]
-    for k in expirados:
-        del _csrf_store[k]
-
-
-# ---------------------------------------------------------------------------
-# Gerenciamento de Sessao Segura com Expiracao
-# ---------------------------------------------------------------------------
-
-_sessoes: dict = {}
-_SESSAO_TIMEOUT = 28800
-
-
-def criar_sessao_segura(conta: str, token: str) -> str:
-    """Cria uma sessao segura com ID unico e timestamp de expiracao."""
-    sessao_id = secrets.token_urlsafe(24)
-    _sessoes[sessao_id] = {
-        "conta": conta,
-        "token": token,
-        "criado_em": time.time(),
-        "ultimo_acesso": time.time(),
-        "ip_hash": None,
-        "user_agent_hash": None,
-    }
-    _limpar_sessoes_expiradas()
-    return sessao_id
-
-
-def validar_sessao_segura(sessao_id: str, ip_remoto: str = None, user_agent: str = None) -> Optional[dict]:
-    """
-    Valida a sessao pelo ID e devolve seus dados, ou None se ela nao existe
-    ou ja expirou.
-
-    `ip_remoto` e `user_agent`, quando informados, sao apenas REGISTRADOS
-    (em hash) na sessao. Nao ha comparacao com o valor anterior, ou seja,
-    nao existe bind de IP/User-Agent aqui.
-    """
-    _limpar_sessoes_expiradas()
-    if sessao_id not in _sessoes:
-        return None
-    sessao = _sessoes[sessao_id]
-    idade = time.time() - sessao["criado_em"]
-    if idade > _SESSAO_TIMEOUT:
-        del _sessoes[sessao_id]
-        return None
-    sessao["ultimo_acesso"] = time.time()
-    if ip_remoto:
-        sessao["ip_hash"] = _hash_ip(ip_remoto)
-    if user_agent:
-        sessao["user_agent_hash"] = hashlib.sha256(user_agent.encode()).hexdigest()
-    return sessao
-
-
-def destruir_sessao_segura(sessao_id: str):
-    """Destroi uma sessao por ID."""
-    _sessoes.pop(sessao_id, None)
-
-
-def _limpar_sessoes_expiradas():
-    agora = time.time()
-    expiradas = [k for k, v in _sessoes.items()
-                 if agora - v["criado_em"] > _SESSAO_TIMEOUT]
-    for k in expiradas:
-        del _sessoes[k]
-
-
-def _hash_ip(ip: str) -> str:
-    return hashlib.sha256(ip.encode()).hexdigest()
-
-
-# ---------------------------------------------------------------------------
-# Sanitizacao de Input
-# ---------------------------------------------------------------------------
-_RE_INJECAO_SQL = re.compile(r"(?:'|;|--|\bOR\b|\bAND\b|\bDROP\b|\bDELETE\b|\bINSERT\b|\bUPDATE\b|\bEXEC\b|\bUNION\b|\bSELECT\b)", re.IGNORECASE)
-_RE_TAG_SCRIPT = re.compile(r"<script[^>]*>.*?</script>", re.IGNORECASE | re.DOTALL)
-_RE_EVENT_HANDLER = re.compile(r"\bon\w+\s*=", re.IGNORECASE)
-_RE_JAVASCRIPT_PROTO = re.compile(r"javascript\s*:", re.IGNORECASE)
-_RE_DATA_URI = re.compile(r"data\s*:", re.IGNORECASE)
-
-
-def sanitizar_texto(texto: str, max_len: int = 1000) -> str:
-    """Remove tags script, handlers de evento, e proto javascript de um texto."""
-    if not isinstance(texto, str):
-        return ""
-    texto = texto[:max_len]
-    texto = _RE_TAG_SCRIPT.sub("", texto)
-    texto = _RE_EVENT_HANDLER.sub("", texto)
-    texto = _RE_JAVASCRIPT_PROTO.sub("", texto)
-    texto = _RE_DATA_URI.sub("", texto)
-    texto = texto.strip()
-    return texto
-
-
-def sanitizar_html(texto: str) -> str:
-    """Escapa entidades HTML para prevencao de XSS."""
-    if not isinstance(texto, str):
-        return ""
-    return (texto
-            .replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-            .replace('"', "&quot;")
-            .replace("'", "&#x27;"))
-
-
-def validar_sql_safe(consulta: str, params: tuple = ()) -> bool:
-    """Verifica se uma consulta SQL parece segura (usando parametros)."""
-    if params:
-        return True
-    if _RE_INJECAO_SQL.search(consulta):
-        log.warning("[SQL-INJECTION] Consulta potencialmente insegura detectada.")
-        return False
-    return True
-
-
+# Aqui viviam `hash_senha` e `verificar_senha` (PBKDF2-HMAC-SHA256, 600 mil
+# iteracoes). Sairam pelo mesmo criterio que tirou os outros 40% deste
+# modulo: nenhuma rota as chamava.
+#
+# Elas tinham sobrevivido a limpeza anterior por um motivo que deixou de
+# valer. A auditoria as apontava como a peca pronta para o degrau 2 do
+# SEG-01 -- identidade propria do ERP, em vez de reaproveitar o OAuth da
+# Microsoft como identidade. Esse degrau foi descartado junto com a decisao
+# de congelar o escopo do produto.
+#
+# Criptografia forte que ninguem chama nao protege nada; so sugere ao
+# proximo leitor que existe login local. Se a identidade propria voltar a
+# ser prioridade, o codigo esta no historico (`git log -S hash_senha`), e
+# reescreve-lo custa menos do que o risco de mante-lo vivo e sem exercicio.
 # ---------------------------------------------------------------------------
 # Seguranca de Upload de Arquivos
 # ---------------------------------------------------------------------------
@@ -463,6 +267,29 @@ _MIME_TYPES_PERMITIDOS = {
 }
 
 
+def _medir_sem_ler(arquivo) -> int:
+    """
+    Tamanho do arquivo pelo ponteiro, sem materializar o conteudo.
+
+    Media-lo com `len(arquivo.read())` carregava os 10 MB inteiros em memoria
+    so para descobrir quantos bytes eram -- e o parser logo em seguida lia tudo
+    de novo. Duas copias completas do arquivo antes de qualquer validacao de
+    conteudo.
+
+    `seek(0, SEEK_END)` faz o mesmo trabalho sem alocar nada. O `finally`
+    devolve o ponteiro ao inicio: sem isso o parser leria a partir do fim e
+    encontraria um arquivo vazio.
+    """
+    if not hasattr(arquivo, 'seek') or not hasattr(arquivo, 'tell'):
+        # Duble de teste sem ponteiro. Cai para a leitura, que ai e barata.
+        return len(arquivo.read()) if hasattr(arquivo, 'read') else 0
+    try:
+        arquivo.seek(0, os.SEEK_END)
+        return arquivo.tell()
+    finally:
+        arquivo.seek(0)
+
+
 def validar_upload(arquivo, max_size: int = _TAMANHO_MAXIMO_UPLOAD) -> tuple:
     """
     Valida um arquivo uploadado. Retorna (valido: bool, erro: str ou None).
@@ -470,9 +297,7 @@ def validar_upload(arquivo, max_size: int = _TAMANHO_MAXIMO_UPLOAD) -> tuple:
     if arquivo is None:
         return False, "Nenhum arquivo fornecido."
 
-    tamanho = len(arquivo.read()) if hasattr(arquivo, 'read') else 0
-    if hasattr(arquivo, 'seek'):
-        arquivo.seek(0)
+    tamanho = _medir_sem_ler(arquivo)
 
     if tamanho > max_size:
         return False, f"Arquivo excede o tamanho maximo de {max_size // (1024*1024)}MB."
@@ -525,91 +350,3 @@ def log_evento_seguro(acao: str, detalhes: str, nivel: str = "info"):
     """Registra um evento de seguranca de forma consistente."""
     logger = getattr(log, nivel, log.info)
     logger("[SECURITY] %s: %s", acao, detalhes)
-
-
-# ---------------------------------------------------------------------------
-# Deteccao de Forca Bruta
-# ---------------------------------------------------------------------------
-
-_brute_force_tentativas: dict = {}
-_BRUTE_FORCE_MAX_TENTATIVAS = 5
-# Janela deslizante. O bloqueio dura enquanto houver MAX_TENTATIVAS dentro
-# dela: passados 5 minutos sem novas tentativas, o IP volta a ser aceito.
-_BRUTE_FORCE_JANELA = 300  # 5 minutos
-
-
-def registrar_tentativa_login(endereco_ip: str, sucesso: bool):
-    """Registra uma tentativa de login para deteccao de bruteforce."""
-    agora = time.time()
-    if endereco_ip not in _brute_force_tentativas:
-        _brute_force_tentativas[endereco_ip] = []
-
-    tentativas = _brute_force_tentativas[endereco_ip]
-    tentativas.append(agora)
-
-    tentativas = [t for t in tentativas if agora - t < _BRUTE_FORCE_JANELA]
-    _brute_force_tentativas[endereco_ip] = tentativas
-
-    if sucesso:
-        _brute_force_tentativas.pop(endereco_ip, None)
-
-
-def esta_bloqueado_bruteforce(endereco_ip: str) -> bool:
-    """Verifica se o endereco IP esta bloqueado por bruteforce."""
-    agora = time.time()
-    if endereco_ip not in _brute_force_tentativas:
-        return False
-    tentativas = _brute_force_tentativas[endereco_ip]
-    recentes = [t for t in tentativas if agora - t < _BRUTE_FORCE_JANELA]
-    if len(recentes) >= _BRUTE_FORCE_MAX_TENTATIVAS:
-        return True
-    return False
-
-
-# ---------------------------------------------------------------------------
-# Assinatura de Requisicoes (Request Signing)
-# ---------------------------------------------------------------------------
-
-def assinar_request(dados: dict, segredo: str) -> str:
-    """Gera uma assinatura HMAC-SHA256 para dados de requisicao."""
-    payload = json.dumps(dados, sort_keys=True, separators=(',', ':'))
-    return hmac.new(segredo.encode(), payload.encode(), hashlib.sha256).hexdigest()
-
-
-def verificar_assinatura(dados: dict, segredo: str, assinatura: str) -> bool:
-    """Verifica se a assinatura HMAC corresponde aos dados."""
-    esperada = assinar_request(dados, segredo)
-    return hmac.compare_digest(esperada, assinatura)
-
-
-# ---------------------------------------------------------------------------
-# Deteccao de Anomalias de Dados
-# ---------------------------------------------------------------------------
-
-def detectar_anomalia_cliente(dados: dict, historico_consultas: list = None) -> dict:
-    """
-    Analisa dados do cliente para detectar anomalias.
-    Retorna dict com 'eh_anomalo': bool e 'motivos': list.
-
-    `historico_consultas` e aceito para compatibilidade da assinatura, mas
-    nao influencia o resultado: nenhuma regra hoje depende do historico.
-    """
-    anomalias = {"eh_anomalo": False, "motivos": []}
-
-    nome = str(dados.get('nome', ''))
-    if len(nome) > 200:
-        anomalias["motivos"].append("Nome excepcionalmente longo")
-        anomalias["eh_anomalo"] = True
-
-    cep = str(dados.get('cep', ''))
-    cep_limpo = cep.replace('-', '').replace('.', '').replace(' ', '')
-    if not cep_limpo.isdigit() or len(cep_limpo) != 8:
-        anomalias["motivos"].append("CEP invalido")
-        anomalias["eh_anomalo"] = True
-
-    observacoes = str(dados.get('observacoes', ''))
-    if len(observacoes) > 5000:
-        anomalias["motivos"].append("Observacoes excepcionalmente longas")
-        anomalias["eh_anomalo"] = True
-
-    return anomalias

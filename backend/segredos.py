@@ -3,10 +3,11 @@ Cofre das credenciais de integracao.
 
 O problema
 ----------
-`ASAAS_API_KEY` e `GEMINI_API_KEY` viviam em texto puro em
+`MP_ACCESS_TOKEN` e `GEMINI_API_KEY` viviam em texto puro em
 `%APPDATA%\\AdriPoltronas\\.env`. Qualquer processo rodando como o mesmo
-usuario -- e qualquer pessoa que abrisse a pasta -- lia as chaves. A do Asaas,
-em producao, movimenta dinheiro de verdade.
+usuario -- e qualquer pessoa que abrisse a pasta -- lia as chaves. A do
+Mercado Pago da acesso total a conta do vendedor: criar cobranca, ler
+movimentacao, estornar.
 
 Os tokens da Microsoft ja eram cifrados com DPAPI desde a 1.0. As chaves de
 integracao ficaram de fora, e nao havia motivo tecnico: e a mesma
@@ -48,7 +49,6 @@ from __future__ import annotations
 import logging
 import os
 import shutil
-from typing import Optional
 
 import security
 
@@ -61,7 +61,7 @@ NOME_DO_COFRE = ".segredos"
 # perde-lo custa apenas relogin.
 CHAVES_PROTEGIDAS = ("MP_ACCESS_TOKEN", "GEMINI_API_KEY")
 
-_cache: Optional[dict] = None
+_cache: dict | None = None
 
 
 def caminho_do_cofre() -> str:
@@ -86,7 +86,7 @@ def _ler_cofre() -> dict:
         return _cache
 
     try:
-        with open(caminho, "r", encoding="utf-8") as arquivo:
+        with open(caminho, encoding="utf-8") as arquivo:
             linhas = arquivo.read().splitlines()
     except OSError as erro:
         log.warning("[SEGREDOS] Nao foi possivel ler o cofre: %s", erro)
@@ -134,8 +134,9 @@ def _valores_vindos_do_env() -> set:
     """
     Nomes que o `.env` colocou em `os.environ`.
 
-    Sem esta distincao nao daria para saber se `ASAAS_API_KEY` veio do arquivo
-    (e portanto perde para o cofre) ou foi injetada de fora (e portanto vence).
+    Sem esta distincao nao daria para saber se `MP_ACCESS_TOKEN` veio do
+    arquivo (e portanto perde para o cofre) ou foi injetada de fora (e portanto
+    vence).
     """
     return _origem_env
 
@@ -207,7 +208,7 @@ def migrar_do_env(caminho_env: str) -> list:
         return []
 
     try:
-        with open(caminho_env, "r", encoding="utf-8") as arquivo:
+        with open(caminho_env, encoding="utf-8") as arquivo:
             linhas = arquivo.read().splitlines()
     except OSError as erro:
         log.warning("[SEGREDOS] Nao foi possivel ler %s: %s", caminho_env, erro)
@@ -252,6 +253,71 @@ def migrar_do_env(caminho_env: str) -> list:
             arquivo.write("\n".join(novas) + "\n")
     except OSError as erro:
         log.warning("[SEGREDOS] Cofre gravado, mas o .env nao pode ser limpo: %s", erro)
+        # O `.env` continua com as chaves em claro, entao a copia ainda pode
+        # servir de referencia. Nao apagar aqui e deliberado.
+        return sorted(em_texto)
 
+    _descartar_copia_em_claro(caminho_env + ".bak", em_texto)
     log.info("[SEGREDOS] Migradas para o cofre: %s", ", ".join(sorted(em_texto)))
     return sorted(em_texto)
+
+
+def _descartar_copia_em_claro(caminho_bak: str, migradas: dict) -> None:
+    """
+    Apaga o `.env.bak` -- mas so depois de reler o cofre e conferir cada chave.
+
+    A copia existe para proteger contra uma falha DURANTE a reescrita do
+    `.env`. Cumprida essa funcao, ela vira o oposto do que o cofre faz: um
+    arquivo permanente, em texto puro, na mesma pasta do banco, contendo o
+    `MP_ACCESS_TOKEN` (que da acesso total a conta do vendedor no Mercado Pago
+    -- criar cobranca, ler movimentacao, estornar) e a `GEMINI_API_KEY`. O
+    trabalho de cifrar ficava metade desfeito, e para sempre.
+
+    A conferencia por releitura e o que torna seguro apagar. O risco oposto e
+    real: se o DPAPI gravar e nao conseguir decifrar de volta -- perfil de
+    usuario recriado, chave da maquina trocada --, apagar a copia perderia a
+    credencial. Entao releitura primeiro; qualquer divergencia mantem o
+    arquivo e registra o motivo.
+    """
+    global _cache
+    if not os.path.exists(caminho_bak):
+        return
+
+    # Forca a releitura do disco: o cache foi populado pelo `gravar()` e
+    # confirmaria o valor que temos em memoria, nao o que ficou no arquivo.
+    _cache = None
+    try:
+        # `_ler_cofre()` e nao `obter()`, e a diferenca e a razao de este
+        # arquivo poder ser apagado com seguranca.
+        #
+        # `obter()` percorre a precedencia inteira e termina em
+        # `return do_ambiente_real or padrao`. Em producao o `load_dotenv()` ja
+        # colocou MP_ACCESS_TOKEN e GEMINI_API_KEY em `os.environ` -- com
+        # exatamente o valor que esta sendo migrado. Entao, se o DPAPI cifrasse
+        # e NAO conseguisse decifrar de volta, o cofre devolvia vazio, a funcao
+        # caia nesse ultimo degrau, entregava o valor do ambiente e a
+        # conferencia "passava". O `.env` ja reescrito sem as chaves mais a
+        # copia apagada = credencial perdida sem volta.
+        #
+        # A pergunta que esta conferencia precisa responder e estreita: o COFRE
+        # devolve o que foi gravado? Qualquer outra fonte responde outra
+        # pergunta.
+        do_cofre = _ler_cofre()
+        divergentes = [nome for nome, valor in migradas.items()
+                       if do_cofre.get(nome) != valor]
+    except Exception as erro:  # noqa: BLE001 - qualquer falha aqui e motivo de nao apagar
+        log.warning("[SEGREDOS] Cofre nao pode ser conferido (%s); "
+                    "mantendo %s por seguranca.", erro, os.path.basename(caminho_bak))
+        return
+
+    if divergentes:
+        log.warning("[SEGREDOS] Cofre nao devolveu %s como gravado; "
+                    "mantendo %s por seguranca.",
+                    ", ".join(sorted(divergentes)), os.path.basename(caminho_bak))
+        return
+
+    try:
+        os.remove(caminho_bak)
+        log.info("[SEGREDOS] Copia em texto claro descartada apos conferencia do cofre.")
+    except OSError as erro:
+        log.warning("[SEGREDOS] Nao foi possivel apagar %s: %s", caminho_bak, erro)

@@ -5,7 +5,6 @@ from logging.handlers import RotatingFileHandler
 import uuid
 import json
 import sys
-import time
 from flask import (
     Flask,
     g,
@@ -132,54 +131,25 @@ app.config.update(
 # dicionario de config sugerindo um modo que ninguem le.
 
 # ---------------------------------------------------------------------------
-# CSRF TOKEN global para a sessao
+# O TOKEN CSRF SAIU NA 1.5.1
+#
+# Havia aqui um cache que gerava um token e o devolvia no header X-CSRF-Token
+# a cada resposta. O frontend guardava em cookie e reenviava. E o backend nunca
+# validava, em lugar nenhum -- as duas pontas executavam o ritual completo de
+# uma protecao inexistente.
+#
+# Quem protege as rotas que alteram estado e `_bloquear_requisicao_de_origem_
+# externa`, pela checagem de Origin/Referer, e sempre foi.
+#
+# Ligar a validacao de verdade nao era alternativa: a chave do cache era o
+# cookie `adri_session`, que este app nunca emite (havia UMA entrada, de chave
+# vazia, para todo mundo), e `security.validar_csrf_token` era de uso unico
+# enquanto o cache reservava o mesmo token por uma hora -- a segunda requisicao
+# seria recusada como replay.
+#
+# Se um dia fizer sentido ter CSRF de verdade aqui, ele nasce inteiro: emissao
+# por sessao real, validacao no `before_request`, e teste que falhe sem ela.
 # ---------------------------------------------------------------------------
-VALIDADE_CSRF_SEGUNDOS = 3600
-MAX_TOKENS_CSRF_EM_CACHE = 1000
-
-_csrf_token_cache = {}
-
-
-def _obter_csrf_token() -> str:
-    """
-    Retorna ou gera o token enviado no header X-CSRF-Token.
-
-    ATENCAO -- o backend NAO valida este token em lugar nenhum. Quem
-    protege as rotas que alteram estado e a checagem de Origin/Referer em
-    _bloquear_requisicao_de_origem_externa(), como descreve o
-    API_STANDARD.md. O header existe porque o frontend faz a outra metade
-    do ritual (guarda em cookie e reenvia), e some-lo quebraria essa ponta.
-
-    Duas consequencias de nao ser um token de verdade, para nao induzir a
-    erro quem for mexer aqui:
-      - a chave do cache e o cookie `adri_session`, que este app nunca
-        emite. Na pratica ha uma unica entrada, de chave '', para todos.
-      - security.validar_csrf_token() e de uso unico (marca `usado`),
-        enquanto este cache reserve o MESMO token por uma hora. Ligar uma
-        coisa na outra hoje recusaria a segunda requisicao como replay.
-    """
-    session_id = request.cookies.get('adri_session', '')
-    if session_id in _csrf_token_cache:
-        token_info = _csrf_token_cache[session_id]
-        if time.time() - token_info['gerado_em'] < VALIDADE_CSRF_SEGUNDOS:
-            return token_info['token']
-    token = security.gerar_csrf_token()
-    _csrf_token_cache[session_id] = {'token': token, 'gerado_em': time.time()}
-    if len(_csrf_token_cache) > MAX_TOKENS_CSRF_EM_CACHE:
-        limpar_csrf_cache()
-    return token
-
-
-def limpar_csrf_cache():
-    """Remove do cache os tokens CSRF ja expirados."""
-    agora = time.time()
-    # As entradas vivas sao copiadas ANTES do clear(). Reconstruir lendo do
-    # proprio dicionario ja esvaziado levantava KeyError e derrubava a
-    # requisicao que tivesse a infelicidade de estourar o limite do cache.
-    vivos = {chave: dados for chave, dados in _csrf_token_cache.items()
-             if agora - dados['gerado_em'] < VALIDADE_CSRF_SEGUNDOS}
-    _csrf_token_cache.clear()
-    _csrf_token_cache.update(vivos)
 
 
 # ---------------------------------------------------------------------------
@@ -227,12 +197,20 @@ def _csp_header() -> str:
     permite defacement e vazamento por seletor, nao execucao de codigo -- e a
     troca, aqui, e consciente.
     """
+    # `script-src 'self'` sem excecao: o Leaflet e o Chart.js passaram a ser
+    # servidos pelo proprio backend (frontend/vendor/). Enquanto vinham de CDN,
+    # a politica precisava confiar em unpkg.com e cdn.jsdelivr.net -- dois
+    # dominios de terceiro autorizados a executar codigo dentro do app, num
+    # programa que trata nome, endereco e valores a receber dos clientes.
     return "; ".join([
         "default-src 'self'",
-        "script-src 'self' https://unpkg.com https://cdn.jsdelivr.net",
-        "style-src 'self' 'unsafe-inline' https://unpkg.com https://fonts.googleapis.com",
+        "script-src 'self'",
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
         "font-src 'self' https://fonts.gstatic.com",
-        "img-src 'self' data: blob: https://*.tile.openstreetmap.org https://unpkg.com",
+        # openstreetmap.org continua liberado: sao os ladrilhos do mapa, que por
+        # natureza vem da rede. As IMAGENS do Leaflet (marcador, sombra) agora
+        # sao locais e cabem em 'self'.
+        "img-src 'self' data: blob: https://*.tile.openstreetmap.org",
         "connect-src 'self' https://viacep.com.br https://nominatim.openstreetmap.org https://generativelanguage.googleapis.com https://login.microsoftonline.com",
         "frame-ancestors 'none'",
         "base-uri 'self'",
@@ -406,10 +384,23 @@ def health():
 # ---------------------------------------------------------------------------
 @app.errorhandler(Exception)
 def _erro_generico(e):
-    correlation_id = uuid.uuid4().hex[:12]
-    log.exception("Erro nao tratado [%s]: %s", correlation_id, e)
     if request.path.startswith('/api/'):
+        # Aqui a excecao MORRE: o operador recebe um 500 sem detalhe interno e
+        # o id de correlacao e a unica ponte entre a tela e o log. Por isso o
+        # traceback tem de ser registrado neste ponto, com o id junto.
+        correlation_id = uuid.uuid4().hex[:12]
+        log.exception("Erro nao tratado [%s]: %s", correlation_id, e)
         return jsonify({"erro": "Erro interno do servidor.", "id": correlation_id}), 500
+
+    # Fora de /api/ a excecao SEGUE, para o Flask renderizar a pagina de erro
+    # HTML. E o Flask registra o traceback dela por conta propria, no
+    # `app.logger`.
+    #
+    # Registrar aqui tambem gravava o MESMO traceback duas vezes em `app.log`,
+    # com ids de correlacao diferentes e nenhum deles exibido a ninguem -- o
+    # que faz o arquivo parecer contar dois incidentes onde houve um. Uma linha
+    # curta basta para dizer que a excecao passou por aqui.
+    log.warning("Excecao fora de /api/ em %s: %s", request.path, type(e).__name__)
     raise e
 
 
@@ -431,8 +422,6 @@ def _erro_http(e):
 #   /api/health -- e a sonda de identidade. O Electron e o app Qt perguntam a
 #          ela QUEM esta na porta antes de adotar o backend, e isso acontece
 #          muito antes de qualquer login. Nao devolve dado de negocio.
-#   /api/pagamentos/webhook -- chega do Asaas, de fora, e tem autenticacao
-#          propria (ASAAS_WEBHOOK_TOKEN).
 #   /, /manifest.json, /sw.js -- e a casca da PWA, que precisa carregar para
 #          o operador ter onde clicar em "Conectar".
 ROTAS_SEM_AUTH = frozenset({
@@ -475,7 +464,26 @@ def _verificar_autenticacao():
 
     sessao = database.obter_sessao()
     if sessao and sessao.get('token'):
-        g.erp_usuario_identificador = sessao.get('conta', '')
+        conta = sessao.get('conta', '')
+        # Conferida aqui TAMBEM, e nao so no /callback: uma sessao gravada
+        # antes de a allowlist existir -- ou antes de a conta sair dela --
+        # continuaria valendo para sempre, ja que nada reavalia a linha depois
+        # de gravada.
+        if not config.conta_autorizada(conta):
+            log.warning("[AUTH] Sessao de conta fora da allowlist: %s", conta)
+            security.log_evento_seguro(
+                "AUTH_CONTA_NAO_AUTORIZADA", f"Conta: {conta}", "warning")
+            database.excluir_sessao()
+            # `codigo` existe para a tela nao ter de casar prosa em portugues:
+            # este 403 e o MESMO status que `_exigir_capacidade` usa para dizer
+            # "Acesso negado.", e sem um discriminador a interface so poderia
+            # separar os dois comparando a mensagem -- que muda quando alguem
+            # reescreve o texto.
+            return jsonify({
+                "erro": "Esta conta nao tem permissao para usar o sistema.",
+                "codigo": "conta_nao_autorizada",
+            }), 403
+        g.erp_usuario_identificador = conta
         return None
 
     # OPTIONS fica de fora porque e o preflight do proprio navegador: ele nao
@@ -528,16 +536,13 @@ def _aplicar_seguranca_requisicao():
     if resposta_auth is not None:
         return resposta_auth
 
-    ip_remoto = get_remote_address()
-    # ATENCAO -- esta checagem esta inerte: nenhum ponto do backend chama
-    # security.registrar_tentativa_login(), entao o contador nunca sai do
-    # zero e isto sempre devolve False. Nao existe login com senha aqui (a
-    # autenticacao e OAuth da Microsoft), entao nao ha o que contar hoje.
-    # Fica no lugar para o dia em que houver -- mas nao conte com ele como
-    # protecao ativa.
-    if security.esta_bloqueado_bruteforce(ip_remoto):
-        log.warning("[BRUTE-FORCE] IP bloqueado: %s", ip_remoto)
-        return jsonify({"erro": "Acesso temporariamente bloqueado por seguranca."}), 429
+    # A checagem de forca bruta que existia aqui saiu na 1.5.1. Ela estava
+    # inerte: nenhum ponto do backend chamava `registrar_tentativa_login`,
+    # entao o contador nunca saia do zero e a funcao sempre devolvia False.
+    # Nao ha login com senha neste app -- a autenticacao e o OAuth da
+    # Microsoft --, entao nao havia o que contar. Um guarda que sempre deixa
+    # passar nao e defesa em profundidade: e uma linha que faz o leitor
+    # acreditar numa protecao a mais do que existe.
 
     ua = request.headers.get('User-Agent', '')
     if ua and any(b in ua.lower() for b in ['sqlmap', 'nikto', 'nmap', 'masscan', 'zgrab']):
@@ -639,11 +644,6 @@ def _aplicar_cabecalhos_de_seguranca(resposta):
     return resposta
 
 
-@app.after_request
-def _adicionar_csrf_token_header(resposta):
-    resposta.headers.setdefault('X-CSRF-Token', _obter_csrf_token())
-    return resposta
-
 
 # ---------------------------------------------------------------------------
 # ROTA INDEX
@@ -691,15 +691,29 @@ def auth_callback():
     data = urllib.parse.urlencode(payload).encode('utf-8')
 
     try:
-        with urllib.request.urlopen(urllib.request.Request(config.URL_TOKEN_MICROSOFT, data=data, method='POST')) as resposta:
+        with urllib.request.urlopen(urllib.request.Request(config.URL_TOKEN_MICROSOFT, data=data, method='POST')) as resposta:  # noqa: S310 - URL montada de constante do proprio codigo, sempre https
             res_dados = json.loads(resposta.read().decode('utf-8'))
             token_acesso = res_dados.get('access_token')
 
             req_perfil = urllib.request.Request("https://graph.microsoft.com/v1.0/me",
                 headers={"Authorization": f"Bearer {token_acesso}"})
-            with urllib.request.urlopen(req_perfil) as resp_perfil:
+            with urllib.request.urlopen(req_perfil) as resp_perfil:  # noqa: S310 - URL montada de constante do proprio codigo, sempre https
                 dados_perfil = json.loads(resp_perfil.read().decode('utf-8'))
                 email_usuario = dados_perfil.get('userPrincipalName', 'Conta Conectada')
+
+            # A allowlist e conferida ANTES de gravar a sessao: uma conta nao
+            # autorizada nunca chega a existir na tabela. Recusar depois, no
+            # guarda de autenticacao, deixaria a linha gravada e o operador
+            # legitimo desconectado -- `salvar_sessao` substitui a sessao
+            # anterior.
+            if not config.conta_autorizada(email_usuario):
+                log.warning("[CALLBACK] Conta fora da allowlist recusada: %s", email_usuario)
+                security.log_evento_seguro(
+                    "OAUTH_CONTA_RECUSADA", f"Conta nao autorizada: {email_usuario}", "warning")
+                return render_template_string(
+                    config._CALLBACK_TEMPLATE, titulo="Conta nao autorizada", erro=True,
+                    mensagem=f"A conta {email_usuario} nao tem permissao para usar este sistema.",
+                    instrucao="Feche esta aba e entre com a conta autorizada."), 403
 
             # `refresh_token` so vem porque `offline_access` esta nos escopos.
             # E ele que evita mandar o operador refazer o login a cada hora.

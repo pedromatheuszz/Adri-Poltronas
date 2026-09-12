@@ -77,8 +77,8 @@ def _texto_para_decimal(texto: str) -> Decimal:
         raise ValorInvalido("Valor monetario mal formado: %r" % texto)
     try:
         return Decimal(limpo)
-    except Exception:
-        raise ValorInvalido("Valor monetario mal formado: %r" % texto)
+    except Exception as erro:
+        raise ValorInvalido("Valor monetario mal formado: %r" % texto) from erro
 
 
 def formatar(centavos: int) -> str:

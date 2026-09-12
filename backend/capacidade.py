@@ -213,7 +213,7 @@ def carregar_ou_criar(pasta_de_dados: str) -> str:
     """
     caminho = caminho_do_arquivo(pasta_de_dados)
     try:
-        with open(caminho, "r", encoding="utf-8") as arquivo:
+        with open(caminho, encoding="utf-8") as arquivo:
             existente = arquivo.read().strip()
         if existente:
             return existente

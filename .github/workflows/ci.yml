@@ -22,6 +22,17 @@ on:
 #   codecov/codecov-action@v5.5.1  5a1091511ad55cbe89839c7260b706298ca349f7
 #   jurplel/install-qt-action@v4.3.0  d325aaf2a8baeeda41ad0b5d39f84a6af9bcf005
 
+# Este workflow so LE o codigo. Nenhum job dele cria release, comenta em PR nem
+# escreve no repositorio.
+#
+# Sem este bloco o GITHUB_TOKEN herda o padrao do repositorio, que costuma ser
+# mais amplo do que qualquer job aqui precisa -- e este workflow roda em pull
+# request de qualquer origem, que e exatamente o caso em que o codigo executado
+# nao passou por revisao ainda. O `release.yml` ja declarava o dele; faltava
+# este.
+permissions:
+  contents: read
+
 jobs:
   test:
     # A aplicacao e Windows-only (DPAPI via pywin32, instalador NSIS).
@@ -347,7 +358,26 @@ jobs:
     - name: Verificar conteudo do bundle
       shell: bash
       run: |
-        for RECURSO in alembic.ini migrations templates; do
+        # `frontend/vendor` entrou nesta lista na 1.5.1, quando o Leaflet e o
+        # Chart.js deixaram de vir de CDN. A CSP passou a `script-src 'self'`
+        # e o service worker perdeu o precache externo, entao nao existe mais
+        # nenhum fallback: se a pasta nao chegar ao bundle, o app instalado
+        # abre normal e o mapa e os graficos ficam em branco EM SILENCIO --
+        # o navegador embutido bloqueia sem avisar, e o unico rastro e o
+        # console, que ninguem abre.
+        RECURSOS="
+          alembic.ini
+          migrations
+          templates
+          frontend/js/app.js
+          frontend/js/comercial.js
+          frontend/sw.js
+          frontend/vendor/leaflet/leaflet.js
+          frontend/vendor/leaflet/leaflet.css
+          frontend/vendor/leaflet/images/marker-icon.png
+          frontend/vendor/chartjs/chart.umd.min.js
+        "
+        for RECURSO in $RECURSOS; do
           if [ ! -e "dist/AdriPoltronasBackend/_internal/$RECURSO" ]; then
             echo "::error::O bundle nao levou '$RECURSO'."
             exit 1
@@ -401,8 +431,19 @@ jobs:
         echo "::error title=electron-builder falhou (codigo $CODIGO)::$MENSAGEM"
         exit 1
 
+    # `continue-on-error` porque este upload e DIAGNOSTICO, nao verificacao.
+    #
+    # Ele existe para que, quando o empacotamento quebrar, o log esteja
+    # disponivel. Sem esta linha ele fazia o oposto: a cota de armazenamento de
+    # artefatos da conta estourou, o upload falhou, o job foi dado como
+    # reprovado e o passo SEGUINTE -- que instala o .exe de verdade e confere
+    # que ele abre -- foi PULADO. O unico job que prova que o cliente recebe
+    # algo funcional deixou de rodar por causa de um anexo de depuracao.
+    #
+    # Um passo que so ajuda a investigar nao pode decidir se a entrega passa.
     - name: Publicar log do empacotamento
       if: always()
+      continue-on-error: true
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4  # v5.0.0
       with:
         name: log-do-empacotamento
@@ -517,7 +558,15 @@ jobs:
           throw "o app instalado nao aplicou as migrations (esta em '$revisao', deveria estar em '$cabeca')"
         }
 
+    # Tambem `continue-on-error`, e pelo mesmo motivo -- mas com uma diferenca
+    # que vale registrar: aqui a prova ja aconteceu. Este passo roda DEPOIS de
+    # instalar o .exe e conferir que ele abre, entao o que se perde numa falha
+    # de cota e a conveniencia de baixar o instalador, nao a garantia.
+    #
+    # `if-no-files-found: error` continua valendo: instalador ausente e um
+    # defeito de verdade, e esse erro nao e de upload.
     - name: Publicar instalador como artefato
+      continue-on-error: true
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4  # v5.0.0
       with:
         name: instalador-windows

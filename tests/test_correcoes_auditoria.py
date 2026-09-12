@@ -155,51 +155,31 @@ def test_csp_recusa_script_inline(client):
     assert "'unsafe-inline'" in style_src
 
 
-def test_limpar_csrf_cache_preserva_tokens_vivos():
-    """Reconstruir o cache lendo do dicionario ja esvaziado levantava KeyError."""
-    import app as app_module_local
-    cache = app_module_local._csrf_token_cache
-    cache.clear()
-    cache['vivo'] = {'token': 'a', 'gerado_em': __import__('time').time()}
-    cache['expirado'] = {'token': 'b', 'gerado_em': 0}
-
-    app_module_local.limpar_csrf_cache()
-
-    assert 'vivo' in cache
-    assert 'expirado' not in cache
-    cache.clear()
-
-
-def test_validar_sessao_segura_nao_levanta_nameerror():
-    """`_SESSION_TIMEOUT` era usado sem existir; a constante e `_SESSAO_TIMEOUT`."""
-    import security
-    sessao_id = security.criar_sessao_segura("conta@exemplo.com", "token-qualquer")
-    assert security.validar_sessao_segura(sessao_id) is not None
-    security.destruir_sessao_segura(sessao_id)
+# Dois testes desta secao sairam na 1.5.1, com o codigo que eles cobriam.
+#
+# `test_limpar_csrf_cache_preserva_tokens_vivos` protegia um KeyError real no
+# cache de tokens CSRF, e `test_validar_sessao_segura_nao_levanta_nameerror`
+# protegia um NameError real no gerenciador de sessao em memoria. Os dois
+# defeitos eram verdadeiros e as correcoes estavam certas -- mas nem o cache nem
+# o gerenciador eram chamados por rota nenhuma.
+#
+# Era a forma mais discreta do problema que SEG-03 descreve: teste de qualidade,
+# cobrindo codigo que producao nunca executa, inflando a cobertura e sugerindo
+# que aquelas defesas estavam de pe.
 
 
 # -----------------------------------------------------------------------------
-# Item 3 - DELETE /api/pagamentos/<id> chamava o Asaas ANTES de checar se a
-# cobranca era cancelavel. Num pagamento ja recebido a cobranca era cancelada
-# no gateway e o registro local permanecia intacto: divergencia permanente.
+# Item 3 - saiu na 1.5.0, junto com o gateway de cobranca.
+#
+# Era sobre DELETE /api/pagamentos/<id> chamar o Asaas antes de checar se a
+# cobranca era cancelavel. A rota, o modulo `asaas.py` e a fixture que espiava
+# as chamadas foram removidos com a integracao.
+#
+# A fixture ficou para tras na 1.5.0 e vale registrar o porque de ninguem ter
+# notado: nenhum teste a requisitava, entao o `import asaas` dentro dela nunca
+# executava. Uma fixture orfa nao falha -- ela espera. Teria quebrado no dia em
+# que alguem a usasse, com um ImportError sem relacao aparente com o teste novo.
 # -----------------------------------------------------------------------------
-@pytest.fixture
-def asaas_espiao(monkeypatch):
-    """Registra as chamadas ao Asaas sem tocar na rede."""
-    import asaas
-    chamadas = []
-
-    def _cancelar(asaas_payment_id):
-        chamadas.append(asaas_payment_id)
-        return dict(_cancelar.resposta)
-
-    _cancelar.resposta = {"deleted": True}
-    monkeypatch.setattr(asaas, 'esta_configurado', lambda: True)
-    monkeypatch.setattr(asaas, 'cancelar_pagamento', _cancelar)
-    return chamadas, _cancelar
-
-
-
 
 
 
@@ -705,7 +685,7 @@ def test_app_importa_pelo_caminho_de_pacote_do_main():
         "from backend.app import app;"
         "print(len(list(app.url_map.iter_rules())))"
     )
-    resultado = subprocess.run([sys.executable, '-c', codigo],
+    resultado = subprocess.run([sys.executable, '-c', codigo],  # noqa: S603 - argumentos fixos, montados no codigo e nao pela entrada
                                capture_output=True, text=True, cwd=raiz, timeout=120)
     assert resultado.returncode == 0, resultado.stderr[-2000:]
     assert int(resultado.stdout.strip().splitlines()[-1]) > 0

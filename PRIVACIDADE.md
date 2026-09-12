@@ -13,17 +13,19 @@ Ele descreve o comportamento real do software. Não é parecer jurídico.
 |---|---|---|
 | Nome, CEP, rua, bairro, cidade | `clientes` | Identificar e entregar |
 | Observações livres | `clientes` | Anotações da equipe |
-| Valores, vencimentos, status | `pagamentos` | Cobrança e conferência |
+| Valores, vencimentos, status das parcelas | `pagamentos` | Conferência do recebimento |
 | Endereço e horário de entrega | `entregas_agendadas` | Agenda da equipe |
 | Pedidos e itens | `pedidos`, `pedido_itens` | O que foi vendido |
 | Ações realizadas | `historico`, `auditoria_eventos` | Rastreabilidade |
 | Conta Microsoft conectada | `sessao` | Exportar para o OneDrive |
-| Chaves de integração (Asaas, Gemini) | `.segredos` | Cifradas com DPAPI |
-| Identificador do cliente no Asaas | `clientes_asaas` | Emitir cobrança |
+| Chaves de integração (Mercado Pago, Gemini) | `.segredos` | Cifradas com DPAPI |
 
 **O que o sistema NÃO guarda:** CPF/CNPJ, telefone, e-mail, dados de cartão,
-senha de cliente. O Asaas cria cobranças sem CPF, e nenhuma tela pede esses
-campos.
+senha de cliente. Nenhuma tela pede esses campos.
+
+A tabela `clientes_asaas`, que guardava o identificador do cliente no gateway
+de cobrança, foi apagada do banco pela migração `e5c94a17b3d8` junto com a
+integração, na versão 1.5.0. Ela não existe mais em instalação nenhuma.
 
 **IP não é guardado em texto.** A auditoria registra um hash derivado do IP com
 o segredo da instalação (`anonimizar_ip`), o que permite correlacionar sessões
@@ -48,15 +50,19 @@ Cada uma destas é iniciada por alguém clicando em algo. Nenhuma é automática
 
 | Destino | O que vai | Quando |
 |---|---|---|
-| **Asaas** | Nome do cliente, endereço, valor, vencimento | Ao gerar cobrança Pix ou boleto |
 | **Microsoft OneDrive** | Planilha com os clientes exportados | Ao clicar em "Enviar para Excel" |
 | **ViaCEP** | O CEP digitado | Ao preencher endereço a partir do CEP |
 | **Nominatim (OpenStreetMap)** | Rua, bairro, cidade, CEP | Ao abrir o mapa, para posicionar os marcadores |
 | **Google Gemini** | Cidade e CEP | Ao pedir sugestão de bairro (opcional) |
+| **Mercado Pago** | Valor e referência da instalação — **nenhum dado de cliente** | Ao pagar a licença de uso do aplicativo |
 | **Arquivo local** | O que o operador escolher | Exportar CSV/XLSX, backup |
 
+Nenhum dado de cliente vai ao Mercado Pago: a cobrança ali é da licença do
+aplicativo, paga pela própria Adri, e leva apenas o valor e um identificador da
+instalação.
+
 A tela do mapa avisa que consulta serviços externos. **A mesma clareza precisa
-existir para o Asaas e o OneDrive** — está na lista de melhorias.
+existir para o OneDrive** — está na lista de melhorias.
 
 ## Retenção
 
@@ -107,11 +113,16 @@ O software cuida de parte; o resto depende de como a máquina é usada.
   `%APPDATA%\AdriPoltronas\.segredos`, protegidas por DPAPI e amarradas à sua
   conta do Windows — copiar o arquivo para outra máquina não serve de nada. A
   migração é automática: uma chave colada no `.env` é movida para o cofre na
-  próxima abertura, com cópia do arquivo original em `.env.bak`.
+  próxima abertura. Uma cópia do arquivo original é feita em `.env.bak` antes
+  da reescrita e **apagada logo depois**, assim que o cofre é relido e cada
+  chave conferida — até a 1.5.0 essa cópia ficava para sempre, em texto puro,
+  ao lado da versão cifrada.
   **O que isso não protege:** código rodando como o seu próprio usuário pode
   pedir ao DPAPI que decifre. Contra ele, o que vale é cifrar o disco.
-- **Chave do Asaas em produção move dinheiro de verdade.** Mantenha em sandbox
-  até haver certeza.
+- **O `MP_ACCESS_TOKEN` dá acesso total à conta do vendedor no Mercado Pago**
+  — criar cobrança, ler movimentação, estornar. Use um token de aplicação
+  dedicada à licença, nunca o token principal da conta. Ver
+  `LICENCA_E_PAGAMENTO.md`.
 
 ## Incidentes
 

@@ -15,7 +15,8 @@ divergencia mais cara de achar depois.
 from __future__ import annotations
 
 import datetime
-from typing import Optional
+import logging
+import sqlite3
 
 import database
 import validators
@@ -23,11 +24,18 @@ from erp.comercial import estados, repositorio
 from erp.core import dinheiro
 from erp.core.auditoria import registrar_evento
 
+log = logging.getLogger("adri.comercial")
+
 UNIDADES = ("un", "pc", "cj", "m", "m2", "h")
 FORMAS_DE_PAGAMENTO = ("Pix", "Boleto", "Dinheiro", "Cartao", "Outro")
 
 MAX_PARCELAS = 36
 LIMITE_ITENS_POR_PEDIDO = 200
+
+# Quantas vezes reemitir o numero do pedido quando outro cadastro leva o mesmo.
+# Tres cobre com folga o cenario real (dois cliques do mesmo operador); um
+# numero alto aqui so mascararia um problema diferente.
+TENTATIVAS_DE_NUMERACAO = 3
 
 
 class ErroDeNegocio(Exception):
@@ -45,7 +53,7 @@ class ConflitoDeSituacao(Exception):
 # =============================================================================
 # Catalogo
 # =============================================================================
-def _validar_produto(dados: dict, ignorar_id: Optional[int] = None) -> dict:
+def _validar_produto(dados: dict, ignorar_id: int | None = None) -> dict:
     codigo = (dados.get("codigo") or "").strip()
     descricao = (dados.get("descricao") or "").strip()
     unidade = (dados.get("unidade") or "un").strip().lower()
@@ -92,30 +100,54 @@ def _produto_para_tela(produto: dict) -> dict:
     return produto
 
 
+def _codigo_duplicado(erro: sqlite3.IntegrityError, codigo: str) -> ErroDeNegocio:
+    """
+    Traduz a recusa do indice unico para o MESMO erro da checagem previa.
+
+    A checagem `codigo_em_uso` roda num SELECT fora de transacao, entao dois
+    cadastros simultaneos com o mesmo codigo passam os dois por ela. O indice
+    unico pega o segundo -- e sem esta traducao ele chegava ao operador como
+    500 com id de correlacao, quando a resposta certa e exatamente a mensagem
+    que ele teria recebido se tivesse chegado um segundo depois.
+    """
+    if "produtos.codigo" not in str(erro):
+        raise erro
+    return ErroDeNegocio(f"Ja existe um produto ativo com o codigo {codigo}.")
+
+
 def criar_produto(dados: dict) -> dict:
     campos = _validar_produto(dados)
-    with database.conectar() as conexao:
-        if repositorio.codigo_em_uso(conexao, campos["codigo"]):
-            raise ErroDeNegocio(f"Ja existe um produto ativo com o codigo {campos['codigo']}.")
-        produto_id = repositorio.inserir_produto(conexao, campos)
-        novo = repositorio.obter_produto(conexao, produto_id)
-        registrar_evento(conexao, acao="comercial.produto.criado", entidade="produto",
-                         entidade_id=produto_id, valores_novos=novo)
+    try:
+        with database.conectar() as conexao:
+            if repositorio.codigo_em_uso(conexao, campos["codigo"]):
+                raise ErroDeNegocio(
+                    f"Ja existe um produto ativo com o codigo {campos['codigo']}.")
+            produto_id = repositorio.inserir_produto(conexao, campos)
+            novo = repositorio.obter_produto(conexao, produto_id)
+            registrar_evento(conexao, acao="comercial.produto.criado", entidade="produto",
+                             entidade_id=produto_id, valores_novos=novo)
+    except sqlite3.IntegrityError as erro:
+        raise _codigo_duplicado(erro, campos["codigo"]) from erro
     return _produto_para_tela(novo)
 
 
 def atualizar_produto(produto_id: int, dados: dict) -> dict:
     campos = _validar_produto(dados, ignorar_id=produto_id)
-    with database.conectar() as conexao:
-        anterior = repositorio.obter_produto(conexao, produto_id)
-        if anterior is None:
-            raise NaoEncontrado("Produto nao encontrado.")
-        if repositorio.codigo_em_uso(conexao, campos["codigo"], ignorar_id=produto_id):
-            raise ErroDeNegocio(f"Ja existe um produto ativo com o codigo {campos['codigo']}.")
-        repositorio.atualizar_produto(conexao, produto_id, campos)
-        novo = repositorio.obter_produto(conexao, produto_id)
-        registrar_evento(conexao, acao="comercial.produto.alterado", entidade="produto",
-                         entidade_id=produto_id, valores_anteriores=anterior, valores_novos=novo)
+    try:
+        with database.conectar() as conexao:
+            anterior = repositorio.obter_produto(conexao, produto_id)
+            if anterior is None:
+                raise NaoEncontrado("Produto nao encontrado.")
+            if repositorio.codigo_em_uso(conexao, campos["codigo"], ignorar_id=produto_id):
+                raise ErroDeNegocio(
+                    f"Ja existe um produto ativo com o codigo {campos['codigo']}.")
+            repositorio.atualizar_produto(conexao, produto_id, campos)
+            novo = repositorio.obter_produto(conexao, produto_id)
+            registrar_evento(conexao, acao="comercial.produto.alterado", entidade="produto",
+                             entidade_id=produto_id, valores_anteriores=anterior,
+                             valores_novos=novo)
+    except sqlite3.IntegrityError as erro:
+        raise _codigo_duplicado(erro, campos["codigo"]) from erro
     return _produto_para_tela(novo)
 
 
@@ -167,7 +199,7 @@ def _recalcular(conexao, pedido_id: int) -> dict:
     return repositorio.obter_pedido(conexao, pedido_id)
 
 
-def _pedido_para_tela(pedido: dict, itens: Optional[list] = None) -> dict:
+def _pedido_para_tela(pedido: dict, itens: list | None = None) -> dict:
     pedido = dict(pedido)
     for campo in ("total_bruto_centavos", "desconto_centavos",
                   "frete_centavos", "total_liquido_centavos"):
@@ -195,15 +227,97 @@ def listar_pedidos(situacao: str = "", busca: str = "") -> list[dict]:
                 repositorio.listar_pedidos(conexao, situacao, busca)]
 
 
+def _parcela_para_tela(parcela: dict) -> dict:
+    """
+    Acrescenta o que a tela precisa e o banco nao guarda.
+
+    `em_atraso` e DERIVADO do vencimento, nunca gravado. Gravar 'Atrasado'
+    exigiria uma rotina passando meia-noite para reescrever linhas, e uma
+    parcela vencida ontem apareceria como em dia ate essa rotina rodar. O
+    status gravado responde "o que o operador declarou"; `em_atraso` responde
+    "o que o calendario diz", e as duas perguntas sao diferentes.
+    """
+    saida = dict(parcela)
+    saida["valor"] = dinheiro.serializar(int(parcela.get("valor_centavos") or 0))
+    saida["em_atraso"] = bool(
+        parcela.get("status") == "Pendente"
+        and parcela.get("data_vencimento")
+        and str(parcela["data_vencimento"]) < _hoje()
+    )
+    return saida
+
+
 def obter_pedido(pedido_id: int) -> dict:
     with database.conectar() as conexao:
         pedido = repositorio.obter_pedido_com_itens(conexao, pedido_id)
         if pedido is None:
             raise NaoEncontrado("Pedido nao encontrado.")
         completo = _pedido_para_tela(pedido, pedido["itens"])
-        completo["parcelas"] = repositorio.parcelas_do_pedido(conexao, pedido_id)
+        completo["parcelas"] = [
+            _parcela_para_tela(p) for p in repositorio.parcelas_do_pedido(conexao, pedido_id)]
         completo["entregas"] = repositorio.entregas_do_pedido(conexao, pedido_id)
     return completo
+
+
+# Status que o operador pode declarar numa parcela.
+#
+# 'Atrasado' fica de fora de proposito: ele e derivado do vencimento
+# (`em_atraso`), nao declarado. Deixar o operador marcar 'Atrasado' criaria dois
+# donos para a mesma verdade, e nenhum deles confiavel.
+STATUS_DE_PARCELA = ("Recebido", "Pendente", "Cancelado")
+
+
+def baixar_parcela(pedido_id: int, parcela: int, dados: dict) -> dict:
+    """
+    Dá baixa numa parcela do pedido, ou desfaz uma baixa.
+
+    Esta funcao e o outro lado do faturamento. Ate a 1.5.0 o faturamento
+    emitia as parcelas e nao havia nada no aplicativo que as lesse, muito menos
+    que as recebesse: o ciclo terminava com dinheiro registrado a receber e sem
+    caminho de volta. O pedido, por desenho, vira terminal ao ser faturado --
+    entao o recebimento nao tinha onde acontecer.
+    """
+    numero = validators.inteiro_positivo(parcela)
+    if numero is None:
+        raise ErroDeNegocio("Numero de parcela invalido.")
+
+    status = (dados.get("status") or "").strip()
+    if status not in STATUS_DE_PARCELA:
+        raise ErroDeNegocio(
+            f"Status deve ser um de: {', '.join(STATUS_DE_PARCELA)}.")
+
+    data_pagamento = (dados.get("data_pagamento") or "").strip()
+    if status == "Recebido":
+        # Sem data informada, o recebimento e hoje: e o caso esmagadoramente
+        # mais comum (o operador marca no momento em que recebe) e exigir o
+        # campo so acrescentaria um clique a operacao mais frequente.
+        data_pagamento = data_pagamento or _hoje()
+        if not validators.data_valida(data_pagamento):
+            raise ErroDeNegocio("Data de pagamento invalida.")
+    else:
+        # Desfazer a baixa tem de limpar a data. Uma parcela 'Pendente' com
+        # data de pagamento preenchida e a contradicao que faz relatorio mentir.
+        data_pagamento = ""
+
+    with database.conectar() as conexao:
+        atual = repositorio.obter_parcela(conexao, pedido_id, numero)
+        if atual is None:
+            raise NaoEncontrado("Parcela nao encontrada.")
+        if atual["status"] == status:
+            raise ConflitoDeSituacao(f"A parcela {numero} ja esta '{status}'.")
+
+        alteradas = repositorio.mudar_status_da_parcela(
+            conexao, pedido_id, numero, status, data_pagamento,
+            status_esperado=atual["status"])
+        if alteradas == 0:
+            raise ConflitoDeSituacao(
+                f"A parcela {numero} mudou durante a operacao. Recarregue a tela.")
+
+        nova = repositorio.obter_parcela(conexao, pedido_id, numero)
+        registrar_evento(conexao, acao="comercial.parcela.baixa", entidade="pagamento",
+                         entidade_id=int(nova["id"]), valores_anteriores=atual,
+                         valores_novos=nova)
+    return _parcela_para_tela(nova)
 
 
 def _validar_cabecalho(conexao, dados: dict) -> dict:
@@ -222,7 +336,7 @@ def _validar_cabecalho(conexao, dados: dict) -> dict:
         desconto = dinheiro.para_centavos(dados.get("desconto", 0))
         frete = dinheiro.para_centavos(dados.get("frete", 0))
     except dinheiro.ValorInvalido as erro:
-        raise ErroDeNegocio(str(erro))
+        raise ErroDeNegocio(str(erro)) from erro
     if desconto < 0 or frete < 0:
         raise ErroDeNegocio("Desconto e frete nao podem ser negativos.")
 
@@ -237,15 +351,42 @@ def _validar_cabecalho(conexao, dados: dict) -> dict:
 
 
 def criar_pedido(dados: dict) -> dict:
-    with database.conectar() as conexao:
-        campos = _validar_cabecalho(conexao, dados)
-        campos["numero"] = repositorio.proximo_numero(conexao, str(datetime.date.today().year))
-        campos["data_emissao"] = _hoje()
-        pedido_id = repositorio.inserir_pedido(conexao, campos)
-        novo = repositorio.obter_pedido(conexao, pedido_id)
-        registrar_evento(conexao, acao="comercial.pedido.criado", entidade="pedido",
-                         entidade_id=pedido_id, valores_novos=novo)
-    return _pedido_para_tela(novo, [])
+    """
+    Cria o pedido, reemitindo o numero se alguem levar o mesmo primeiro.
+
+    `proximo_numero()` deriva do maior numero ja gravado, com um SELECT que
+    roda fora de transacao (o sqlite3 do Python so abre uma na primeira
+    escrita). Dois cadastros simultaneos liam o mesmo ultimo numero e tentavam
+    gravar o mesmo seguinte: o indice unico recusava a segunda e o handler
+    generico devolvia 500 com id de correlacao.
+
+    Um 500 e a resposta errada aqui. O operador nao fez nada de errado, e o
+    sistema sabe exatamente o que aconteceu -- basta pegar o numero seguinte.
+    O indice unico continua sendo a autoridade; o retry so aceita a resposta
+    dele em vez de morrer com ela.
+    """
+    exercicio = str(datetime.date.today().year)
+    for tentativa in range(TENTATIVAS_DE_NUMERACAO):
+        try:
+            with database.conectar() as conexao:
+                campos = _validar_cabecalho(conexao, dados)
+                campos["numero"] = repositorio.proximo_numero(conexao, exercicio)
+                campos["data_emissao"] = _hoje()
+                pedido_id = repositorio.inserir_pedido(conexao, campos)
+                novo = repositorio.obter_pedido(conexao, pedido_id)
+                registrar_evento(conexao, acao="comercial.pedido.criado", entidade="pedido",
+                                 entidade_id=pedido_id, valores_novos=novo)
+            return _pedido_para_tela(novo, [])
+        except sqlite3.IntegrityError as erro:
+            # So a colisao de numero e reversivel por retry. Qualquer outra
+            # violacao de integridade (FK para cliente inexistente, por
+            # exemplo) e um erro de verdade e precisa subir.
+            if "pedidos.numero" not in str(erro):
+                raise
+            log.warning("[PEDIDO] Numero disputado na tentativa %s: %s", tentativa + 1, erro)
+
+    raise ConflitoDeSituacao(
+        "Nao foi possivel reservar um numero de pedido. Tente novamente.")
 
 
 def atualizar_pedido(pedido_id: int, dados: dict) -> dict:
@@ -290,7 +431,7 @@ def adicionar_item(pedido_id: int, dados: dict) -> dict:
                      else int(produto["preco_venda_centavos"]))
             desconto = dinheiro.para_centavos(dados.get("desconto", 0))
         except dinheiro.ValorInvalido as erro:
-            raise ErroDeNegocio(str(erro))
+            raise ErroDeNegocio(str(erro)) from erro
 
         total = preco * quantidade - desconto
         if total < 0:
@@ -329,12 +470,29 @@ def remover_item(pedido_id: int, item_id: int) -> dict:
 
 
 # --- Transicoes --------------------------------------------------------------
-def _transicionar(conexao, pedido: dict, destino: str, extras: Optional[dict] = None) -> dict:
+def _transicionar(conexao, pedido: dict, destino: str, extras: dict | None = None) -> dict:
+    """
+    Move o pedido de situacao, recusando se outro ja tiver movido.
+
+    A checagem da maquina de estados vale sobre o que ESTA REQUISICAO leu; e a
+    leitura acontece fora de transacao, porque o sqlite3 do Python so abre uma
+    na primeira escrita. Passar `situacao_esperada` faz o proprio UPDATE
+    revalidar a premissa no momento da escrita: se ninguem mexeu, uma linha
+    muda; se outra requisicao chegou primeiro, zero -- e a segunda vira 409 em
+    vez de gravar por cima.
+    """
     try:
         estados.exigir_transicao(pedido["situacao"], destino, pedido["numero"])
     except estados.TransicaoInvalida as erro:
-        raise ConflitoDeSituacao(str(erro))
-    repositorio.mudar_situacao(conexao, pedido["id"], destino, extras)
+        raise ConflitoDeSituacao(str(erro)) from erro
+
+    alteradas = repositorio.mudar_situacao(
+        conexao, pedido["id"], destino, extras, situacao_esperada=pedido["situacao"])
+    if alteradas == 0:
+        raise ConflitoDeSituacao(
+            f"O pedido {pedido['numero']} mudou de situacao durante a operacao. "
+            "Recarregue a tela e tente de novo."
+        )
     return repositorio.obter_pedido(conexao, pedido["id"])
 
 
@@ -361,16 +519,31 @@ def aprovar_pedido(pedido_id: int) -> dict:
 
 
 def cancelar_pedido(pedido_id: int, motivo: str = "") -> dict:
+    """
+    Cancela o pedido E as entregas que so existiam por causa dele.
+
+    O cancelamento so mudava a situacao do pedido. As entregas vinculadas
+    continuavam 'Pendente' na agenda e seguiam gerando notificacao
+    "ENTREGA ATRASADA" para um pedido que ninguem ia mais entregar -- alerta
+    que nao corresponde a nada e o que ensina o operador a ignorar alertas.
+
+    Tudo na mesma transacao: pedido cancelado com entrega viva e o mesmo tipo
+    de meia-verdade que o faturamento evita ao emitir as parcelas de uma vez.
+    """
     with database.conectar() as conexao:
         pedido = _exigir_pedido(conexao, pedido_id)
         atualizado = _transicionar(conexao, pedido, estados.CANCELADO, {
             "cancelado_em": datetime.datetime.now().isoformat(timespec="seconds"),
             "motivo_cancelamento": (motivo or "").strip()[:500],
         })
+        entregas_canceladas = repositorio.cancelar_entregas_do_pedido(conexao, pedido_id)
         registrar_evento(conexao, acao="comercial.pedido.cancelado", entidade="pedido",
                          entidade_id=pedido_id, valores_anteriores=pedido,
-                         valores_novos=atualizado)
-    return _pedido_para_tela(atualizado)
+                         valores_novos=atualizado,
+                         contexto_extra={"entregas_canceladas": entregas_canceladas})
+    resultado = _pedido_para_tela(atualizado)
+    resultado["entregas_canceladas"] = entregas_canceladas
+    return resultado
 
 
 def _vencimentos_mensais(primeiro: str, parcelas: int) -> list[str]:
@@ -430,7 +603,7 @@ def faturar_pedido(pedido_id: int, dados: dict) -> dict:
         valores = dinheiro.ratear(total, parcelas)
         vencimentos = _vencimentos_mensais(primeiro, parcelas)
 
-        for indice, (centavos, vencimento) in enumerate(zip(valores, vencimentos), start=1):
+        for indice, (centavos, vencimento) in enumerate(zip(valores, vencimentos, strict=False), start=1):
             repositorio.inserir_parcela(conexao, {
                 "cliente_id": pedido["cliente_id"],
                 "cliente_nome": pedido["cliente_nome"],
@@ -453,5 +626,7 @@ def faturar_pedido(pedido_id: int, dados: dict) -> dict:
         emitidas = repositorio.parcelas_do_pedido(conexao, pedido_id)
 
     resultado = _pedido_para_tela(atualizado)
-    resultado["parcelas"] = emitidas
+    # Mesmo formato que `obter_pedido` devolve. Duas formas para o mesmo campo
+    # em dois endpoints e a inconsistencia que a tela paga depois.
+    resultado["parcelas"] = [_parcela_para_tela(p) for p in emitidas]
     return resultado

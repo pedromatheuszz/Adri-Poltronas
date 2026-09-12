@@ -134,7 +134,7 @@ def _backend_no_ar(banco):
     log = banco.parent / "backend.log"
     with open(log, "w", encoding="utf-8") as saida:
         processo = subprocess.Popen(
-            [sys.executable, os.path.join(BACKEND, 'servidor.py')],
+            [sys.executable, os.path.join(BACKEND, 'servidor.py')],  # noqa: S603 - argumentos fixos, montados no codigo e nao pela entrada
             cwd=BACKEND, env=ambiente,
             stdout=saida, stderr=subprocess.STDOUT, text=True,
         )
@@ -249,17 +249,18 @@ def navegador():
 
 
 def _preparar_contexto(navegador):
-    """Contexto novo, com os CDNs neutralizados."""
+    """Contexto novo, com a rede de terceiros cortada."""
     contexto = navegador.new_context()
 
-    # Leaflet e Chart.js vem de CDN. Numa maquina sem internet -- ou num
-    # runner de CI com saida restrita -- esperar por eles trava o teste em
-    # algo que nao e o objeto do teste.
-    def _script_vazio(rota):
-        rota.fulfill(status=200, content_type="application/javascript", body="")
-
-    contexto.route("**unpkg.com/**", _script_vazio)
-    contexto.route("**cdn.jsdelivr.net/**", _script_vazio)
+    # Ate a 1.5.0 era preciso neutralizar os CDNs aqui: o Leaflet e o Chart.js
+    # vinham de fora, e num runner sem saida para a internet o teste travava
+    # esperando por algo que nao era o objeto dele. Os stubs sairam junto com a
+    # dependencia -- as duas bibliotecas agora sao servidas pelo proprio
+    # backend, entao o navegador carrega as de verdade e o e2e exercita o que
+    # o usuario realmente recebe.
+    #
+    # Os ladrilhos do mapa continuam cortados: vem da rede por natureza, e
+    # desenhar o mapa nao e o que nenhum destes testes verifica.
     contexto.route("**tile.openstreetmap.org/**", lambda rota: rota.abort())
     return contexto
 
@@ -312,15 +313,15 @@ def pagina(navegador, servidor):
     erros = []
     pagina.on("pageerror", lambda erro: erros.append(str(erro)))
 
-    # Leaflet e Chart.js vem de CDN. Numa maquina sem internet -- ou num
-    # runner de CI com saida restrita -- esperar por eles trava o teste em
-    # algo que nao e o objeto do teste. Sao respondidos com um script vazio:
-    # o que se exercita aqui e o codigo do aplicativo.
-    def _script_vazio(rota):
-        rota.fulfill(status=200, content_type="application/javascript", body="")
-
-    contexto.route("**unpkg.com/**", _script_vazio)
-    contexto.route("**cdn.jsdelivr.net/**", _script_vazio)
+    # Ate a 1.5.0 era preciso neutralizar os CDNs aqui: o Leaflet e o Chart.js
+    # vinham de fora, e num runner sem saida para a internet o teste travava
+    # esperando por algo que nao era o objeto dele. Os stubs sairam junto com a
+    # dependencia -- as duas bibliotecas agora sao servidas pelo proprio
+    # backend, entao o navegador carrega as de verdade e o e2e exercita o que
+    # o usuario realmente recebe.
+    #
+    # Os ladrilhos do mapa continuam cortados: vem da rede por natureza, e
+    # desenhar o mapa nao e o que nenhum destes testes verifica.
     contexto.route("**tile.openstreetmap.org/**", lambda rota: rota.abort())
 
     # `load`, e nao `networkidle`: o Service Worker mantem trafego de fundo, e
@@ -783,3 +784,111 @@ def test_o_rodape_de_clientes_mantem_as_acoes_que_sao_dele(pagina):
     pagina.wait_for_selector("#aba-clientes.active")
     for identificador in ("btnEnviarExcel", "btnBackupBanco", "btnRestaurarBanco"):
         assert pagina.locator("#" + identificador).count() == 1, identificador
+
+
+# =============================================================================
+# Consentimento do mapa (SEG-05)
+# =============================================================================
+def test_o_mapa_nao_consulta_o_nominatim_sem_autorizacao(pagina):
+    """
+    A propriedade que importa: abrir a aba Mapa NAO pode disparar consulta
+    nenhuma ao Nominatim.
+
+    Ate a 1.5.0 o endereco completo de cada cliente ativo -- rua, bairro,
+    cidade e CEP -- saia para um servico fora do pais no instante em que a aba
+    era aberta. Havia aviso na tela, e o aviso era claro; o que nao havia era
+    como recusar.
+
+    O teste conta REQUISICOES, e nao o que a tela mostra: esconder o mapa e
+    consultar assim mesmo passaria numa verificacao visual.
+    """
+    consultas = []
+    pagina.context.route(
+        "**nominatim.openstreetmap.org/**",
+        lambda rota: (consultas.append(rota.request.url),
+                      rota.fulfill(status=200, content_type="application/json", body="[]")),
+    )
+
+    pagina.click('[data-comando="trocarAba"][data-arg="mapa"]')
+    pagina.wait_for_selector("#mapaConsentimento", state="visible", timeout=10000)
+    pagina.wait_for_timeout(1500)
+
+    assert consultas == [], f"endereco enviado sem autorizacao: {consultas}"
+    assert pagina.is_hidden("#mapaClientes")
+
+
+def test_autorizar_libera_o_mapa_e_o_estado_persiste(pagina):
+    """
+    O outro lado: autorizar tem de funcionar de verdade, e a resposta nao pode
+    ser perguntada de novo a cada troca de aba.
+    """
+    pagina.context.route(
+        "**nominatim.openstreetmap.org/**",
+        lambda rota: rota.fulfill(
+            status=200, content_type="application/json",
+            body='[{"lat": "-26.30", "lon": "-48.84"}]'),
+    )
+
+    pagina.click('[data-comando="trocarAba"][data-arg="mapa"]')
+    pagina.wait_for_selector("#mapaConsentimento", state="visible", timeout=10000)
+    pagina.click('[data-comando="autorizarMapa"]')
+
+    pagina.wait_for_selector("#mapaClientes", state="visible", timeout=10000)
+    assert pagina.is_hidden("#mapaConsentimento")
+    assert pagina.is_visible("#mapaControles")
+
+    # Sai da aba e volta: o pedido nao pode reaparecer.
+    pagina.click('[data-comando="trocarAba"][data-arg="dashboard"]')
+    pagina.click('[data-comando="trocarAba"][data-arg="mapa"]')
+    pagina.wait_for_timeout(500)
+    assert pagina.is_hidden("#mapaConsentimento")
+
+
+def test_revogar_apaga_as_coordenadas_guardadas(pagina):
+    """
+    Revogar sem apagar deixaria as coordenadas de todos os clientes guardadas
+    numa maquina onde o operador acabou de dizer que nao quer isso.
+    """
+    # O cache e semeado direto, e nao geocodificando de verdade: a fila real
+    # respeita 1,1 s por cliente para nao estourar o limite do Nominatim, e
+    # atravessa-la aqui tornaria o teste lento e instavel sem medir mais nada.
+    # O que se afirma e o efeito de revogar sobre o que ESTA guardado.
+    pagina.evaluate(
+        "localStorage.setItem('adri-geocache',"
+        " JSON.stringify({'rua x,centro,joinville': [-26.30, -48.84]}));"
+        "localStorage.setItem('adri-mapa-consentimento', 'sim');"
+    )
+    pagina.reload(wait_until="load")
+    pagina.click('[data-comando="trocarAba"][data-arg="mapa"]')
+    pagina.wait_for_selector("#mapaControles", state="visible", timeout=10000)
+
+    assert pagina.evaluate("localStorage.getItem('adri-geocache')") != '{}'
+
+    pagina.click('[data-comando="revogarMapa"]')
+    pagina.wait_for_selector("#mapaConsentimento", state="visible", timeout=10000)
+
+    assert pagina.evaluate("localStorage.getItem('adri-geocache')") is None
+    assert pagina.evaluate("localStorage.getItem('adri-mapa-consentimento')") is None
+
+
+def test_apagar_coordenadas_nao_revoga_a_autorizacao(pagina):
+    """
+    Sao duas acoes distintas de proposito: apagar o cache resolve coordenada
+    errada, e continuar autorizado e o que o operador espera nesse caso. Juntar
+    as duas obrigaria a reautorizar por causa de um endereco que mudou.
+    """
+    pagina.evaluate(
+        "localStorage.setItem('adri-geocache',"
+        " JSON.stringify({'rua x,centro,joinville': [-26.30, -48.84]}));"
+        "localStorage.setItem('adri-mapa-consentimento', 'sim');"
+    )
+    pagina.reload(wait_until="load")
+    pagina.click('[data-comando="trocarAba"][data-arg="mapa"]')
+    pagina.wait_for_selector("#mapaControles", state="visible", timeout=10000)
+
+    pagina.click('[data-comando="limparCacheDoMapa"]')
+    pagina.wait_for_timeout(300)
+
+    assert pagina.evaluate("localStorage.getItem('adri-geocache')") is None
+    assert pagina.evaluate("localStorage.getItem('adri-mapa-consentimento')") == 'sim'
+    assert pagina.is_hidden("#mapaConsentimento")

@@ -5,6 +5,229 @@ Versionamento [semântico](https://semver.org/lang/pt-BR/).
 
 ---
 
+## [1.5.1-beta] — 2026-09-12
+
+Correções da auditoria técnica da 1.5.0 (41 achados: 2 altos, 18 médios,
+17 baixos, 4 informativos). Nenhuma funcionalidade nova além do destino das
+parcelas, que fecha um ciclo que a 1.5.0 deixou pela metade.
+
+### Corrigido — alta severidade
+
+- **Uma queda de rede apagava a sessão e trancava o operador fora do banco.**
+  `renovar_token()` já distinguia "a Microsoft recusou" de "não consegui falar
+  com a Microsoft", mas devolvia `None` nos dois casos, e o chamador apagava a
+  sessão em ambos. Roteador reiniciando, Wi-Fi ainda não conectado ou máquina
+  saindo de suspensão bastavam: a partir daí toda rota `/api/` respondia 401 e
+  a única saída era refazer o login OAuth no navegador. Um ERP que anuncia
+  funcionar offline virava um aplicativo que não abre. Agora só uma recusa
+  explícita apaga a sessão; timeout e resposta ilegível (o portal cativo de
+  Wi-Fi público, que responde 200 com HTML) preservam.
+
+- **Faturar gerava dinheiro a receber que nenhuma tela mostrava.** A 1.5.0
+  removeu a aba Pagamentos e não removeu o faturamento: as parcelas eram
+  criadas, `faturado` é estado terminal, e não havia onde ver, conferir ou dar
+  baixa. Dois textos da interface ainda mandavam procurar "a aba Pagamentos".
+  As parcelas passam a viver **dentro do próprio pedido**, com baixa manual via
+  `PATCH /api/pedidos/<id>/parcelas/<n>`.
+
+### Corrigido — integridade e concorrência
+
+- **Toda escrita passou a travar o duplo clique, não só o faturamento.** O
+  backend recusa a segunda de duas requisições concorrentes sobre o mesmo
+  registro, o que fecha a duplicidade no banco — mas resolvia só metade: sem
+  travar na tela, o operador que clicasse duas vezes em Abrir, Aprovar,
+  Cancelar, dar baixa numa parcela ou mudar o status de uma entrega levava um
+  409 vermelho. Trocar uma falha silenciosa por uma confusa não é progresso.
+  As cinco ações agora compartilham um guarda por registro (`_umaDeCadaVez`),
+  com a chave carregando o ID — travar "aprovar" inteiro impediria aprovar
+  dois pedidos diferentes em sequência, que é uso legítimo.
+
+- **Duplo clique no faturamento emitia dois conjuntos de parcelas.** O
+  `sqlite3` do Python só abre transação na primeira escrita, então a leitura da
+  situação acontecia fora de qualquer transação; com `threaded=True`, dois
+  cliques viravam duas threads que liam `aprovado` e gravavam as duas. Um
+  pedido de R$ 100,00 em 3x virava seis lançamentos somando R$ 200,00. A
+  transição agora é condicional (`WHERE situacao = ?`), o que vale para todas
+  as transições, e o botão trava durante o envio.
+
+- **Corrida na numeração de pedido virava 500.** Dois cadastros simultâneos
+  liam o mesmo último número; o índice único recusava o segundo e o handler
+  genérico devolvia erro opaco. Agora reemite o número seguinte. A corrida
+  equivalente no código de produto passa a devolver a mesma mensagem da
+  checagem prévia, como 400.
+
+- **Excluir cliente não checava vínculo nenhum**, deixando pedido em aberto e
+  parcela pendente órfãos de um cliente invisível — e o pedido passava a
+  recusar edição com um 404 que não tinha nada a ver com ele.
+
+- **Entrega podia apontar para pedido de outro cliente**, ou para um pedido em
+  rascunho ou cancelado.
+
+- **Cancelar pedido não cancelava as entregas dele**, que seguiam gerando
+  "ENTREGA ATRASADA" para um pedido morto.
+
+### Corrigido — o schema que as instalações novas recebem
+
+- **Os `DEFAULT` de `status` e `tipo_pagamento` gravavam o valor entre aspas.**
+  A migration inicial declarou `server_default="'Pendente'"`; para o
+  SQLAlchemy uma `str` ali é um *valor a ser aspeado*, não SQL cru — quem quer
+  SQL cru usa `sa.text(...)`. O DDL saiu `DEFAULT '''Pendente'''` e o SQLite
+  passou a gravar a string `'Pendente'`, com apóstrofos dentro.
+
+  Nenhum erro era levantado: os filtros simplesmente não encontravam nada. Em
+  toda instalação nova, `cancelar_pedido` não cancelava entrega alguma e a
+  trava de exclusão de cliente não enxergava parcela pendente — ou seja, duas
+  correções desta mesma versão nasciam inertes exatamente onde precisavam
+  valer. A migration `b7f21c9e4a05` corrige o `DEFAULT` e desaspeia as linhas
+  já gravadas. O banco de produção não tem o problema (veio do caminho legado),
+  e por isso a correção é condicional.
+
+  A causa de nada ter pego isso: a suíte montava o banco por `criar_tabela()`
+  → `schema_fallback`, que estava correto. O caminho das *migrations* — o de
+  toda instalação real — não era exercitado por teste funcional nenhum.
+  `tests/test_migrations_schema.py` fecha a lacuna, inclusive com um teste que
+  falha se os dois schemas voltarem a divergir num `DEFAULT`.
+
+- **Parcela antiga sem pedido tornava o cliente inexcluível para sempre.** As
+  parcelas são lidas e baixadas *dentro* do pedido que as emitiu, então uma
+  linha sem `pedido_id` não aparece em tela nenhuma — e a mensagem mandava
+  "conclua ou cancele" algo que o operador não tinha como achar. Nenhum
+  caminho de escrita atual produz uma dessas (`inserir_parcela` exige o pedido
+  e é o único `INSERT` em `pagamentos`), mas bancos anteriores à 1.5.0 têm. A
+  trava agora conta essas linhas à parte e diz explicitamente que a interface
+  não as resolve. `'Atrasado'` também passou a contar: o código nunca grava
+  esse status — o atraso é derivado do vencimento —, mas versões anteriores
+  gravavam, e uma parcela vencida é mais devida, não menos.
+
+### Corrigido — segurança e privacidade
+
+- **Allowlist de contas** (`ADRI_CONTAS_AUTORIZADAS`). Vazia, o comportamento é
+  o histórico: qualquer conta Microsoft entra. Preenchida, fecha o cenário do
+  colaborador que conecta a conta pessoal e passa a poder tudo.
+
+- **A migração do cofre deixava a chave em texto claro ao lado.** O `.env.bak`
+  ficava para sempre, com o `MP_ACCESS_TOKEN` legível, na mesma pasta do banco.
+  Agora é descartado — mas só depois de reler o cofre e conferir cada chave.
+
+- **Consentimento explícito para o mapa.** Abrir a aba enviava o endereço
+  completo de todos os clientes ao Nominatim/OpenStreetMap. O aviso existia; o
+  que faltava era poder recusar e poder apagar as coordenadas guardadas.
+
+- **Leaflet e Chart.js deixaram de vir de CDN.** Num aplicativo desktop, isso
+  significava mapa e gráficos em branco na primeira abertura sem internet — o
+  Service Worker só ajudava a partir da segunda — e, pior, uma CSP que
+  autorizava `unpkg.com` e `cdn.jsdelivr.net` a **executar código** dentro de
+  um programa que trata nome, endereço e valores a receber dos clientes. As
+  duas passaram para `frontend/vendor/`, conferidas byte a byte contra os
+  hashes SRI que já estavam no HTML, e `script-src` voltou a ser só `'self'`.
+
+- **A conferência que autorizava apagar o `.env.bak` não lia o cofre.** Ela
+  usava `obter()`, cujo último degrau é `return do_ambiente_real or padrao` — e
+  em produção o `load_dotenv()` já colocou as chaves em `os.environ` com o
+  mesmo valor que está sendo migrado. Se o DPAPI cifrasse e **não** conseguisse
+  decifrar de volta, o cofre devolvia vazio, a função caía nesse último degrau
+  e a conferência "passava": o `.env` já reescrito sem as chaves, mais a cópia
+  apagada, davam perda irrecuperável das credenciais. Agora a conferência
+  consulta `_ler_cofre()` diretamente, que é a única fonte que responde a
+  pergunta certa.
+
+- **Revogar o mapa não desfazia o que já estava na tela.** Os marcadores
+  continuavam no DOM, cada um com nome e endereço no popup, e uma
+  geocodificação já em voo regravava em disco as coordenadas que o operador
+  acabara de mandar apagar — o guarda de geração do laço só é consultado
+  *depois* do `await`, e a gravação acontece antes. A revogação agora invalida
+  a geração, remove os marcadores, e `guardarGeocache()` recusa gravar sem
+  consentimento, fechando o caso para qualquer caminho futuro.
+
+- **A allowlist não existia no `.env` da máquina instalada.** Ela estava só no
+  `.env.example`, que fica no repositório e não entra no bundle. O controle
+  nascia desligado e sem nenhum lugar onde a operadora descobrisse que existe.
+  Foi para o `config._MODELO_ENV`, junto de `ADRI_BACKUP_EXTRA`, e um teste
+  agora exige que toda variável do `.env.example` seja classificada como
+  configurável na instalação ou como só-para-desenvolvimento.
+
+- **`/api/auth/status` dizia "conectado" para conta que a allowlist recusaria.**
+  A rota está em `ROTAS_SEM_AUTH` — precisa estar —, então o guarda de `/api/`
+  não roda nela. A tela anunciava "Conectado (fulano)" no boot e a primeira
+  requisição de dados recusava aquela mesma conta.
+
+- **O 403 da allowlist chegava como erro genérico.** É o mesmo status que a
+  capacidade usa para "Acesso negado.", então a tela não tinha como separá-los.
+  O backend passou a enviar `codigo: "conta_nao_autorizada"` e a interface
+  explica o motivo em vez de mandar reconectar a conta recusada.
+
+- `.capacidade` entrou no `.gitignore`; `ci.yml` declara `permissions: contents: read`;
+  a cópia do banco para download usa `tempfile.mkstemp()`.
+
+### Removido
+
+- **Quase metade de `security.py`** (165 dos 342 comandos): CSRF de uso único,
+  gerenciador de sessão, sanitizadores, `validar_sql_safe`, assinatura HMAC,
+  detecção de anomalia, detecção de força bruta e o par PBKDF2
+  `hash_senha`/`verificar_senha`. Nada disso era chamado por rota nenhuma. O ritual do
+  CSRF existia completo nas duas pontas para uma validação que nunca acontecia
+  — quem protege é a checagem de `Origin`/`Referer` —, e
+  `esta_bloqueado_bruteforce()` sempre devolvia `False` porque o contador nunca
+  era incrementado.
+
+- **Cinco variáveis de "segurança avançada" do `.env.example`** que nenhuma
+  linha do backend lia. Quem preenchesse a allowlist de IP acreditava ter
+  restringido o acesso, e não havia restringido nada.
+
+- **Resíduos da saída do Asaas**: o módulo `erp/financeiro/` inteiro (que
+  consultava uma coluna apagada do schema), o `hiddenimport` inexistente no
+  `.spec`, a fixture órfã de teste e os comentários que descreviam a máquina
+  de cobrança removida.
+
+- **Dez funções de `database.py` sem chamador em produção**, mais os três
+  auxiliares que só elas usavam. O arquivo caiu de 988 para 717 linhas, e a
+  cobertura global subiu de 82% para 84% — o código morto era testado, e era
+  ele que puxava o número para baixo. As últimas três (`listar_pagamentos`,
+  `salvar_pagamento`, `obter_metricas_pagamentos`) tinham sido preservadas
+  para uma eventual tela de contas a receber; com a decisão de manter o
+  escopo atual, saíram também.
+
+### Desempenho
+
+- A importação de planilha materializava o arquivo três vezes e só conferia o
+  teto de linhas depois do parse completo. Agora mede sem ler, usa
+  `read_only=True` no openpyxl e corta durante a leitura.
+- A exportação carregava a base inteira para filtrar N clientes.
+- `notificacoes_lidas` nunca era expurgada.
+
+### Documentação
+
+- README, `SECURITY.md`, `API_STANDARD.md` e `PRIVACIDADE.md` descreviam o
+  produto de duas versões atrás — abas, integrações e rotas removidas na 1.5.0.
+  O `PRIVACIDADE.md` era o mais grave: declarava o gateway como destino de dado
+  pessoal e listava uma tabela que a migration já havia apagado.
+
+### Build e CI
+
+- **A verificação de conteúdo do bundle não olhava para `frontend/`.** Conferia
+  `alembic.ini`, `migrations` e `templates` — e nada mais. Com `script-src
+  'self'` e o precache de CDN removido, não há mais fallback: se
+  `frontend/vendor/` não chegasse ao instalador, o app abriria normal e o mapa
+  e os gráficos ficariam em branco **em silêncio**. Os arquivos do frontend
+  entraram na lista.
+
+- `python build.py lint` lintava `backend/` e `tests/` mas não `build.py`, então
+  passava verde num arquivo que o job de teste reprovaria — exatamente o que o
+  comando local existe para evitar.
+
+### Testes
+
+- `test_concorrencia.py`, `test_contrato_da_interface.py`, `test_autorizacao.py`
+  e `test_configuracao.py` são novos. O primeiro roda threads de verdade com
+  barreira de largada; o segundo lê a interface e a documentação como texto e
+  falha quando elas apontam para algo que não existe — a classe de defeito que
+  nenhum teste de backend pegaria.
+- `conftest.py` gera uma `FERNET_KEY` efêmera: a suíte deixa de exigir Windows
+  e para de tocar na chave DPAPI real do desenvolvedor.
+- `ruff.toml` liga as regras `S`, `B` e `UP`. Sem configuração, o ruff nunca
+  aplicou a regra de SQL — uma consulta concatenando entrada do usuário passava
+  pelo pipeline sem reclamação.
+
 ## [1.5.0-beta] — 2026-09-05
 
 Remoção do Asaas e das áreas Financeiro e Análise. É uma **regressão
