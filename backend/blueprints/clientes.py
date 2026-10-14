@@ -14,6 +14,7 @@ import database
 import security
 import validators
 from erp.core import idempotencia
+from permissoes import exigir_permissao
 
 log = logging.getLogger("adri.clientes")
 
@@ -123,6 +124,7 @@ LIMITE_MAXIMO_POR_PAGINA = 500
 
 
 @clientes_bp.route('', methods=['GET'])
+@exigir_permissao("clientes.ver_todos")
 def listar_clientes():
     """
     Lista clientes ativos.
@@ -162,6 +164,7 @@ def listar_clientes():
 
 @clientes_bp.route('', methods=['POST'])
 @idempotente
+@exigir_permissao("clientes.criar")
 def adicionar_cliente():
     cliente, erros = validators.validar_cliente(request.get_json(silent=True) or {})
     if erros:
@@ -179,6 +182,7 @@ def adicionar_cliente():
 
 @clientes_bp.route('/<int:id_cliente>', methods=['PUT'])
 @idempotente
+@exigir_permissao("clientes.editar")
 def atualizar_cliente(id_cliente):
     cliente, erros = validators.validar_cliente(request.get_json(silent=True) or {})
     if erros:
@@ -195,6 +199,7 @@ def atualizar_cliente(id_cliente):
 
 @clientes_bp.route('/<int:id_cliente>', methods=['DELETE'])
 @idempotente
+@exigir_permissao("clientes.excluir")
 def excluir_cliente(id_cliente):
     try:
         linhas = database.excluir_cliente(id_cliente)
@@ -208,6 +213,7 @@ def excluir_cliente(id_cliente):
 
 
 @clientes_bp.route('/importar', methods=['POST'])
+@exigir_permissao("clientes.importar")
 def importar_clientes():
     if 'arquivo' not in request.files:
         return jsonify({"erro": "Nenhum arquivo enviado."}), 400
@@ -330,12 +336,14 @@ def importar_clientes():
 
 
 @clientes_bp.route('/mapa')
+@exigir_permissao("mapa.ver")
 def clientes_mapa():
     """Retorna clientes individuais com CEP para geolocalizacao no mapa."""
     return jsonify(database.obter_clientes_para_mapa())
 
 
 @clientes_bp.route('/backup/json')
+@exigir_permissao("clientes.exportar")
 def backup_json():
     clientes = database.listar_clientes()
     dados = {"versao": "1.0", "data_exportacao": time.strftime('%Y-%m-%dT%H:%M:%S'), "clientes": clientes}
@@ -347,6 +355,7 @@ def backup_json():
 
 
 @clientes_bp.route('/backup/sqlite')
+@exigir_permissao("config.backup.restaurar")
 def backup_sqlite():
     """
     Alias historico de `/api/backup/sqlite`.

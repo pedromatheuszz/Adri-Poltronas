@@ -22,6 +22,7 @@ from flask import Blueprint, jsonify, request, send_file
 
 import database
 from erp.core import backup as servico_backup
+from permissoes import exigir_permissao
 
 log = logging.getLogger("adri.backup")
 
@@ -29,6 +30,7 @@ backup_bp = Blueprint('backup', __name__, url_prefix='/api/backup')
 
 
 @backup_bp.route('/copias')
+@exigir_permissao("config.backup.restaurar")
 def listar_copias():
     """Copias disponiveis para restauracao, da mais recente para a mais antiga."""
     caminho = database.obter_caminho_banco_absoluto()
@@ -39,6 +41,7 @@ def listar_copias():
 
 
 @backup_bp.route('/criar', methods=['POST'])
+@exigir_permissao("config.backup.restaurar")
 def criar_copia():
     """Copia sob demanda, alem das automaticas."""
     caminho = database.obter_caminho_banco_absoluto()
@@ -55,6 +58,7 @@ def criar_copia():
 
 
 @backup_bp.route('/restaurar', methods=['POST'])
+@exigir_permissao("config.backup.restaurar")
 def restaurar_copia():
     """
     Sobrescreve o banco atual com o conteudo de uma copia.
@@ -92,6 +96,7 @@ def restaurar_copia():
 
 
 @backup_bp.route('/json')
+@exigir_permissao("clientes.exportar")
 def baixar_json():
     """Exportacao legivel dos clientes. Nao substitui a copia do banco."""
     clientes = database.listar_clientes()
@@ -108,6 +113,7 @@ def baixar_json():
 
 
 @backup_bp.route('/sqlite')
+@exigir_permissao("config.backup.restaurar")
 def baixar_sqlite():
     """
     Copia integra do banco, para guardar fora da maquina.

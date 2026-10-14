@@ -229,15 +229,16 @@ def cliente_com_guarda_ligado(monkeypatch, tmp_path):
     monkeypatch.setattr(database, 'DB_PATH', str(tmp_path / 'guarda.db'))
     database.criar_tabela()
 
-    # Sessao semeada porque, desde que a leitura tambem exige autenticacao,
-    # um GET sem sessao pararia no guarda de AUTH (401) antes de chegar ao de
-    # capacidade -- e estes testes existem para medir o de capacidade. Com a
-    # sessao no lugar, o unico motivo possivel para uma recusa aqui e o token.
-    database.salvar_sessao('token-de-teste', 'operador@exemplo.local')
+    # Sessao local com cookie para que a requisicao com capacidade atravesse
+    # tambem a autenticacao. Sem o token, a recusa deve ocorrer antes dela.
+    user_id = database.criar_usuario('operador', 'senha-local-de-teste', 'administrador')
+    token_sessao = 'token-de-sessao-local'
+    database.salvar_sessao_local(token_sessao, user_id, 'operador', 'administrador')
 
     modulo_app.app.config['TESTING'] = False
     try:
         with modulo_app.app.test_client() as cliente:
+            cliente.set_cookie(database.NOME_COOKIE_SESSAO_LOCAL, token_sessao)
             yield cliente
     finally:
         modulo_app.app.config['TESTING'] = True
@@ -286,6 +287,30 @@ def test_host_forjado_e_recusado(cliente_com_guarda_ligado):
     assert resposta.status_code == 400
 
 
+@pytest.mark.parametrize(('metodo', 'rota'), [
+    ('GET', '/api/auth/local/status'),
+    ('GET', '/api/auth/local/me'),
+    ('POST', '/api/auth/local/login'),
+    ('POST', '/api/auth/local/register'),
+    ('POST', '/api/auth/local/setup'),
+])
+def test_rotas_de_auth_local_tambem_exigem_capacidade(cliente_com_guarda_ligado, metodo, rota):
+    resposta = cliente_com_guarda_ligado.open(rota, method=metodo, json={})
+    assert resposta.status_code == 403
+
+
+def test_cadastro_local_recusa_origem_externa(cliente_com_guarda_ligado):
+    resposta = cliente_com_guarda_ligado.post(
+        '/api/auth/local/register',
+        json={'username': 'atacante', 'senha': 'senha-segura'},
+        headers={
+            capacidade.NOME_DO_HEADER: 'token-do-app',
+            'Origin': 'https://site-malicioso.exemplo',
+        },
+    )
+    assert resposta.status_code == 403
+
+
 # =============================================================================
 # Rotas isentas: cada uma tem um motivo, e nenhuma devolve dado de negocio
 # =============================================================================
@@ -298,6 +323,8 @@ def test_isencoes_sao_apenas_as_duas_necessarias():
     o callback do OAuth, que chega pelo navegador do sistema e nao tem como
     carregar o cabecalho, e a sonda de identidade, que nao devolve dado de
     negocio.
+    As rotas de login local tambem exigem capacidade: o Electron a injeta
+    antes de carregar a tela de login.
     """
     assert capacidade.ROTAS_ISENTAS == frozenset({
         '/callback',

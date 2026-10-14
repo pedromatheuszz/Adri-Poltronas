@@ -19,13 +19,90 @@
           href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 
     <!-- Ordem obrigatoria: tokens.css declara as variaveis que style.css usa. -->
-    <link rel="stylesheet" href="/css/tokens.css?v=v87">
-    <link rel="stylesheet" href="/css/style.css?v=v87">
+    <link rel="stylesheet" href="/css/tokens.css?v=v103">
+    <link rel="stylesheet" href="/css/style.css?v=v104">
     <!-- Leaflet 1.9.4, servido pelo proprio backend. Ver frontend/vendor/README.md. -->
     <link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
 </head>
 <body>
-    <div class="app-shell" id="appShell">
+    <div class="barra-janela" id="barraJanela" role="toolbar" aria-label="Controles da janela" hidden>
+        <div class="barra-janela__arraste" title="Adri Poltronas">
+            <img src="/Design-sem-nome-8-1024x1024.png" alt="" width="20" height="20">
+            <span>Adri Poltronas</span>
+        </div>
+        <div class="barra-janela__controles">
+            <button type="button" class="barra-janela__botao" id="btnMinimizarJanela" aria-label="Minimizar" title="Minimizar">
+                <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 6h8"/></svg>
+            </button>
+            <button type="button" class="barra-janela__botao" id="btnMaximizarJanela" aria-label="Maximizar" title="Maximizar" aria-pressed="false">
+                <svg class="icone-maximizar" viewBox="0 0 12 12" aria-hidden="true"><rect x="2.5" y="2.5" width="7" height="7"/></svg>
+                <svg class="icone-restaurar" viewBox="0 0 12 12" aria-hidden="true"><path d="M4 2.5h5.5v5.5M2.5 4v5.5H8"/></svg>
+            </button>
+            <button type="button" class="barra-janela__botao barra-janela__botao--fechar" id="btnFecharJanela" aria-label="Fechar" title="Fechar">
+                <svg viewBox="0 0 12 12" aria-hidden="true"><path d="m3 3 6 6m0-6L3 9"/></svg>
+            </button>
+        </div>
+    </div>
+    <section class="tela-login" id="telaLogin" aria-labelledby="tituloTelaLogin">
+        <div class="tela-login__painel">
+            <img src="/Design-sem-nome-8-1024x1024.png" alt="Adri Poltronas" class="tela-login__logo">
+            <p class="tela-login__erro" id="erroTelaLogin" role="alert" hidden></p>
+            <div id="etapaLogin" hidden>
+                <p class="tela-login__sobretitulo">Acesso restrito</p>
+                <h1 id="tituloTelaLogin">Entre no sistema</h1>
+                <p class="tela-login__descricao">Use seu usuário e senha para acessar o Adri Poltronas.</p>
+                <form id="formLoginLocal" class="tela-login__formulario">
+                    <label class="tela-login__campo">
+                        <span>Usuário</span>
+                        <span class="tela-login__entrada">
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
+                            <input type="text" id="localUsername" required maxlength="80" autocomplete="username" placeholder="Seu usuário">
+                        </span>
+                    </label>
+                    <label class="tela-login__campo">
+                        <span>Senha</span>
+                        <span class="tela-login__entrada">
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+                            <input type="password" id="localSenha" required autocomplete="current-password" placeholder="Sua senha">
+                        </span>
+                    </label>
+                    <button type="submit" class="tela-login__entrar">Entrar</button>
+                </form>
+                <button type="button" class="tela-login__criar-conta" data-comando="abrirCadastroPublico">Criar conta</button>
+                <p class="tela-login__rodape">Cadastre sua conta para acessar o sistema.</p>
+            </div>
+            <div id="etapaSetupDesenvolvedor" hidden>
+                <p class="tela-login__sobretitulo">Configuração inicial</p>
+                <h1 id="tituloSetupDesenvolvedor">Crie a conta de desenvolvedor</h1>
+                <p class="tela-login__descricao">Esta conta administra os acessos e os períodos de teste. Ela será criada uma única vez nesta instalação.</p>
+                <form id="formSetupDesenvolvedor" class="tela-login__formulario">
+                    <label class="tela-login__campo">
+                        <span>Usuário</span>
+                        <span class="tela-login__entrada">
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
+                            <input type="text" id="setupDevUsername" required maxlength="80" autocomplete="username" placeholder="Nome de usuário">
+                        </span>
+                    </label>
+                    <label class="tela-login__campo">
+                        <span>E-mail</span>
+                        <span class="tela-login__entrada">
+                            <input type="email" id="setupDevEmail" autocomplete="email" placeholder="seu@email.com">
+                        </span>
+                    </label>
+                    <label class="tela-login__campo">
+                        <span>Senha (mínimo 12 caracteres)</span>
+                        <span class="tela-login__entrada">
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+                            <input type="password" id="setupDevSenha" required minlength="12" maxlength="72" autocomplete="new-password" placeholder="Crie uma senha forte">
+                        </span>
+                    </label>
+                    <button type="submit" class="tela-login__entrar">Criar e entrar</button>
+                </form>
+            </div>
+        </div>
+    </section>
+
+    <div class="app-shell" id="appShell" aria-hidden="true" inert>
 
         <!-- ================================================================
              BARRA LATERAL
@@ -114,6 +191,11 @@
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
                 <span class="nav-tab-rotulo">Mapa</span>
             </button>
+            <button type="button" class="nav-tab" role="tab" id="tab-desenvolvedor" tabindex="-1"
+                    aria-selected="false" aria-controls="aba-desenvolvedor" title="Desenvolvedor"
+                    data-comando="trocarAba" data-arg="desenvolvedor" hidden>
+                <span class="nav-tab-rotulo">Desenvolvedor</span>
+            </button>
             </nav>
         </aside>
 
@@ -148,18 +230,23 @@
                     <span class="online-rotulo">Online</span>
                 </output>
 
-                <!-- Conexao com a Microsoft, ao lado do estado da rede.
-                     Sao a mesma categoria de informacao -- "como este app esta
-                     ligado ao mundo" -- e ficavam em lugares distantes: o
-                     estado da rede aqui em cima, a conta no rodape da aba
-                     Clientes, onde so era encontrada por quem ja sabia que
-                     existia. Agora quem precisa exportar planilha ve de onde
-                     ela depende sem procurar. -->
-                <button type="button" class="btn-conexao" id="btnConectarMicrosoft"
-                        data-comando="conectarMicrosoft" title="Conectar conta Microsoft">
-                    <img src="/img/excel.png" alt="" width="16" height="16">
-                    <span id="txtBtnConectar">Conectar</span>
-                </button>
+<!-- Os dois acessos sao opcionais: login local para definir o perfil;
+     Microsoft apenas para habilitar a exportacao de planilhas. -->
+                 <button type="button" class="btn-conexao btn-secundario" id="btnConectarMicrosoft"
+                         data-comando="conectarMicrosoft" title="Conectar Microsoft opcional para exportar planilhas">
+                     <img src="/img/excel.png" alt="" width="16" height="16">
+                     <span id="txtBtnConectar">Microsoft</span>
+                 </button>
+                 <button type="button" class="btn-conexao btn-secundario" id="btnLoginLocal"
+                         data-comando="abrirModalLoginLocal" title="Login com usuário e senha">
+                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                     <span id="txtBtnLocal">Login</span>
+                 </button>
+                 <button type="button" class="btn-icon" id="btnAlterarSenha" hidden
+                         data-comando="abrirModalAlterarSenha" title="Alterar senha"
+                         aria-label="Alterar senha da conta">
+                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                 </button>
 
                 <button type="button" class="btn-icon" data-comando="abrirNotificacoes"
                         title="Notificacoes" id="btnNotificacoes"
@@ -184,16 +271,8 @@
         <main>
             <!-- ============================================================
                  SEM CONTA CONECTADA
-                 A autenticacao deste ERP e a sessao Microsoft. Sem ela o
-                 backend recusa toda leitura de /api/ -- e a casca sozinha
-                 exibia os zeros escritos neste proprio HTML ("0 Total
-                 Clientes", "R$ 0,00 em atraso") como se fossem o cadastro
-                 real, enquanto o console acumulava 401. Nao dava erro: dizia
-                 numero errado, que e pior.
-
-                 Por isso este painel SUBSTITUI o conteudo em vez de flutuar
-                 sobre ele. Enquanto estiver visivel, nao ha numero na tela
-                 para ser lido errado.
+                 O acesso a dados e funcoes exige uma conta local ativa. A tela
+                 de entrada cobre o app ate a sessao ser confirmada.
                  ============================================================ -->
             <!-- ============================================================
                  LICENCA VENCIDA
@@ -203,20 +282,18 @@
                  precisa estar a um clique, com o valor a vista.
                  ============================================================ -->
             <div id="painelLicenca" class="painel-sem-conexao" hidden>
-                <div class="painel-sem-conexao__caixa" role="status" aria-live="polite">
+                <div class="painel-sem-conexao__caixa" role="dialog" aria-modal="true" aria-labelledby="licencaTitulo" aria-live="polite">
                     <svg class="painel-sem-conexao__icone" width="40" height="40" viewBox="0 0 24 24"
                          fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
                         <circle cx="12" cy="12" r="9"/>
                         <path d="M12 7v5l3 2"/>
                     </svg>
-                    <h2>Seu periodo de teste terminou</h2>
-                    <p>
-                        Os 30 dias de uso gratuito do Adri Poltronas chegaram ao
-                        fim. Para continuar usando o sistema, ative a licenca
-                        definitiva.
+                    <h2 id="licencaTitulo">Pagamento necessário para continuar. Período de teste encerrado</h2>
+                    <p id="licencaMensagem">
+                        Entre em contato com o fornecedor para efetuar o pagamento.
                     </p>
-                    <p class="licenca-valor" id="licencaValor">R$ 1.500,00</p>
-                    <p class="painel-sem-conexao__nota">
+                    <p class="licenca-valor" id="licencaValor">R$ 2.000,00</p>
+                    <p class="painel-sem-conexao__nota" id="licencaNota">
                         Seus dados continuam salvos nesta maquina. Nada foi
                         apagado e nada sera perdido.
                     </p>
@@ -237,24 +314,19 @@
                         <rect x="3" y="11" width="18" height="11" rx="2"/>
                         <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
                     </svg>
-                    <h2>Conecte sua conta Microsoft</h2>
+                    <h2>Entre no sistema</h2>
                     <!-- Preenchido so quando ha um motivo especifico (conta fora
                          da allowlist, por exemplo). Sem ele o operador via um
                          "conecte sua conta" generico logo depois de conectar,
                          sem nada dizendo por que a conta dele nao serve. -->
                     <p class="painel-sem-conexao__motivo" id="painelSemConexaoMotivo" hidden></p>
-                    <p>
-                        O sistema usa a sua conta Microsoft para saber quem esta
-                        usando o computador. Enquanto ela nao estiver conectada,
-                        os dados dos clientes ficam guardados e nao aparecem na
-                        tela.
-                    </p>
+                    <p>Entre com sua conta local para continuar usando o sistema.</p>
                     <p class="painel-sem-conexao__nota">
                         Nada foi perdido: o cadastro continua salvo nesta maquina.
                     </p>
                     <button type="button" class="btn btn-primary"
-                            id="btnConectarPeloPainel" data-comando="conectarMicrosoft">
-                        Conectar agora
+                            id="btnConectarPeloPainel" data-comando="abrirModalLoginLocal">
+                        Entrar
                     </button>
                 </div>
             </div>
@@ -320,6 +392,40 @@
                 </div>
             </section>
 
+            <section id="aba-desenvolvedor" class="tab-content" role="tabpanel"
+                     aria-labelledby="tab-desenvolvedor" tabindex="0" hidden>
+                <h2 class="secao-titulo">Painel do desenvolvedor</h2>
+                <p>Libere ou limite o acesso e escolha o perfil de cada conta.</p>
+                <section class="card" aria-labelledby="controleTesteTitulo">
+                    <h3 class="card-title" id="controleTesteTitulo">Teste por conta</h3>
+                    <p>Cada conta comum inicia com 30 dias. Você pode liberar mais 30 dias ou remover o vencimento individualmente.</p>
+                </section>
+                <button type="button" class="btn btn-secundario" data-comando="abrirModalRegistroLocal">Cadastrar conta</button>
+                <div class="tabela-rolagem">
+                    <table class="tabela-simples">
+                        <thead><tr><th>Usuário</th><th>E-mail</th><th>Perfil</th><th>Acesso</th><th>Período de teste</th><th>Ações</th></tr></thead>
+                        <tbody id="tabelaUsuariosSistema"></tbody>
+                    </table>
+                </div>
+                <button type="button" class="btn btn-primary" data-comando="salvarAcessosUsuarios">Salvar perfis e acessos</button>
+                <section class="card dev-licencas-remotas" aria-labelledby="licencasRemotasTitulo">
+                    <div class="secao-topo">
+                        <div>
+                            <h3 class="card-title" id="licencasRemotasTitulo">Licenças dos clientes</h3>
+                            <p>As contas aparecem aqui depois que o computador do cliente sincronizar com a API central.</p>
+                        </div>
+                        <button type="button" class="btn btn-secundario" data-comando="carregarLicencasRemotas">Atualizar</button>
+                    </div>
+                    <p id="estadoApiLicencas" class="texto-secundario" role="status">Conectando à API central...</p>
+                    <div class="tabela-rolagem">
+                        <table class="tabela-simples">
+                            <thead><tr><th>Cliente</th><th>E-mail</th><th>Licença</th><th>Teste até</th><th>Ações</th></tr></thead>
+                            <tbody id="tabelaLicencasRemotas"></tbody>
+                        </table>
+                    </div>
+                </section>
+            </section>
+
             <!-- ============================================================
                  PEDIDOS
                  O centro do dia a dia numa fabrica sob encomenda: e do pedido
@@ -367,6 +473,7 @@
                                     <th scope="col" class="col-nome">Cliente</th>
                                     <th scope="col">Emissao</th>
                                     <th scope="col">Entrega prevista</th>
+                                    <th scope="col">Periodo do aluguel</th>
                                     <th scope="col" class="valor">Total</th>
                                     <th scope="col">Situacao</th>
                                     <th scope="col" class="col-acoes">Acoes</th>
@@ -390,7 +497,7 @@
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 18v-6a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v6"/><path d="M4 15h16"/></svg>
                             Produtos
                         </h2>
-                        <button type="button" class="btn btn-primary" data-comando="abrirFormularioProduto">
+                        <button type="button" class="btn btn-primary" data-perfis="desenvolvedor,administrador,usuario" data-comando="abrirFormularioProduto">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                             Novo Produto
                         </button>
@@ -692,7 +799,7 @@
                         Mapa de Clientes
                     </h2>
 
-                    <p class="aviso-dados-externos">
+                    <p class="aviso-dados-externos" data-perfis="desenvolvedor">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
                         Para posicionar os marcadores, o endereco de cada cliente e
                         consultado no ViaCEP e no Nominatim (OpenStreetMap), servicos
@@ -714,8 +821,7 @@
                         </p>
                         <p class="mapa-consentimento-detalhe">
                             As coordenadas ficam guardadas neste computador, entao a
-                            consulta acontece uma vez por endereco. Voce pode revogar e
-                            apagar o que foi guardado a qualquer momento.
+                            consulta acontece uma vez por endereco.
                         </p>
                         <div class="mapa-consentimento-acoes">
                             <button type="button" class="btn btn-primario"
@@ -723,7 +829,7 @@
                         </div>
                     </div>
 
-                    <div id="mapaControles" class="mapa-controles" hidden>
+                    <div id="mapaControles" class="mapa-controles" data-perfis="desenvolvedor" hidden>
                         <button type="button" class="btn btn-secundario btn-sm"
                                 data-comando="limparCacheDoMapa">Apagar coordenadas guardadas</button>
                         <button type="button" class="btn btn-secundario btn-sm"
@@ -759,6 +865,15 @@
 
         </div><!-- /.area-trabalho -->
     </div><!-- /.app-shell -->
+
+    <section class="tela-pagamento" id="telaPagamento" hidden role="dialog"
+             aria-modal="true" aria-labelledby="tituloPagamentoNecessario">
+        <div class="tela-pagamento__painel">
+            <h1 id="tituloPagamentoNecessario" tabindex="-1">Pagamento necessário para continuar. Período de teste encerrado</h1>
+            <p class="tela-pagamento__valor">R$ 2.000,00</p>
+            <p>Entre em contato com o fornecedor para efetuar o pagamento.</p>
+        </div>
+    </section>
 
     <!-- ================================================================
          PAINEL DE NOTIFICACOES
@@ -962,6 +1077,22 @@
 
                 <div class="form-grid-modal">
                     <div class="input-group">
+                        <label for="pedDataInicioAluguel">Inicio do aluguel</label>
+                        <input type="text" id="pedDataInicioAluguel" inputmode="numeric"
+                               autocomplete="off" maxlength="5" placeholder="DD/MM"
+                               aria-describedby="pedPeriodoAjuda">
+                    </div>
+                    <div class="input-group">
+                        <label for="pedDataFimAluguel">Termino do aluguel</label>
+                        <input type="text" id="pedDataFimAluguel" inputmode="numeric"
+                               autocomplete="off" maxlength="5" placeholder="DD/MM"
+                               aria-describedby="pedPeriodoAjuda">
+                    </div>
+                </div>
+                <p class="campo-ajuda" id="pedPeriodoAjuda">Informe apenas dia e mes. Exemplo: 10/03 ate 15/03.</p>
+
+                <div class="form-grid-modal">
+                    <div class="input-group">
                         <label for="pedDesconto">Desconto (R$)</label>
                         <input type="text" id="pedDesconto" inputmode="decimal" placeholder="0,00">
                     </div>
@@ -1004,6 +1135,14 @@
                     <div class="input-group input-group-estreito">
                         <label for="itemPreco">Preco un. (R$)</label>
                         <input type="text" id="itemPreco" inputmode="decimal" placeholder="catalogo">
+                    </div>
+                    <div class="input-group input-group-estreito">
+                        <label for="itemDataInicio">Início do aluguel</label>
+                        <input type="date" id="itemDataInicio">
+                    </div>
+                    <div class="input-group input-group-estreito">
+                        <label for="itemDataFim">Fim do aluguel</label>
+                        <input type="date" id="itemDataFim">
                     </div>
                     <button type="button" class="btn btn-secundario" data-comando="adicionarItemAoPedido">Adicionar</button>
                 </div>
@@ -1158,15 +1297,100 @@
         </div>
     </dialog>
 
+    <!-- ================================================================
+         REGISTRO LOCAL
+         ================================================================ -->
+    <dialog class="modal-overlay" id="modalRegistroLocal" aria-labelledby="modalRegistroLocalTitulo">
+        <div class="modal-box modal-formulario">
+            <h2 class="modal-title" id="modalRegistroLocalTitulo">Criar Conta Local</h2>
+            <p class="modal-msg" id="registroLocalAjuda">Crie uma conta para acessar o sistema.</p>
+
+            <form id="formRegistroLocal">
+                <div class="input-group">
+                    <label for="regUsername">Usuário *</label>
+                    <input type="text" id="regUsername" required maxlength="80" autocomplete="username" placeholder="Nome de usuário">
+                </div>
+                <div class="input-group">
+                    <label for="regEmail">E-mail</label>
+                    <input type="email" id="regEmail" autocomplete="email" placeholder="seu@email.com">
+                </div>
+                <div class="input-group">
+                    <label for="regSenha">Senha *</label>
+                    <input type="password" id="regSenha" required autocomplete="new-password" placeholder="Mínimo 12 caracteres" minlength="12" maxlength="72">
+                </div>
+                <div class="input-group" id="regRoleGrupo">
+                    <label for="regRole">Perfil</label>
+                    <select id="regRole">
+                        <option value="usuario">Usuário</option>
+                        <option value="administrador">Administrador</option>
+                        <option value="desenvolvedor">Desenvolvedor</option>
+                    </select>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="modal-btn modal-btn-cancelar" data-comando="fecharModal" data-arg="modalRegistroLocal">Cancelar</button>
+                    <button type="submit" class="modal-btn modal-btn-confirmar modal-btn-sucesso">Criar conta</button>
+                </div>
+            </form>
+        </div>
+    </dialog>
+
+    <dialog class="modal-overlay" id="modalAlterarSenhaLocal" aria-labelledby="modalAlterarSenhaTitulo">
+        <div class="modal-box modal-formulario">
+            <h2 class="modal-title" id="modalAlterarSenhaTitulo">Alterar senha</h2>
+            <p class="modal-msg">Use pelo menos 12 caracteres. A nova senha substitui a atual imediatamente.</p>
+            <form id="formAlterarSenhaLocal">
+                <div class="input-group">
+                    <label for="senhaAtualLocal">Senha atual</label>
+                    <input type="password" id="senhaAtualLocal" required maxlength="72" autocomplete="current-password">
+                </div>
+                <div class="input-group">
+                    <label for="senhaNovaLocal">Nova senha</label>
+                    <input type="password" id="senhaNovaLocal" required minlength="12" maxlength="72" autocomplete="new-password">
+                </div>
+                <div class="input-group">
+                    <label for="senhaNovaConfirmacaoLocal">Confirme a nova senha</label>
+                    <input type="password" id="senhaNovaConfirmacaoLocal" required minlength="12" maxlength="72" autocomplete="new-password">
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="modal-btn modal-btn-cancelar" data-comando="fecharModal" data-arg="modalAlterarSenhaLocal">Cancelar</button>
+                    <button type="submit" class="modal-btn modal-btn-confirmar modal-btn-sucesso">Salvar nova senha</button>
+                </div>
+            </form>
+        </div>
+    </dialog>
+
+    <dialog class="modal-overlay" id="modalEditarContaLocal" aria-labelledby="modalEditarContaLocalTitulo">
+        <div class="modal-box modal-formulario">
+            <h2 class="modal-title" id="modalEditarContaLocalTitulo">Editar conta</h2>
+            <input type="hidden" id="editarContaId">
+            <div class="input-group">
+                <label for="editarContaUsername">Usuário *</label>
+                <input type="text" id="editarContaUsername" required maxlength="80" autocomplete="username">
+            </div>
+            <div class="input-group">
+                <label for="editarContaEmail">E-mail</label>
+                <input type="email" id="editarContaEmail" autocomplete="email">
+            </div>
+            <div class="input-group">
+                <label for="editarContaSenha">Nova senha</label>
+                <input type="password" id="editarContaSenha" minlength="12" maxlength="72" autocomplete="new-password" placeholder="Mínimo 12 caracteres; deixe em branco para manter">
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="modal-btn modal-btn-cancelar" data-comando="fecharModal" data-arg="modalEditarContaLocal">Cancelar</button>
+                <button type="button" class="modal-btn modal-btn-confirmar modal-btn-sucesso" data-comando="salvarEdicaoConta">Salvar alterações</button>
+            </div>
+        </div>
+    </dialog>
+
     <!-- Sem SRI e sem crossorigin: os arquivos sao da mesma origem agora, e
          `integrity` em recurso proprio so adicionaria um jeito de o app
          parar de funcionar depois de uma atualizacao legitima. -->
     <script src="/vendor/leaflet/leaflet.js"></script>
     <script src="/vendor/chartjs/chart.umd.min.js"></script>
-    <script src="/js/offline.js?v=v87"></script>
-    <script src="/js/app.js?v=v87"></script>
+    <script src="/js/offline.js?v=v103"></script>
+    <script src="/js/app.js?v=v104"></script>
     <!-- Modulo comercial: Produtos, Pedidos e Agenda de Entregas.
          Arquivo separado porque app.js ja passa de 2.000 linhas. -->
-    <script src="/js/comercial.js?v=v87"></script>
+    <script src="/js/comercial.js?v=v103"></script>
 </body>
 </html>

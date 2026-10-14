@@ -85,6 +85,9 @@ BYTES_DO_TOKEN = 32
 #   /api/health -- e a sonda de identidade. Precisa responder para que o
 #       Electron consiga descobrir SE o servidor na porta e este aplicativo e
 #       se aceita a capacidade apresentada. Nao devolve dado de negocio.
+#   Nenhuma rota de autenticacao local e isenta. O Electron injeta a capacidade
+#   antes de carregar a tela de login, portanto login, cadastro e setup inicial
+#   podem exigir o mesmo segredo das demais requisicoes.
 ROTAS_ISENTAS = frozenset({
     "/callback",
     "/api/health",

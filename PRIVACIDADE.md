@@ -17,11 +17,13 @@ Ele descreve o comportamento real do software. Não é parecer jurídico.
 | Endereço e horário de entrega | `entregas_agendadas` | Agenda da equipe |
 | Pedidos e itens | `pedidos`, `pedido_itens` | O que foi vendido |
 | Ações realizadas | `historico`, `auditoria_eventos` | Rastreabilidade |
+| Nome de usuário, e-mail opcional, perfil e hash da senha | `usuarios` | Login local e controle de acesso |
 | Conta Microsoft conectada | `sessao` | Exportar para o OneDrive |
 | Chaves de integração (Mercado Pago, Gemini) | `.segredos` | Cifradas com DPAPI |
 
-**O que o sistema NÃO guarda:** CPF/CNPJ, telefone, e-mail, dados de cartão,
-senha de cliente. Nenhuma tela pede esses campos.
+**O que o sistema NÃO guarda:** CPF/CNPJ, telefone, dados de cartão ou senha
+em texto claro. As senhas das contas locais são armazenadas somente como
+hashes bcrypt.
 
 A tabela `clientes_asaas`, que guardava o identificador do cliente no gateway
 de cobrança, foi apagada do banco pela migração `e5c94a17b3d8` junto com a
@@ -41,34 +43,47 @@ Tudo em **um arquivo SQLite** na máquina do usuário:
 %APPDATA%\AdriPoltronas\logs\           registro de execução
 ```
 
-Não há servidor central, nem sincronização em nuvem, nem telemetria. O banco
-não sai da máquina exceto pelas ações abaixo.
+Os dados comerciais do ERP permanecem na máquina local. Para controlar a
+licença entre computadores, a instalação pode sincronizar com a API central
+descrita em `licensing-service/README.md`.
 
 ## Quando dados saem da máquina — e para onde
 
-Cada uma destas é iniciada por alguém clicando em algo. Nenhuma é automática.
+As transferências abaixo acontecem durante o uso das funções indicadas; a API
+de licença também sincroniza automaticamente enquanto o aplicativo está aberto.
 
 | Destino | O que vai | Quando |
 |---|---|---|
 | **Microsoft OneDrive** | Planilha com os clientes exportados | Ao clicar em "Enviar para Excel" |
 | **ViaCEP** | O CEP digitado | Ao preencher endereço a partir do CEP |
-| **Nominatim (OpenStreetMap)** | Rua, bairro, cidade, CEP | Ao abrir o mapa, para posicionar os marcadores |
+| **Nominatim (OpenStreetMap)** | Rua, bairro, cidade, CEP | Depois que o usuário autoriza o mapa para sua conta |
 | **Google Gemini** | Cidade e CEP | Ao pedir sugestão de bairro (opcional) |
 | **Mercado Pago** | Valor e referência da instalação — **nenhum dado de cliente** | Ao pagar a licença de uso do aplicativo |
+| **API central de licenças** | ID aleatório da conta, nome de usuário, e-mail e estado do teste/licença | Ao entrar no sistema e, enquanto aberto, a cada 30 segundos |
 | **Arquivo local** | O que o operador escolher | Exportar CSV/XLSX, backup |
 
 Nenhum dado de cliente vai ao Mercado Pago: a cobrança ali é da licença do
 aplicativo, paga pela própria Adri, e leva apenas o valor e um identificador da
 instalação.
 
-A tela do mapa avisa que consulta serviços externos. **A mesma clareza precisa
-existir para o OneDrive** — está na lista de melhorias.
+A API central não recebe nome/endereço de clientes do ERP, pedidos, produtos,
+valores de venda ou dados financeiros. O serviço guarda o nome/e-mail da conta
+do software e o estado da licença em PostgreSQL hospedado pelo fornecedor. O
+segredo aleatório de sincronização é guardado como hash no servidor; o token
+administrativo fica somente no backend da máquina do desenvolvedor, cifrado
+com DPAPI no cofre local. A conexão de produção usa HTTPS. As respostas
+confirmadas permitem até 72 horas de uso offline.
+
+A tela do mapa explica a consulta e aguarda autorização antes de enviar os
+endereços. O consentimento é guardado por conta neste computador. A exportação
+para o OneDrive é iniciada pelo operador ao selecionar a ação de exportar.
 
 ## Retenção
 
 | Dado | Quanto tempo | Como é apagado |
 |---|---|---|
 | Clientes | Enquanto o usuário quiser | Exclusão lógica (`ativo = 0`); some das telas e das exportações |
+| Contas locais | Até exclusão pelo desenvolvedor | Remoção pela área de desenvolvedor |
 | Pagamentos | Indefinido | Cancelamento marca `Cancelado`; a linha permanece |
 | Auditoria | Indefinido | **Não é apagável** — a tabela é append-only, por design |
 | Backups | 7 cópias diárias, 10 de pré-migração | Rotação automática, a mais antiga sai |
@@ -92,7 +107,7 @@ O que o software oferece hoje:
 | **Portabilidade** | ✅ Exportação em CSV, XLSX ou JSON |
 | **Correção** | ✅ Edição do cadastro |
 | **Eliminação** | ⚠️ Parcial — exclusão lógica; o dado permanece no banco e nos backups |
-| **Informação sobre compartilhamento** | ⚠️ Parcial — está nesta página; a interface só avisa no mapa |
+| **Informação sobre compartilhamento** | ✅ A interface explica e pede autorização para o envio de endereços ao mapa |
 
 Enquanto a eliminação definitiva não existir na interface, um pedido de
 exclusão precisa ser tratado manualmente, incluindo as cópias de backup.
@@ -107,8 +122,10 @@ O software cuida de parte; o resto depende de como a máquina é usada.
 - **Backups saem da máquina em claro.** O arquivo baixado por "Backup do banco"
   e a cópia em `ADRI_BACKUP_EXTRA` contêm todos os dados. Guarde em local
   controlado.
-- **Não há controle de acesso no aplicativo.** Quem abre, vê tudo. Use conta de
-  usuário do Windows com senha.
+- **O acesso ao aplicativo exige conta local.** A senha é armazenada como hash
+  bcrypt e a sessão usa cookie `HttpOnly`. Usuários comuns e administradores
+  acessam as áreas comuns; somente o desenvolvedor administra contas e testes.
+  O login Microsoft é opcional e é usado apenas para exportar ao OneDrive.
 - **As chaves de integração ficam cifradas** em
   `%APPDATA%\AdriPoltronas\.segredos`, protegidas por DPAPI e amarradas à sua
   conta do Windows — copiar o arquivo para outra máquina não serve de nada. A

@@ -53,23 +53,28 @@ computador, e isso define o que é defensável:
   (`backend/capacidade.py`).
 - **DNS rebinding.** O nome do host é validado contra a lista de apelidos de
   loopback, em vez de ser inferido do próprio cabeçalho `Host`.
+- **Login e autorização locais.** A API de negócio exige cookie de sessão
+  `HttpOnly` e conta ativa. Senhas locais são armazenadas como hashes bcrypt;
+  novas contas exigem ao menos 12 caracteres. O perfil é conferido no servidor:
+  só o desenvolvedor pode administrar contas e períodos de teste.
 - **Tokens da Microsoft cifrados em repouso**, com DPAPI no Windows.
 - **Trilha de auditoria append-only**, protegida por gatilhos no banco, com
   valores sensíveis removidos.
 - **Janela isolada**: `contextIsolation`, sandbox, sem integração com Node,
   navegação externa bloqueada.
-- **Nenhuma rota chega de fora.** Desde a 1.5.0 não há webhook: a
-  verificação do pagamento da licença é feita perguntando ao Mercado Pago, de
-  dentro para fora. O conjunto de rotas isentas das regras de tráfego local
-  está vazio.
+- **Rotas externas limitadas.** Desde a 1.5.0 não há webhook: a verificação
+  do pagamento da licença é feita perguntando ao Mercado Pago, de dentro para
+  fora. `/callback` recebe o retorno OAuth e `/api/health` identifica o
+  backend; nenhuma delas devolve dados de negócio. Ambas continuam restritas
+  ao host de loopback.
 - **Segredos fora do repositório e cifrados em repouso**: o `MP_ACCESS_TOKEN`
   e a `GEMINI_API_KEY` vivem em `%APPDATA%\AdriPoltronas\.segredos`,
   protegidos por DPAPI. Uma chave em texto no `.env` é migrada automaticamente
   na próxima abertura, e a cópia em texto claro é descartada depois que o cofre
   é relido e conferido.
-- **Allowlist de contas, quando configurada.** `ADRI_CONTAS_AUTORIZADAS`
-  restringe quais contas Microsoft destravam a base. Vazia, qualquer conta
-  entra — ver a limitação correspondente abaixo.
+- **Allowlist Microsoft, quando configurada.** `ADRI_CONTAS_AUTORIZADAS`
+  restringe quais contas Microsoft podem vincular o OneDrive. Isso não cria
+  login local nem concede perfil no ERP.
 
 ### O que **não** é tratado — e por quê
 
@@ -85,24 +90,38 @@ computador, e isso define o que é defensável:
   endereço e CEP de clientes reais. Um disco sem BitLocker, roubado, entrega
   tudo. Cifrar exigiria SQLCipher e uma chave que o usuário teria de digitar a
   cada abertura — uma decisão de produto que ainda não foi tomada.
-- **Não há papéis nem permissões.** Quem abre o aplicativo pode tudo:
-  faturar, restaurar backup e baixar o banco completo exigem exatamente a
-  mesma permissão que listar clientes. A autenticação é o OAuth da Microsoft,
-  que serve à integração com o OneDrive e foi reaproveitada como identidade.
-  Desde a 1.5.1 é possível restringir *quais* contas entram
-  (`ADRI_CONTAS_AUTORIZADAS`), o que fecha o caso do colaborador que conecta a
-  conta pessoal — mas continua sendo um único nível de privilégio. Identidade
-  local própria e separação por papéis seguem na lista de correções.
+- **O limite de confiança é o usuário do Windows.** As permissões locais
+  impedem que uma conta comum use a área de desenvolvedor pela API do
+  aplicativo, mas não protegem os arquivos contra outro processo executado
+  pela mesma conta do Windows. Uma pessoa com essa identidade pode ler ou
+  alterar o banco diretamente.
 
-- **O controle de licença é local, e um controle local é contornável.** O
-  estado vive em arquivo cifrado por DPAPI e na tabela `licenca`, reconciliados
-  sempre pelo lado mais restritivo, com marca-d'água monotônica contra recuo do
-  relógio. Isso resiste a acidente e a tentativa casual, não a alguém decidido
-  a editar o próprio banco.
+- **A licença central é uma barreira comercial, não inviolável.** O servidor
+  central guarda os estados de teste/pagamento e o ERP consulta a API por HTTPS.
+  O estado local dá até 72 horas de operação offline após validação. O dono do
+  computador ainda controla o executável local e pode adulterá-lo; não se deve
+  prometer proteção contra engenharia reversa.
+- **O token administrativo da licença não vai aos clientes.** Só o backend da
+  máquina do vendedor deve receber `ADRI_LICENCA_ADMIN_TOKEN`. Os clientes
+  autenticam sua própria consulta com um segredo aleatório por conta, cujo hash
+  fica no serviço central.
 - **O aplicativo não é assinado digitalmente.** O Windows exibe o aviso do
   SmartScreen na instalação.
 - **Vários computadores compartilhando a mesma base** não são suportados. O
   SQLite em pasta de rede corrompe.
+
+### Contas e perfis
+
+- Na primeira execução, o operador cria a conta de desenvolvedor. Não existe
+  senha padrão ou credencial de desenvolvedor embutida no código.
+- Usuários podem criar a própria conta; o cadastro público só aceita o perfil
+  comum. Administrador e desenvolvedor são criados ou gerenciados pelo
+  desenvolvedor.
+- Usuário e administrador acessam as áreas comuns. A área de desenvolvedor e
+  o controle de contas/períodos de teste são exclusivos do perfil
+  desenvolvedor, com checagem repetida no backend.
+- A conexão Microsoft é opcional e serve à integração com o OneDrive. Ela não
+  substitui o login local nem altera o perfil local.
 
 ## Se você encontrou um segredo neste repositório
 

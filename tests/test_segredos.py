@@ -347,7 +347,7 @@ def test_apenas_credenciais_de_integracao_sao_protegidas():
     mente tornaria a recuperacao de uma instalacao mais dificil sem ganho.
     """
     assert set(segredos.CHAVES_PROTEGIDAS) == {
-        'MP_ACCESS_TOKEN', 'GEMINI_API_KEY', }
+        'MP_ACCESS_TOKEN', 'GEMINI_API_KEY', 'ADRI_LICENCA_ADMIN_TOKEN', }
     assert 'ADRI_FLASK_SECRET' not in segredos.CHAVES_PROTEGIDAS
 
 

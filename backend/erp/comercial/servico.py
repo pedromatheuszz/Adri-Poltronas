@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import datetime
 import logging
+import re
 import sqlite3
 
 import database
@@ -218,6 +219,8 @@ def _item_para_tela(item: dict) -> dict:
     item = dict(item)
     item["preco_unitario"] = dinheiro.serializar(item["preco_unitario_centavos"])
     item["total"] = dinheiro.serializar(item["total_centavos"])
+    item["data_inicio_aluguel"] = item.get("data_inicio_aluguel", "")
+    item["data_fim_aluguel"] = item.get("data_fim_aluguel", "")
     return item
 
 
@@ -332,6 +335,13 @@ def _validar_cabecalho(conexao, dados: dict) -> dict:
     if prazo and not validators.data_valida(prazo):
         raise ErroDeNegocio("Data de entrega prevista invalida.")
 
+    inicio_aluguel = _validar_dia_mes_aluguel(
+        dados.get("data_inicio_aluguel", ""), "Data de início do aluguel")
+    fim_aluguel = _validar_dia_mes_aluguel(
+        dados.get("data_fim_aluguel", ""), "Data de término do aluguel")
+    if bool(inicio_aluguel) != bool(fim_aluguel):
+        raise ErroDeNegocio("Informe as datas de início e término do aluguel.")
+
     try:
         desconto = dinheiro.para_centavos(dados.get("desconto", 0))
         frete = dinheiro.para_centavos(dados.get("frete", 0))
@@ -344,10 +354,31 @@ def _validar_cabecalho(conexao, dados: dict) -> dict:
         "cliente_id": cliente_id,
         "cliente_nome": cliente["nome"],
         "data_entrega_prevista": prazo,
+        "data_inicio_aluguel": inicio_aluguel,
+        "data_fim_aluguel": fim_aluguel,
         "desconto_centavos": desconto,
         "frete_centavos": frete,
         "observacoes": (dados.get("observacoes") or "").strip()[:1000],
     }
+
+
+def _validar_dia_mes_aluguel(data_str: str, nome_campo: str) -> str:
+    """Valida uma data recorrente DD/MM sem associar ano ao período."""
+    if data_str in (None, ""):
+        return ""
+    if not isinstance(data_str, str):
+        raise ErroDeNegocio(f"{nome_campo} inválida. Use o formato DD/MM.")
+    valor = data_str.strip()
+    if not valor:
+        return ""
+    if not re.fullmatch(r"[0-9]{2}/[0-9]{2}", valor):
+        raise ErroDeNegocio(f"{nome_campo} inválida. Use o formato DD/MM.")
+    try:
+        dia, mes = (int(parte) for parte in valor.split("/"))
+        datetime.date(2000, mes, dia)  # ano bissexto permite 29/02
+    except (ValueError, TypeError):
+        raise ErroDeNegocio(f"{nome_campo} inválida. Use o formato DD/MM.") from None
+    return valor
 
 
 def criar_pedido(dados: dict) -> dict:
@@ -404,6 +435,16 @@ def atualizar_pedido(pedido_id: int, dados: dict) -> dict:
 
 
 # --- Itens -------------------------------------------------------------------
+def _validar_data_aluguel(data_str: str, nome_campo: str) -> str:
+    """Valida e normaliza uma data de aluguel (formato YYYY-MM-DD)."""
+    if not data_str:
+        return ""
+    data_str = data_str.strip()
+    if not validators.data_valida(data_str):
+        raise ErroDeNegocio(f"{nome_campo} invalida. Use formato YYYY-MM-DD.")
+    return data_str
+
+
 def adicionar_item(pedido_id: int, dados: dict) -> dict:
     with database.conectar() as conexao:
         pedido = _exigir_pedido(conexao, pedido_id)
@@ -437,6 +478,17 @@ def adicionar_item(pedido_id: int, dados: dict) -> dict:
         if total < 0:
             raise ErroDeNegocio("O desconto do item supera o valor dele.")
 
+        # Datas de aluguel (opcionais)
+        data_inicio = _validar_data_aluguel(dados.get("data_inicio_aluguel", ""), "Data inicio do aluguel")
+        data_fim = _validar_data_aluguel(dados.get("data_fim_aluguel", ""), "Data fim do aluguel")
+
+        if bool(data_inicio) != bool(data_fim):
+            raise ErroDeNegocio("Informe as datas de início e término do aluguel.")
+
+        # Se ambas informadas, fim deve ser >= inicio
+        if data_inicio and data_fim and data_fim < data_inicio:
+            raise ErroDeNegocio("Data fim do aluguel deve ser posterior ou igual a data inicio.")
+
         # Descricao propria: cada poltrona tem tecido, acabamento e medida.
         # Sem informar, herda a do catalogo.
         descricao = (dados.get("descricao") or "").strip() or produto["descricao"]
@@ -448,6 +500,8 @@ def adicionar_item(pedido_id: int, dados: dict) -> dict:
             "preco_unitario_centavos": preco,
             "desconto_centavos": desconto,
             "total_centavos": total,
+            "data_inicio_aluguel": data_inicio,
+            "data_fim_aluguel": data_fim,
         })
         atualizado = _recalcular(conexao, pedido_id)
         itens = repositorio.listar_itens(conexao, pedido_id)

@@ -52,7 +52,15 @@ def _abas_existentes() -> set:
 def test_index_declara_as_abas_esperadas():
     """Guarda de sanidade: se este falhar, os outros testes leem lixo."""
     assert _abas_existentes() == {
-        'dashboard', 'pedidos', 'clientes', 'produtos', 'entregas', 'mapa'}
+        'dashboard', 'pedidos', 'clientes', 'produtos', 'entregas', 'mapa', 'desenvolvedor'}
+
+
+def test_consentimento_do_mapa_e_separado_por_conta_e_interrompe_envios():
+    codigo = _ler(os.path.join(RAIZ, 'frontend', 'js', 'app.js'))
+    assert "CHAVE_CONSENTIMENTO_MAPA + ':' + id" in codigo
+    assert "localStorage.getItem(chave) === 'sim'" in codigo
+    assert "localStorage.setItem(chave, 'sim')" in codigo
+    assert "if (_controladorMapa) _controladorMapa.abort()" in codigo
 
 
 def test_nenhum_texto_manda_o_operador_para_aba_inexistente():

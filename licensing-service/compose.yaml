@@ -1,0 +1,53 @@
+services:
+  db:
+    image: postgres:16.9-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: adri_licenses
+      POSTGRES_USER: adri
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Configure POSTGRES_PASSWORD}
+    volumes:
+      - license_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U adri -d adri_licenses"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    networks: [private]
+
+  api:
+    build: .
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://adri:${POSTGRES_PASSWORD}@db:5432/adri_licenses
+      LICENSE_ADMIN_TOKEN: ${LICENSE_ADMIN_TOKEN:?Configure LICENSE_ADMIN_TOKEN}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [private]
+
+  https:
+    image: caddy:2.9.1-alpine
+    restart: unless-stopped
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?Configure APP_DOMAIN with a DNS name}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [api]
+    networks: [private, edge]
+
+volumes:
+  license_db:
+  caddy_data:
+  caddy_config:
+
+networks:
+  private:
+    internal: true
+  edge:

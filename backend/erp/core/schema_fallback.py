@@ -87,7 +87,10 @@ def garantir_schema_fallback(conexao: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS sessao (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             token TEXT NOT NULL,
-            conta TEXT NOT NULL
+            conta TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'usuario',
+            user_id INTEGER,
+            tipo TEXT NOT NULL DEFAULT 'microsoft'
         );
 
         CREATE TABLE IF NOT EXISTS historico (
@@ -170,6 +173,8 @@ def garantir_schema_fallback(conexao: sqlite3.Connection) -> None:
             situacao TEXT NOT NULL DEFAULT 'rascunho',
             data_emissao TEXT NOT NULL DEFAULT (date('now', 'localtime')),
             data_entrega_prevista TEXT NOT NULL DEFAULT '',
+            data_inicio_aluguel TEXT NOT NULL DEFAULT '',
+            data_fim_aluguel TEXT NOT NULL DEFAULT '',
             total_bruto_centavos INTEGER NOT NULL DEFAULT 0,
             desconto_centavos INTEGER NOT NULL DEFAULT 0,
             frete_centavos INTEGER NOT NULL DEFAULT 0,
@@ -195,6 +200,8 @@ def garantir_schema_fallback(conexao: sqlite3.Connection) -> None:
             desconto_centavos INTEGER NOT NULL DEFAULT 0,
             total_centavos INTEGER NOT NULL,
             sequencia INTEGER NOT NULL DEFAULT 1,
+            data_inicio_aluguel TEXT DEFAULT '',
+            data_fim_aluguel TEXT DEFAULT '',
             CONSTRAINT fk_pedido_itens_pedido_id_pedidos
                 FOREIGN KEY (pedido_id) REFERENCES pedidos(id) ON DELETE CASCADE,
             CONSTRAINT fk_pedido_itens_produto_id_produtos
@@ -245,8 +252,29 @@ def garantir_schema_fallback(conexao: sqlite3.Connection) -> None:
             estado TEXT NOT NULL DEFAULT 'teste',
             pagamento_id TEXT NOT NULL DEFAULT '',
             pago_em TEXT NOT NULL DEFAULT '',
-            referencia TEXT NOT NULL DEFAULT ''
+            referencia TEXT NOT NULL DEFAULT '',
+            teste_modo TEXT NOT NULL DEFAULT '',
+            teste_ate TEXT NOT NULL DEFAULT '',
+            teste_controle_em TEXT NOT NULL DEFAULT ''
         );
+
+        CREATE TABLE IF NOT EXISTS usuarios (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL UNIQUE,
+            email TEXT,
+            password_hash TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'usuario',
+            ativo INTEGER NOT NULL DEFAULT 1,
+            criado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+            atualizado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+            ultimo_login_em TEXT,
+            teste_modo TEXT NOT NULL DEFAULT 'automatico',
+            teste_inicio_em TEXT NOT NULL DEFAULT '',
+            teste_ate TEXT NOT NULL DEFAULT '',
+            teste_controle_em TEXT NOT NULL DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS ix_usuarios_username ON usuarios(username);
+        CREATE INDEX IF NOT EXISTS ix_usuarios_email ON usuarios(email);
         """
     )
 
@@ -260,6 +288,32 @@ def garantir_schema_fallback(conexao: sqlite3.Connection) -> None:
     }
     for coluna, declaracao in colunas_clientes.items():
         _garantir_coluna(conexao, "clientes", coluna, declaracao)
+
+    colunas_usuarios = {
+        "teste_modo": "TEXT NOT NULL DEFAULT 'automatico'",
+        "teste_inicio_em": "TEXT NOT NULL DEFAULT ''",
+        "teste_ate": "TEXT NOT NULL DEFAULT ''",
+        "teste_controle_em": "TEXT NOT NULL DEFAULT ''",
+        "licenca_remota_id": "TEXT NOT NULL DEFAULT ''",
+        "licenca_remota_segredo": "TEXT NOT NULL DEFAULT ''",
+        "licenca_remota_estado": "TEXT NOT NULL DEFAULT ''",
+        "licenca_remota_expira_em": "TEXT NOT NULL DEFAULT ''",
+        "licenca_remota_verificada_em": "TEXT NOT NULL DEFAULT ''",
+        "licenca_remota_offline_ate": "TEXT NOT NULL DEFAULT ''",
+    }
+    for coluna, declaracao in colunas_usuarios.items():
+        _garantir_coluna(conexao, "usuarios", coluna, declaracao)
+    conexao.execute(
+        "UPDATE usuarios SET teste_modo='automatico', "
+        "teste_inicio_em=strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime'), "
+        "teste_ate=strftime('%Y-%m-%dT%H:%M:%S', 'now', '+30 days', 'localtime'), "
+        "teste_controle_em=strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime') "
+        "WHERE role != 'desenvolvedor' AND teste_inicio_em=''"
+    )
+    conexao.execute(
+        "UPDATE usuarios SET teste_modo='desativado', teste_ate='' "
+        "WHERE role='desenvolvedor'"
+    )
 
     colunas_pagamentos = {
         "data_vencimento": "TEXT DEFAULT ''",
@@ -285,6 +339,12 @@ def garantir_schema_fallback(conexao: sqlite3.Connection) -> None:
     # proximo login, que ja preenche as duas.
     # Vinculo do pagamento com o pedido que o originou. Anulaveis: os
     # lancamentos avulsos que ja existem nasceram sem pedido.
+    colunas_sessao_role = {
+        "role": "TEXT NOT NULL DEFAULT 'usuario'",
+    }
+    for coluna, declaracao in colunas_sessao_role.items():
+        _garantir_coluna(conexao, "sessao", coluna, declaracao)
+
     colunas_idempotencia = {
         "estado": "TEXT NOT NULL DEFAULT 'concluida'",
         "impressao": "TEXT",
@@ -309,6 +369,46 @@ def garantir_schema_fallback(conexao: sqlite3.Connection) -> None:
     }
     for coluna, declaracao in colunas_sessao.items():
         _garantir_coluna(conexao, "sessao", coluna, declaracao)
+
+    # Coluna role na sessao
+    colunas_sessao_role = {
+        "role": "TEXT NOT NULL DEFAULT 'usuario'",
+    }
+    for coluna, declaracao in colunas_sessao_role.items():
+        _garantir_coluna(conexao, "sessao", coluna, declaracao)
+
+    # Colunas para sessão local (username/senha)
+    colunas_sessao_local = {
+        "user_id": "INTEGER",
+        "tipo": "TEXT NOT NULL DEFAULT 'microsoft'",
+    }
+    for coluna, declaracao in colunas_sessao_local.items():
+        _garantir_coluna(conexao, "sessao", coluna, declaracao)
+
+    # Colunas de aluguel nos itens do pedido
+    colunas_aluguel_pedido = {
+        "data_inicio_aluguel": "TEXT NOT NULL DEFAULT ''",
+        "data_fim_aluguel": "TEXT NOT NULL DEFAULT ''",
+    }
+    for coluna, declaracao in colunas_aluguel_pedido.items():
+        _garantir_coluna(conexao, "pedidos", coluna, declaracao)
+
+    # Colunas de aluguel nos itens do pedido
+    colunas_aluguel = {
+        "data_inicio_aluguel": "TEXT DEFAULT ''",
+        "data_fim_aluguel": "TEXT DEFAULT ''",
+    }
+    for coluna, declaracao in colunas_aluguel.items():
+        _garantir_coluna(conexao, "pedido_itens", coluna, declaracao)
+
+    # Overrides do período de teste configurados pelo desenvolvedor.
+    colunas_controle_teste = {
+        "teste_modo": "TEXT NOT NULL DEFAULT ''",
+        "teste_ate": "TEXT NOT NULL DEFAULT ''",
+        "teste_controle_em": "TEXT NOT NULL DEFAULT ''",
+    }
+    for coluna, declaracao in colunas_controle_teste.items():
+        _garantir_coluna(conexao, "licenca", coluna, declaracao)
 
     _criar_indices(conexao)
     conexao.executescript(

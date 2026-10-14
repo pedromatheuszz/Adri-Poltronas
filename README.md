@@ -41,11 +41,21 @@ Aguarde alguns segundos até que o Dashboard seja exibido.
 Use somente instaladores obtidos pelo repositório oficial ou fornecidos diretamente pelo responsável pelo sistema.
 Preparação inicial
 Antes de registrar a primeira locação, recomenda-se:
+na primeira abertura, criar a conta de desenvolvedor com uma senha forte;
 cadastrar os modelos de poltronas na aba Produtos;
 cadastrar ou importar os clientes existentes;
 conferir endereços, cidades e tipos de atendimento;
 criar um backup inicial;
 configurar, com o responsável pelo sistema, a integração opcional de Microsoft/Excel.
+
+O acesso ao sistema exige login local. Usuários podem criar a própria conta na
+tela de login; o desenvolvedor cria contas administrativas e gerencia o acesso
+e os períodos de teste. A conexão Microsoft é opcional e serve apenas à
+integração com o OneDrive.
+
+O período de teste e a confirmação manual do pagamento entre computadores
+usam uma API central opcional. Para publicar o serviço e configurar as
+instalações, consulte [`licensing-service/README.md`](licensing-service/README.md).
 Como navegar pelo aplicativo
 As áreas principais ficam no menu lateral esquerdo, organizadas por assunto:
 Grupo

@@ -153,6 +153,34 @@ def test_item_herda_descricao_do_catalogo(client, cliente_id, produto_id):
     assert resposta.get_json()['itens'][0]['descricao'] == 'Poltrona Costela'
 
 
+def test_item_persiste_periodo_de_aluguel(client, cliente_id, produto_id):
+    pedido = _post(client, '/api/pedidos', {'cliente_id': cliente_id}).get_json()
+    resposta = _post(client, f"/api/pedidos/{pedido['id']}/itens", {
+        'produto_id': produto_id,
+        'quantidade': 1,
+        'data_inicio_aluguel': '2026-11-01',
+        'data_fim_aluguel': '2026-11-04',
+    })
+
+    assert resposta.status_code == 201
+    item = resposta.get_json()['itens'][0]
+    assert item['data_inicio_aluguel'] == '2026-11-01'
+    assert item['data_fim_aluguel'] == '2026-11-04'
+
+
+@pytest.mark.parametrize('datas', [
+    {'data_inicio_aluguel': '2026-11-01'},
+    {'data_inicio_aluguel': '2026-02-30', 'data_fim_aluguel': '2026-03-01'},
+    {'data_inicio_aluguel': '2026-11-05', 'data_fim_aluguel': '2026-11-04'},
+])
+def test_periodo_de_aluguel_incompleto_ou_invalido_e_recusado(client, cliente_id, produto_id, datas):
+    pedido = _post(client, '/api/pedidos', {'cliente_id': cliente_id}).get_json()
+    resposta = _post(client, f"/api/pedidos/{pedido['id']}/itens", {
+        'produto_id': produto_id, 'quantidade': 1, **datas,
+    })
+    assert resposta.status_code == 400
+
+
 def test_item_aceita_descricao_propria(client, cliente_id, produto_id):
     """Cada poltrona tem tecido, acabamento e medida proprios."""
     pedido = _post(client, '/api/pedidos', {'cliente_id': cliente_id}).get_json()

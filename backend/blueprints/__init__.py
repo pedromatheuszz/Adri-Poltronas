@@ -1,6 +1,7 @@
 # backend/blueprints/__init__.py
 """Pacote de blueprints Flask."""
 from .auth import auth_bp
+from .auth_local import auth_local_bp
 from .clientes import clientes_bp
 from .ia import ia_bp
 from .entregas import entregas_bp
@@ -13,6 +14,7 @@ from .licenca_bp import licenca_bp
 
 __all__ = [
     'auth_bp',
+    'auth_local_bp',
     'clientes_bp',
     'ia_bp',
     'entregas_bp',
