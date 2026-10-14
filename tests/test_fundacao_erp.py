@@ -237,6 +237,12 @@ def test_migrations_reconstroem_schema_integral_em_banco_novo(tmp_path, monkeypa
         colunas_sessao = {
             linha[1] for linha in conexao.execute("PRAGMA table_info(sessao)")
         }
+        colunas_usuarios = {
+            linha[1] for linha in conexao.execute("PRAGMA table_info(usuarios)")
+        }
+        colunas_pedido_itens = {
+            linha[1] for linha in conexao.execute("PRAGMA table_info(pedido_itens)")
+        }
         gatilhos = {
             linha[0]
             for linha in conexao.execute(
@@ -247,7 +253,7 @@ def test_migrations_reconstroem_schema_integral_em_banco_novo(tmp_path, monkeypa
     # Cabeca da cadeia de migrations. Atualizar junto ao acrescentar uma
     # revisao nova -- e o que garante que ela entrou na cadeia, e nao ficou
     # pendurada fora dela.
-    assert revisao == "b7f21c9e4a05"
+    assert revisao == "f2d71a9c0b64"
     # O modulo comercial: sem estas tres, pagamento e entrega continuam
     # pendurados no cliente, sem saber a que venda pertencem.
     assert {"produtos", "pedidos", "pedido_itens"} <= tabelas
@@ -263,6 +269,10 @@ def test_migrations_reconstroem_schema_integral_em_banco_novo(tmp_path, monkeypa
     # passa a depender so do arquivo do perfil -- que e o lado que se apaga com
     # um clique.
     assert "licenca" in tabelas
+    # Tabela de usuarios locais (auth username/senha)
+    assert "usuarios" in tabelas
+    assert {"role", "password_hash", "teste_modo", "teste_inicio_em", "teste_ate", "licenca_remota_id", "licenca_remota_segredo"} <= colunas_usuarios
+    assert {"data_inicio_aluguel", "data_fim_aluguel"} <= colunas_pedido_itens
     # A integracao de cobranca saiu na 1.5.0: a tabela de vinculo com o gateway
     # e as colunas dele nao podem voltar por um schema desatualizado.
     assert "clientes_asaas" not in tabelas

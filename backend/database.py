@@ -1,6 +1,8 @@
 import sqlite3
 import os
 import logging
+from datetime import datetime, timedelta
+import bcrypt
 
 import security
 import notificacoes_db
@@ -32,6 +34,10 @@ def obter_caminho_banco() -> str:
 
 
 DB_PATH = obter_caminho_banco()
+DIAS_TESTE_POR_USUARIO = 30
+NOME_COOKIE_SESSAO_LOCAL = 'adri_sessao_local'
+TAMANHO_MINIMO_SENHA = 12
+TAMANHO_MAXIMO_SENHA_BYTES = 72  # Limite do bcrypt.
 
 
 # O journal_mode e propriedade do ARQUIVO, nao da conexao: uma vez gravado no
@@ -453,21 +459,26 @@ def importar_clientes_em_lote(clientes_lista):
 
 def excluir_sessao():
     with conectar() as conexao:
-        conexao.execute('DELETE FROM sessao')
+        conexao.execute("DELETE FROM sessao WHERE tipo = 'microsoft'")
 
 
-def salvar_sessao(token, conta, refresh_token=None, expira_em=None):
+def salvar_sessao(token, conta, refresh_token=None, expira_em=None, role=None):
     """
     Grava a sessao Microsoft, substituindo a anterior.
 
     `refresh_token` e `expira_em` sao opcionais para nao quebrar chamadas
     antigas de dois argumentos; quando ausentes, a sessao se comporta como
     antes -- vale ate o Graph recusar o token.
+
+    `role` e opcional; se nao informado, usa o role padrao da configuracao.
     """
+    import config
+    if role is None:
+        role = config.obter_role(conta)
     with conectar() as conexao:
-        conexao.execute('DELETE FROM sessao')
+        conexao.execute("DELETE FROM sessao WHERE tipo = 'microsoft'")
         conexao.execute(
-            'INSERT INTO sessao (token, conta, refresh_token, expira_em) VALUES (?, ?, ?, ?)',
+            'INSERT INTO sessao (token, conta, refresh_token, expira_em, role) VALUES (?, ?, ?, ?, ?)',
             (
                 security.cifrar(token),
                 conta,
@@ -475,6 +486,7 @@ def salvar_sessao(token, conta, refresh_token=None, expira_em=None):
                 # o access_token e e cifrado pelo mesmo caminho.
                 security.cifrar(refresh_token) if refresh_token else None,
                 int(expira_em) if expira_em else None,
+                role,
             ),
         )
 
@@ -492,7 +504,8 @@ def _decifrar_campo(valor):
 def obter_sessao():
     with conectar() as conexao:
         linha = conexao.execute(
-            'SELECT token, conta, refresh_token, expira_em FROM sessao LIMIT 1'
+            "SELECT token, conta, refresh_token, expira_em, role FROM sessao "
+            "WHERE tipo = 'microsoft' LIMIT 1"
         ).fetchone()
         if not linha:
             return None
@@ -508,6 +521,7 @@ def obter_sessao():
             # Ausente nas sessoes gravadas antes desta coluna existir.
             "refresh_token": _decifrar_campo(linha["refresh_token"]),
             "expira_em": linha["expira_em"],
+            "role": linha["role"] if "role" in linha.keys() else "usuario",
         }
 
 
@@ -522,14 +536,334 @@ def atualizar_token_sessao(token, expira_em, refresh_token=None):
     with conectar() as conexao:
         if refresh_token:
             conexao.execute(
-                'UPDATE sessao SET token=?, expira_em=?, refresh_token=?',
+                "UPDATE sessao SET token=?, expira_em=?, refresh_token=? WHERE tipo = 'microsoft'",
                 (security.cifrar(token), int(expira_em), security.cifrar(refresh_token)),
             )
         else:
             conexao.execute(
-                'UPDATE sessao SET token=?, expira_em=?',
+                "UPDATE sessao SET token=?, expira_em=? WHERE tipo = 'microsoft'",
                 (security.cifrar(token), int(expira_em)),
             )
+
+
+# =============================================================================
+# Sessão local (auth username/senha) - usa a mesma tabela sessao
+# =============================================================================
+def salvar_sessao_local(token: str, user_id: int, username: str, role: str) -> None:
+    """Grava sessão local (substitui anterior)."""
+    with conectar() as conexao:
+        conexao.execute("DELETE FROM sessao WHERE tipo = 'local'")
+        conexao.execute(
+            'INSERT INTO sessao (token, conta, role, user_id, tipo) VALUES (?, ?, ?, ?, ?)',
+            (
+                security.cifrar(token),
+                username,
+                role,
+                user_id,
+                'local',
+            ),
+        )
+
+
+def _decifrar_campo_local(valor: str) -> str | None:
+    """Decifra campo da sessão local."""
+    if not valor:
+        return None
+    return security.decifrar(valor)
+
+
+def obter_sessao_local() -> dict | None:
+    """Obtém sessão local ativa."""
+    with conectar() as conexao:
+        linha = conexao.execute(
+            'SELECT token, conta, role, user_id, tipo FROM sessao WHERE tipo = ? LIMIT 1',
+            ('local',)
+        ).fetchone()
+        if not linha:
+            return None
+        token_decifrado = _decifrar_campo_local(linha['token'])
+        if token_decifrado is None:
+            return None
+        return {
+            "token": token_decifrado,
+            "username": linha["conta"],
+            "role": linha["role"],
+            "user_id": linha["user_id"],
+            "tipo": "local",
+        }
+
+
+def excluir_sessao_local() -> None:
+    """Remove sessão local."""
+    with conectar() as conexao:
+        conexao.execute('DELETE FROM sessao WHERE tipo = ?', ('local',))
+
+
+def existe_algum_usuario() -> bool:
+    """Verifica se existe pelo menos um usuário cadastrado."""
+    with conectar() as conexao:
+        return conexao.execute('SELECT 1 FROM usuarios LIMIT 1').fetchone() is not None
+
+
+def existe_desenvolvedor() -> bool:
+    """Verifica se já existe um usuário com role 'desenvolvedor'."""
+    with conectar() as conexao:
+        return conexao.execute("SELECT 1 FROM usuarios WHERE role = 'desenvolvedor' LIMIT 1").fetchone() is not None
+
+
+# =============================================================================
+# Usuários locais (auth com username/senha)
+# =============================================================================
+def hash_senha(senha: str) -> str:
+    """Gera hash bcrypt da senha."""
+    if not isinstance(senha, str):
+        raise ValueError('A senha deve ser texto.')
+    senha_bytes = senha.encode('utf-8')
+    if len(senha) < TAMANHO_MINIMO_SENHA:
+        raise ValueError(f'A senha deve ter pelo menos {TAMANHO_MINIMO_SENHA} caracteres.')
+    if len(senha_bytes) > TAMANHO_MAXIMO_SENHA_BYTES:
+        raise ValueError('A senha não pode exceder 72 bytes em UTF-8.')
+    return bcrypt.hashpw(senha_bytes, bcrypt.gensalt()).decode('utf-8')
+
+
+def verificar_senha(senha: str, hash_salvo: str) -> bool:
+    """Verifica senha contra hash bcrypt."""
+    try:
+        if not isinstance(senha, str):
+            return False
+        senha_bytes = senha.encode('utf-8')
+        if len(senha_bytes) > TAMANHO_MAXIMO_SENHA_BYTES:
+            return False
+        return bcrypt.checkpw(senha_bytes, hash_salvo.encode('utf-8'))
+    except Exception:
+        return False
+
+
+def criar_usuario(username: str, senha: str, role: str = 'usuario', email: str = '') -> int:
+    """Cria um novo usuário local. Retorna o ID."""
+    if role not in ('desenvolvedor', 'administrador', 'usuario'):
+        role = 'usuario'
+    hash_pwd = hash_senha(senha)
+    agora = datetime.now().replace(microsecond=0)
+    modo_teste = 'desativado' if role == 'desenvolvedor' else 'automatico'
+    inicio_teste = agora.strftime('%Y-%m-%dT%H:%M:%S')
+    fim_teste = '' if role == 'desenvolvedor' else (agora + timedelta(days=DIAS_TESTE_POR_USUARIO)).strftime('%Y-%m-%dT%H:%M:%S')
+    with conectar() as conexao:
+        cursor = conexao.execute(
+            'INSERT INTO usuarios (username, email, password_hash, role, teste_modo, '
+            'teste_inicio_em, teste_ate, teste_controle_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            (username.strip(), email.strip() if email else '', hash_pwd, role,
+             modo_teste, inicio_teste, fim_teste, inicio_teste)
+        )
+        return cursor.lastrowid
+
+
+def criar_desenvolvedor_inicial(username: str, senha: str, email: str = '') -> int | None:
+    """Provisiona a primeira conta de desenvolvedor uma única vez.
+
+    O lock de escrita torna a verificação e a criação atômicas. Nenhuma senha
+    ou hash de credencial padrão fica embutida no pacote do aplicativo.
+    """
+    hash_pwd = hash_senha(senha)
+    agora = datetime.now().replace(microsecond=0)
+    inicio_teste = agora.strftime('%Y-%m-%dT%H:%M:%S')
+    with conectar() as conexao:
+        conexao.execute('BEGIN IMMEDIATE')
+        if conexao.execute('SELECT 1 FROM usuarios LIMIT 1').fetchone() is not None:
+            return None
+        cursor = conexao.execute(
+            'INSERT INTO usuarios (username, email, password_hash, role, ativo, '
+            'teste_modo, teste_inicio_em, teste_ate, teste_controle_em) '
+            "VALUES (?, ?, ?, 'desenvolvedor', 1, 'desativado', ?, '', ?)",
+            (username.strip(), email.strip() if email else '', hash_pwd, inicio_teste, inicio_teste),
+        )
+        return cursor.lastrowid
+
+
+def obter_usuario_por_username(username: str) -> dict | None:
+    """Busca usuário por username."""
+    with conectar() as conexao:
+        linha = conexao.execute(
+            'SELECT id, username, email, password_hash, role, ativo, criado_em, atualizado_em, ultimo_login_em '
+            'FROM usuarios WHERE username = ?', (username.strip(),)
+        ).fetchone()
+        return dict(linha) if linha else None
+
+
+def obter_usuario_por_id(user_id: int) -> dict | None:
+    """Busca usuário por ID."""
+    with conectar() as conexao:
+        linha = conexao.execute(
+            'SELECT id, username, email, password_hash, role, ativo, criado_em, atualizado_em, ultimo_login_em '
+            'FROM usuarios WHERE id = ?', (user_id,)
+        ).fetchone()
+        return dict(linha) if linha else None
+
+
+def autenticar_usuario_local(username: str, senha: str) -> dict | None:
+    """Autentica usuário local. Retorna dict do usuário se válido, None caso contrário."""
+    usuario = obter_usuario_por_username(username)
+    if not usuario:
+        return None
+    if not usuario['ativo']:
+        return None
+    if not verificar_senha(senha, usuario['password_hash']):
+        return None
+    # Atualiza último login
+    with conectar() as conexao:
+        conexao.execute(
+            'UPDATE usuarios SET ultimo_login_em = datetime(\'now\', \'localtime\') WHERE id = ?',
+            (usuario['id'],)
+        )
+    return usuario
+
+
+def atualizar_usuario_local(user_id: int, **campos) -> bool:
+    """Atualiza campos do usuário local. Retorna True se atualizou."""
+    permitidos = {'username', 'email', 'role', 'ativo', 'senha'}
+    updates = []
+    valores = []
+    for k, v in campos.items():
+        if k in permitidos:
+            if k == 'senha':
+                v = hash_senha(v)
+                k = 'password_hash'
+            updates.append(f'{k} = ?')  # noqa: S608 - k e limitado pela allowlist `permitidos`.
+            valores.append(v)
+    if not updates:
+        return False
+    updates.append('atualizado_em = datetime(\'now\', \'localtime\')')
+    valores.append(user_id)
+    with conectar() as conexao:
+        cursor = conexao.execute(
+            f'UPDATE usuarios SET {", ".join(updates)} WHERE id = ?', valores  # noqa: S608 - colunas vêm da allowlist `permitidos`.
+        )
+    return cursor.rowcount > 0
+
+
+def alterar_senha(user_id: int, senha_atual: str, nova_senha: str) -> bool:
+    """Altera senha do usuário verificando a atual."""
+    usuario = obter_usuario_por_id(user_id)
+    if not usuario:
+        return False
+    if not verificar_senha(senha_atual, usuario['password_hash']):
+        return False
+    hash_novo = hash_senha(nova_senha)
+    with conectar() as conexao:
+        cursor = conexao.execute(
+            'UPDATE usuarios SET password_hash = ?, atualizado_em = datetime(\'now\', \'localtime\') WHERE id = ?',
+            (hash_novo, user_id)
+        )
+    return cursor.rowcount > 0
+
+
+def listar_usuarios(apenas_ativos: bool = True) -> list[dict]:
+    """Lista todos os usuários."""
+    with conectar() as conexao:
+        sql = ('SELECT id, username, email, role, ativo, criado_em, atualizado_em, '
+               'ultimo_login_em, teste_modo, teste_inicio_em, teste_ate, teste_controle_em FROM usuarios')
+        if apenas_ativos:
+            sql += ' WHERE ativo = 1'
+        sql += ' ORDER BY username'
+        linhas = conexao.execute(sql).fetchall()
+        return [dict(linha) for linha in linhas]
+
+
+def obter_teste_usuario(user_id: int) -> dict | None:
+    """Retorna somente os campos de período de teste da conta."""
+    with conectar() as conexao:
+        linha = conexao.execute(
+            "SELECT id, role, teste_modo, teste_inicio_em, teste_ate, teste_controle_em "
+            "FROM usuarios WHERE id = ?",
+            (user_id,),
+        ).fetchone()
+        return dict(linha) if linha else None
+
+
+def obter_identidade_licenca_remota(user_id: int) -> dict | None:
+    """Cria e devolve a identidade remota estável da conta local."""
+    import secrets
+    import uuid
+
+    with conectar() as conexao:
+        linha = conexao.execute(
+            "SELECT id, username, email, role, licenca_remota_id, "
+            "licenca_remota_segredo FROM usuarios WHERE id = ? AND ativo = 1",
+            (user_id,),
+        ).fetchone()
+        if not linha:
+            return None
+        conta = dict(linha)
+        if not conta.get("licenca_remota_id") or not conta.get("licenca_remota_segredo"):
+            conta["licenca_remota_id"] = str(uuid.uuid4())
+            conta["licenca_remota_segredo"] = secrets.token_urlsafe(32)
+            conexao.execute(
+                "UPDATE usuarios SET licenca_remota_id = ?, licenca_remota_segredo = ? "
+                "WHERE id = ? AND (licenca_remota_id = '' OR licenca_remota_segredo = '')",
+                (conta["licenca_remota_id"], conta["licenca_remota_segredo"], user_id),
+            )
+            linha = conexao.execute(
+                "SELECT id, username, email, role, licenca_remota_id, "
+                "licenca_remota_segredo FROM usuarios WHERE id = ?",
+                (user_id,),
+            ).fetchone()
+            conta = dict(linha)
+        return conta
+
+
+def gravar_licenca_remota(user_id: int, situacao: dict) -> None:
+    """Guarda a última resposta válida do servidor para consultas locais rápidas."""
+    with conectar() as conexao:
+        conexao.execute(
+            "UPDATE usuarios SET licenca_remota_estado = ?, "
+            "licenca_remota_expira_em = ?, licenca_remota_verificada_em = ?, "
+            "licenca_remota_offline_ate = ? WHERE id = ?",
+            (situacao.get("estado_central", situacao.get("estado", "")),
+             situacao.get("expira_em", ""), situacao.get("verificada_em", ""),
+             situacao.get("offline_ate", ""), user_id),
+        )
+
+
+def obter_licenca_remota_cache(user_id: int) -> dict | None:
+    with conectar() as conexao:
+        linha = conexao.execute(
+            "SELECT licenca_remota_estado AS estado, "
+            "licenca_remota_expira_em AS expira_em, "
+            "licenca_remota_verificada_em AS verificada_em, "
+            "licenca_remota_offline_ate AS offline_ate FROM usuarios WHERE id = ?",
+            (user_id,),
+        ).fetchone()
+        return dict(linha) if linha else None
+
+
+def gravar_teste_usuario(
+    user_id: int, modo: str, inicio_em: str, ate: str, controle_em: str
+) -> bool:
+    """Persiste o controle individual do teste."""
+    with conectar() as conexao:
+        cursor = conexao.execute(
+            "UPDATE usuarios SET teste_modo = ?, teste_inicio_em = ?, teste_ate = ?, "
+            "teste_controle_em = ?, atualizado_em = datetime('now', 'localtime') "
+            "WHERE id = ? AND role != 'desenvolvedor'",
+            (modo, inicio_em, ate, controle_em, user_id),
+        )
+    return cursor.rowcount > 0
+
+
+def contar_usuarios() -> int:
+    """Retorna o total de usuários ativos."""
+    with conectar() as conexao:
+        return conexao.execute('SELECT COUNT(*) FROM usuarios WHERE ativo = 1').fetchone()[0]
+
+
+def excluir_usuario_local(user_id: int) -> bool:
+    """Exclui permanentemente uma conta local."""
+    with conectar() as conexao:
+        cursor = conexao.execute(
+            "DELETE FROM usuarios WHERE id = ? AND role != 'desenvolvedor'",
+            (user_id,),
+        )
+    return cursor.rowcount > 0
 
 
 def obter_caminho_banco_absoluto() -> str:

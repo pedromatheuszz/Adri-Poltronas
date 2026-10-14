@@ -16,6 +16,7 @@ class ContextoOperacao:
     correlation_id: str = ""
     usuario_id: str = ""
     usuario_identificador: str = ""
+    usuario_role: str = ""
     ip_hash: str = ""
     rota: str = ""
     metodo: str = ""

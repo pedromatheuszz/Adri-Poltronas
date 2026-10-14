@@ -4,6 +4,7 @@ import logging
 from flask import Blueprint, request, jsonify
 
 import database
+from permissoes import exigir_permissao
 
 log = logging.getLogger("adri.notificacoes")
 
@@ -11,6 +12,7 @@ notificacoes_bp = Blueprint('notificacoes', __name__, url_prefix='/api')
 
 
 @notificacoes_bp.route('/notificacoes')
+@exigir_permissao("notificacoes.ver")
 def api_obter_notificacoes():
     """Retorna notificacoes do sistema, com a contagem de nao lidas."""
     try:
@@ -30,6 +32,7 @@ def api_obter_notificacoes():
 
 
 @notificacoes_bp.route('/notificacoes/lidas', methods=['POST'])
+@exigir_permissao("notificacoes.gerenciar")
 def api_marcar_lidas():
     """
     Marca notificacoes como lidas.
@@ -51,6 +54,7 @@ def api_marcar_lidas():
 
 
 @notificacoes_bp.route('/notificacoes/lidas', methods=['DELETE'])
+@exigir_permissao("notificacoes.gerenciar")
 def api_desmarcar_lidas():
     """Volta notificacoes para nao lidas. Sem corpo, restaura todas."""
     dados = request.get_json(silent=True) or {}

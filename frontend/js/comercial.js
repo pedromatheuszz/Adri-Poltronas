@@ -49,6 +49,17 @@ function _dataBR(iso) {
     return partes.length === 3 ? partes[2] + '/' + partes[1] + '/' + partes[0] : iso;
 }
 
+function _periodoAluguel(pedido) {
+    if (!pedido.data_inicio_aluguel && !pedido.data_fim_aluguel) return '—';
+    return escaparHtml(pedido.data_inicio_aluguel || '??/??') + ' ate ' +
+        escaparHtml(pedido.data_fim_aluguel || '??/??');
+}
+
+function _mascararDiaMes(campo) {
+    var digitos = campo.value.replace(/\D/g, '').slice(0, 4);
+    campo.value = digitos.length > 2 ? digitos.slice(0, 2) + '/' + digitos.slice(2) : digitos;
+}
+
 function _badgeSituacao(situacao) {
     var info = SITUACAO_PEDIDO[situacao] || { rotulo: situacao, badge: 'badge-cancelado' };
     return '<span class="' + info.badge + '">' + escaparHtml(info.rotulo) + '</span>';
@@ -143,8 +154,9 @@ function renderizarProdutos(produtos) {
             '<td>' + escaparHtml(p.unidade) + '</td>' +
             '<td class="valor">' + _brl(p.preco_venda) + '</td>' +
             '<td class="col-acoes"><div class="tabela-acoes">' +
+            (['desenvolvedor', 'administrador', 'usuario'].indexOf(_perfilAtual) >= 0 ?
             '<button type="button" class="btn btn-secundario btn-sm" data-produto="' + p.id + '">Editar</button>' +
-            '<button type="button" class="btn btn-perigo btn-sm" data-inativar="' + p.id + '">Inativar</button>' +
+            '<button type="button" class="btn btn-perigo btn-sm" data-inativar="' + p.id + '">Inativar</button>' : '') +
             '</div></td></tr>';
     }).join('');
 }
@@ -214,7 +226,7 @@ async function inativarProduto(produtoId) {
 async function carregarPedidos() {
     var busca = (document.getElementById('pedFiltroBusca') || {}).value || '';
     var situacao = (document.getElementById('pedFiltroSituacao') || {}).value || '';
-    mostrarEsqueleto('tabelaPedidos', 7, 4);
+    mostrarEsqueleto('tabelaPedidos', 8, 4);
     try {
         var params = new URLSearchParams();
         if (busca.trim()) params.set('busca', busca.trim());
@@ -230,7 +242,7 @@ function renderizarPedidos(pedidos) {
     var corpo = document.getElementById('tabelaPedidos');
     if (!corpo) return;
     if (!pedidos.length) {
-        corpo.innerHTML = linhaEstadoVazio(7, 'Nenhum pedido encontrado',
+        corpo.innerHTML = linhaEstadoVazio(8, 'Nenhum pedido encontrado',
             'Crie um pedido para registrar o que o cliente encomendou e o prazo combinado.');
         return;
     }
@@ -241,6 +253,7 @@ function renderizarPedidos(pedidos) {
             '<td class="col-nome" title="' + cliente + '">' + cliente + '</td>' +
             '<td class="valor">' + _dataBR(p.data_emissao) + '</td>' +
             '<td class="valor">' + _dataBR(p.data_entrega_prevista) + '</td>' +
+            '<td class="valor">' + _periodoAluguel(p) + '</td>' +
             '<td class="valor">' + _brl(p.total_liquido) + '</td>' +
             '<td>' + _badgeSituacao(p.situacao) + '</td>' +
             '<td class="col-acoes"><div class="tabela-acoes">' +
@@ -286,6 +299,8 @@ async function abrirFormularioPedido(pedidoId) {
         document.getElementById('modalPedidoTitulo').textContent = 'Pedido ' + pedido.numero;
         document.getElementById('pedidoSituacao').innerHTML = _badgeSituacao(pedido.situacao);
         document.getElementById('pedEntregaPrevista').value = pedido.data_entrega_prevista || '';
+        document.getElementById('pedDataInicioAluguel').value = pedido.data_inicio_aluguel || '';
+        document.getElementById('pedDataFimAluguel').value = pedido.data_fim_aluguel || '';
         document.getElementById('pedDesconto').value =
             (pedido.desconto_centavos / 100).toFixed(2).replace('.', ',');
         document.getElementById('pedFrete').value =
@@ -306,7 +321,8 @@ async function abrirFormularioPedido(pedidoId) {
 }
 
 function _travarFormularioPedido(travado) {
-    ['pedClienteId', 'pedEntregaPrevista', 'pedDesconto', 'pedFrete', 'pedObservacoes']
+    ['pedClienteId', 'pedEntregaPrevista', 'pedDataInicioAluguel', 'pedDataFimAluguel',
+        'pedDesconto', 'pedFrete', 'pedObservacoes']
         .forEach(function (id) {
             var campo = document.getElementById(id);
             if (campo) campo.disabled = travado;
@@ -322,11 +338,16 @@ function _renderizarItens(pedido) {
 
     corpo.innerHTML = itens.length ? itens.map(function (i) {
         var descricao = escaparHtml(i.descricao);
+        var aluguel = '';
+        if (i.data_inicio_aluguel || i.data_fim_aluguel) {
+            aluguel = '<br><small class="texto-secundario">Aluguel: ' +
+                _dataBR(i.data_inicio_aluguel) + ' a ' + _dataBR(i.data_fim_aluguel) + '</small>';
+        }
         var remover = pedido.editavel
             ? '<button type="button" class="btn btn-perigo btn-sm" data-item="' + i.id + '">Remover</button>'
             : '';
         return '<tr>' +
-            '<td class="col-nome" title="' + descricao + '">' + descricao + '</td>' +
+            '<td class="col-nome" title="' + descricao + '">' + descricao + aluguel + '</td>' +
             '<td class="centro">' + i.quantidade + '</td>' +
             '<td class="direita">' + _brl(i.preco_unitario) + '</td>' +
             '<td class="direita">' + _brl(i.total) + '</td>' +
@@ -461,6 +482,8 @@ async function salvarPedido(evento) {
     var corpo = {
         cliente_id: parseInt(document.getElementById('pedClienteId').value, 10),
         data_entrega_prevista: document.getElementById('pedEntregaPrevista').value,
+        data_inicio_aluguel: document.getElementById('pedDataInicioAluguel').value,
+        data_fim_aluguel: document.getElementById('pedDataFimAluguel').value,
         desconto: document.getElementById('pedDesconto').value || '0',
         frete: document.getElementById('pedFrete').value || '0',
         observacoes: document.getElementById('pedObservacoes').value
@@ -488,7 +511,9 @@ async function adicionarItemAoPedido() {
         produto_id: produtoId,
         quantidade: parseInt(document.getElementById('itemQuantidade').value, 10) || 1,
         descricao: document.getElementById('itemDescricao').value,
-        preco_unitario: document.getElementById('itemPreco').value
+        preco_unitario: document.getElementById('itemPreco').value,
+        data_inicio_aluguel: document.getElementById('itemDataInicio').value,
+        data_fim_aluguel: document.getElementById('itemDataFim').value
     };
     try {
         var pedido = await _pedirApi('/api/pedidos/' + pedidoId + '/itens', _json(corpo));
@@ -496,6 +521,8 @@ async function adicionarItemAoPedido() {
         document.getElementById('itemDescricao').value = '';
         document.getElementById('itemPreco').value = '';
         document.getElementById('itemQuantidade').value = '1';
+        document.getElementById('itemDataInicio').value = '';
+        document.getElementById('itemDataFim').value = '';
         _renderizarItens(pedido);
         carregarPedidos();
     } catch (erro) {
@@ -780,6 +807,8 @@ function registrarEventosComerciais() {
 
     liga('formProduto', 'submit', salvarProduto);
     liga('formPedido', 'submit', salvarPedido);
+    liga('pedDataInicioAluguel', 'input', function (evento) { _mascararDiaMes(evento.currentTarget); });
+    liga('pedDataFimAluguel', 'input', function (evento) { _mascararDiaMes(evento.currentTarget); });
     liga('formFaturamento', 'submit', faturar);
     liga('formEntrega', 'submit', salvarEntrega);
     liga('fatParcelas', 'input', _atualizarAvisoFaturamento);

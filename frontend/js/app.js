@@ -40,6 +40,63 @@ var filtrosAtivos = { tipos: ['Entrega', 'Retirada'], cidades: [] };
 // escreva sem lembrar do assunto.
 // -----------------------------------------------------------------------------
 var _semSessao = false;
+var _sessaoComPrivilegios = false;
+var _configuracaoDesenvolvedorNecessaria = false;
+
+function mostrarTelaLogin(mensagem) {
+    _configuracaoDesenvolvedorNecessaria = false;
+    var tela = document.getElementById('telaLogin');
+    var casca = document.getElementById('appShell');
+    var erro = document.getElementById('erroTelaLogin');
+    var etapaLogin = document.getElementById('etapaLogin');
+    var etapaSetup = document.getElementById('etapaSetupDesenvolvedor');
+    if (tela) tela.hidden = false;
+    if (tela) tela.setAttribute('aria-labelledby', 'tituloTelaLogin');
+    if (etapaLogin) etapaLogin.hidden = false;
+    if (etapaSetup) etapaSetup.hidden = true;
+    if (casca) {
+        casca.inert = true;
+        casca.setAttribute('aria-hidden', 'true');
+    }
+    if (erro) {
+        erro.textContent = mensagem || '';
+        erro.hidden = !mensagem;
+    }
+}
+
+function mostrarConfiguracaoDesenvolvedor(mensagem) {
+    _configuracaoDesenvolvedorNecessaria = true;
+    var tela = document.getElementById('telaLogin');
+    var casca = document.getElementById('appShell');
+    var erro = document.getElementById('erroTelaLogin');
+    var etapaLogin = document.getElementById('etapaLogin');
+    var etapaSetup = document.getElementById('etapaSetupDesenvolvedor');
+    if (tela) tela.hidden = false;
+    if (tela) tela.setAttribute('aria-labelledby', 'tituloSetupDesenvolvedor');
+    if (etapaLogin) etapaLogin.hidden = true;
+    if (etapaSetup) etapaSetup.hidden = false;
+    if (casca) {
+        casca.inert = true;
+        casca.setAttribute('aria-hidden', 'true');
+    }
+    if (erro) {
+        erro.textContent = mensagem || '';
+        erro.hidden = !mensagem;
+    }
+}
+
+function esconderTelaLogin() {
+    _configuracaoDesenvolvedorNecessaria = false;
+    var tela = document.getElementById('telaLogin');
+    var casca = document.getElementById('appShell');
+    var erro = document.getElementById('erroTelaLogin');
+    if (tela) tela.hidden = true;
+    if (casca) {
+        casca.inert = false;
+        casca.removeAttribute('aria-hidden');
+    }
+    if (erro) { erro.textContent = ''; erro.hidden = true; }
+}
 
 // `/api/auth/` e `/api/health` respondem antes de existir sessao por desenho;
 // um 401 vindo delas significaria outra coisa, e nao "precisa conectar".
@@ -49,12 +106,14 @@ function _ehRotaQueExigeSessao(url) {
 }
 
 function registrarSessaoAusente() {
-    if (_semSessao) return;
-    _semSessao = true;
-    // O que estiver na tela deixou de valer; a proxima abertura precisa
-    // buscar de novo em vez de confiar no que ficou.
-    _dadosJaCarregados = false;
-    mostrarPainelSemConexao();
+    // Sem login, a interface e os dados ficam inacessiveis ate nova entrada.
+    var precisaReabrir = _sessaoComPrivilegios;
+    _sessaoComPrivilegios = false;
+    _semSessao = false;
+    esconderPainelSemConexao();
+    aplicarPerfilNaInterface('usuario');
+    mostrarTelaLogin('Sua sessão terminou. Entre novamente para continuar.');
+    if (precisaReabrir) window.location.reload();
 }
 
 function registrarSessaoPresente() {
@@ -203,20 +262,45 @@ function _formatarReais(centavos) {
 
 function mostrarPainelLicenca(situacao) {
     var painel = document.getElementById('painelLicenca');
+    var telaPagamento = document.getElementById('telaPagamento');
     var casca = document.getElementById('appShell');
+    var eDesenvolvedor = _perfilAtual === 'desenvolvedor';
+    if (!eDesenvolvedor) {
+        if (painel) painel.hidden = true;
+        if (telaPagamento) {
+            telaPagamento.hidden = false;
+            document.getElementById('tituloPagamentoNecessario').focus();
+        }
+        if (casca) casca.inert = true;
+        return;
+    }
+    if (telaPagamento) telaPagamento.hidden = true;
+    var titulo = document.getElementById('licencaTitulo');
+    var texto = document.getElementById('licencaMensagem');
+    var valor = document.getElementById('licencaValor');
+    var nota = document.getElementById('licencaNota');
+    var acao = document.getElementById('licencaAcao');
     if (painel) painel.hidden = false;
     if (casca) casca.classList.add('licenca-vencida');
-
-    var valor = document.getElementById('licencaValor');
-    if (valor && situacao && situacao.valor_centavos) {
-        valor.textContent = _formatarReais(situacao.valor_centavos);
+    if (titulo) titulo.textContent = 'Seu período de teste terminou';
+    if (texto) texto.textContent = 'Você pode ativar a licença desta instalação.';
+    if (valor) {
+        valor.hidden = false;
+        if (situacao && situacao.valor_centavos) {
+            valor.textContent = _formatarReais(situacao.valor_centavos);
+        }
     }
+    if (nota) nota.hidden = false;
+    if (acao) acao.hidden = false;
 }
 
 function esconderPainelLicenca() {
     var painel = document.getElementById('painelLicenca');
+    var telaPagamento = document.getElementById('telaPagamento');
     var casca = document.getElementById('appShell');
     if (painel) painel.hidden = true;
+    if (telaPagamento) telaPagamento.hidden = true;
+    if (casca) casca.inert = false;
     if (casca) casca.classList.remove('licenca-vencida');
 }
 
@@ -225,9 +309,10 @@ function registrarLicencaVencida(situacao) {
     _licencaVencida = true;
     _dadosJaCarregados = false;
     mostrarPainelLicenca(situacao);
+    if (_perfilAtual === 'desenvolvedor') trocarAba('desenvolvedor');
     // Ha cobranca aberta de uma execucao anterior? Entao ja se comeca
     // perguntando, sem pedir ao operador que refaca algo que ele ja fez.
-    verificarPagamentoDaLicenca(true);
+    if (_perfilAtual === 'desenvolvedor') verificarPagamentoDaLicenca(true);
 }
 
 function registrarLicencaLiberada() {
@@ -292,6 +377,7 @@ async function checarLicenca() {
 }
 
 async function gerarPixDaLicenca() {
+    if (_perfilAtual !== 'desenvolvedor') return;
     var botao = document.getElementById('btnGerarPixLicenca');
     var caixa = document.getElementById('licencaCobranca');
     if (botao) { botao.disabled = true; botao.textContent = 'Gerando...'; }
@@ -349,6 +435,7 @@ async function copiarPixDaLicenca() {
 }
 
 function iniciarVerificacaoDaLicenca() {
+    if (_perfilAtual !== 'desenvolvedor') return;
     if (_intervaloDaLicenca) return;
     _intervaloDaLicenca = setInterval(function() {
         verificarPagamentoDaLicenca(false);
@@ -362,6 +449,10 @@ function pararVerificacaoDaLicenca() {
 }
 
 async function verificarPagamentoDaLicenca(primeira) {
+    if (_perfilAtual !== 'desenvolvedor') {
+        pararVerificacaoDaLicenca();
+        return;
+    }
     try {
         var resp = await fetch('/api/licenca/verificar', {
             method: 'POST', headers: CABECALHOS_JSON, body: JSON.stringify({})
@@ -640,6 +731,12 @@ function atualizarCabecalho(aba) {
 }
 
 function trocarAba(aba) {
+    if (aba === 'desenvolvedor' && _perfilAtual !== 'desenvolvedor') return;
+    if (_licencaVencida && _perfilAtual !== 'desenvolvedor') return;
+    if (_licencaVencida && _perfilAtual === 'desenvolvedor') {
+        var painelLicencaDev = document.getElementById('painelLicenca');
+        if (painelLicencaDev) painelLicencaDev.hidden = aba === 'desenvolvedor';
+    }
     atualizarCabecalho(aba);
     // Mantem estado visual, semantica ARIA e o atributo HTML5 `hidden` juntos.
     document.querySelectorAll('.tab-content').forEach(function(s) {
@@ -702,7 +799,7 @@ var _licencaVerificada = false;
 // aberto, funcional e mostrando "0 Total Clientes" sobre um banco cheio.
 function liberarDadosSeOsPortoesAbrirem() {
     if (!_licencaVerificada) return;
-    if (_semSessao || _licencaVencida) return;
+    if (_licencaVencida) return;
     carregarDadosDoApp();
 }
 
@@ -719,23 +816,19 @@ function carregarDadosDoApp() {
 // impede a tela de aparecer preenchida com os zeros do HTML enquanto quatro
 // requisicoes voltam 401 em silencio.
 async function iniciarAplicacao() {
-    var logado = false;
+    var autenticado = false;
     try {
-        logado = await checarLoginExistente();
+        autenticado = await checarLoginExistente();
     } catch (_) {
-        // /api/auth/status e isenta de sessao; falhar aqui significa backend
-        // fora do ar, nao falta de conta. Tratar como desconectado e o lado
-        // seguro: melhor pedir conexao do que mostrar numero que nao veio.
+        // A tela continua bloqueada quando a consulta da sessão falha.
     }
-    if (!logado) {
-        registrarSessaoAusente();
+    if (!autenticado) {
+        if (_configuracaoDesenvolvedorNecessaria) mostrarConfiguracaoDesenvolvedor();
+        else mostrarTelaLogin();
         return;
     }
-
-    // A licenca so e consultada DEPOIS de haver sessao, na mesma ordem dos
-    // guardas do backend: quem nao esta autenticado no app nao precisa saber
-    // em que pe esta a licenca dele.
     await checarLicenca();
+    iniciarSincronizacaoLicencaRemota();
     liberarDadosSeOsPortoesAbrirem();
 }
 
@@ -743,6 +836,21 @@ document.addEventListener('DOMContentLoaded', function() {
     initTheme();
     initSidebar();
     registrarAtalhosTeclado();
+
+    [
+        ['formLoginLocal', loginLocal],
+        ['formRegistroLocal', registrarLocal],
+        ['formSetupDesenvolvedor', configurarDesenvolvedorInicial],
+        ['formAlterarSenhaLocal', alterarSenhaLocal]
+    ].forEach(function (entrada) {
+        var formulario = document.getElementById(entrada[0]);
+        if (formulario) {
+            formulario.addEventListener('submit', function (evento) {
+                evento.preventDefault();
+                entrada[1]();
+            });
+        }
+    });
 
     initObservacoesCounter();
     marcarVersaoBeta();
@@ -2123,6 +2231,46 @@ function abrirModalImportar() {
     }
 }
 
+function abrirModalLoginLocal() {
+    mostrarTelaLogin();
+    var userInput = document.getElementById('localUsername');
+    if (userInput) userInput.focus();
+}
+
+function abrirCadastroPublico() {
+    return abrirModalRegistroLocal(true);
+}
+
+async function abrirModalRegistroLocal(cadastroPublico) {
+    var publico = cadastroPublico === true;
+    var grupoRole = document.getElementById('regRoleGrupo');
+    if (grupoRole) grupoRole.hidden = publico || _perfilAtual !== 'desenvolvedor';
+    var papel = document.getElementById('regRole');
+    var ajuda = document.getElementById('registroLocalAjuda');
+    var titulo = document.getElementById('modalRegistroLocalTitulo');
+    if (ajuda) ajuda.textContent = publico
+        ? 'Crie uma conta de usuário. Seu acesso começará assim que o cadastro for concluído.'
+        : 'Cadastre uma conta e escolha seu perfil e permissões.';
+    if (titulo) titulo.textContent = publico ? 'Criar minha conta' : 'Cadastrar conta';
+    if (papel && publico) {
+        papel.value = 'usuario';
+        papel.querySelectorAll('option').forEach(function (opcao) {
+            opcao.hidden = opcao.value !== 'usuario';
+        });
+    } else if (papel && _perfilAtual !== 'desenvolvedor') {
+        papel.value = 'usuario';
+        papel.querySelectorAll('option').forEach(function (opcao) { opcao.hidden = opcao.value !== 'usuario'; });
+    } else if (papel) {
+        papel.querySelectorAll('option').forEach(function (opcao) { opcao.hidden = opcao.value === 'desenvolvedor'; });
+    }
+    var modal = document.getElementById('modalRegistroLocal');
+    if (modal) {
+        abrirModal(modal);
+        var userInput = document.getElementById('regUsername');
+        if (userInput) { userInput.focus(); }
+    }
+}
+
 async function executarImportacao() {
     var input = document.getElementById('inputArquivoImportar');
     var resultado = document.getElementById('importarResultado');
@@ -2151,27 +2299,272 @@ async function executarImportacao() {
 
 async function checarLoginExistente() {
     try {
-        var resp = await fetch('/api/auth/status');
-        var status = await resp.json();
-        if (status.logado) {
-            atualizarVisualBotaoConexao(status.conta);
+        var respLocal = await fetch('/api/auth/local/me');
+        var statusLocal = await respLocal.json();
+        if (statusLocal.logado) {
+            _sessaoComPrivilegios = true;
+            atualizarVisualBotaoConexaoLocal(statusLocal.usuario);
+            aplicarPerfilNaInterface(statusLocal.usuario.role);
+            esconderTelaLogin();
             if (intervaloChecagem) { clearInterval(intervaloChecagem); intervaloChecagem = null; }
-            // A ordem importa: some o painel, e so entao os dados entram numa
-            // tela que ja voltou a mostrar conteudo.
             registrarSessaoPresente();
+            // A Microsoft permanece opcional. Uma conta local continua sendo
+            // a identidade que define o perfil mesmo quando o OneDrive conecta.
+            var statusMS = {};
+            try { statusMS = await (await fetch('/api/auth/status')).json(); } catch (_) {}
+            if (statusMS.logado) atualizarVisualBotaoConexao(statusMS.conta);
+            else {
+                var botaoMS = document.getElementById('btnConectarMicrosoft');
+                if (botaoMS) botaoMS.classList.remove('conectado');
+                var textoMS = document.getElementById('txtBtnConectar');
+                if (textoMS) textoMS.textContent = 'Microsoft';
+            }
             liberarDadosSeOsPortoesAbrirem();
             return true;
         }
+
+        var respostaSetup = await fetch('/api/auth/local/status');
+        var statusSetup = respostaSetup.ok ? await respostaSetup.json() : {};
+        if (statusSetup.setup_required) {
+            resetarVisualBotaoConexao();
+            registrarSessaoAusente();
+            mostrarConfiguracaoDesenvolvedor();
+            return false;
+        }
+        var status = await (await fetch('/api/auth/status')).json();
         resetarVisualBotaoConexao();
         registrarSessaoAusente();
-        // O backend so devolve este motivo quando havia uma sessao que nao
-        // pode mais ser renovada -- vale avisar, porque a tela acabou de
-        // mudar de "Conectado" para "Conectar" sem o operador ter feito nada.
-        if (status.motivo === 'sessao_expirada') {
-            exibirToast('Sessao Microsoft expirada. Reconecte para exportar planilhas.', 'error');
-        }
+        if (status.motivo === 'sessao_expirada') mostrarTelaLogin('Entre com seu usuário e senha para acessar o sistema.');
     } catch(_) {}
     return false;
+}
+
+var _perfilAtual = 'usuario';
+function aplicarPerfilNaInterface(role) {
+    _perfilAtual = ['desenvolvedor', 'administrador', 'usuario'].indexOf(role) >= 0 ? role : 'usuario';
+    document.querySelectorAll('.nav-tab').forEach(function (tab) {
+        var aba = (tab.getAttribute('data-arg') || '').toLowerCase();
+        tab.hidden = aba === 'desenvolvedor' && _perfilAtual !== 'desenvolvedor';
+    });
+    document.querySelectorAll('[data-perfis]').forEach(function (controle) {
+        controle.hidden = controle.getAttribute('data-perfis').split(',').indexOf(_perfilAtual) < 0;
+    });
+    var painel = document.getElementById('aba-desenvolvedor');
+    if (painel) painel.hidden = _perfilAtual !== 'desenvolvedor';
+    if (_perfilAtual === 'desenvolvedor') {
+        carregarUsuariosDesenvolvedor();
+        carregarLicencasRemotas();
+        if (_licencaVencida) trocarAba('desenvolvedor');
+    }
+    if (typeof _mostrarEstadoDoMapa === 'function') _mostrarEstadoDoMapa();
+}
+
+async function carregarUsuariosDesenvolvedor() {
+    if (_perfilAtual !== 'desenvolvedor') return;
+    var corpo = document.getElementById('tabelaUsuariosSistema');
+    if (!corpo) return;
+    try {
+        var resposta = await fetch('/api/auth/local/usuarios');
+        var usuarios = await resposta.json();
+        if (!resposta.ok) {
+            if (resposta.status === 403) { window.location.reload(); return; }
+            throw new Error(usuarios.erro || 'Falha ao listar usuários.');
+        }
+        _usuariosDesenvolvedor = usuarios;
+        corpo.innerHTML = usuarios.map(function (u) {
+            var propriaConta = Number(u.id) === Number(_usuarioLocalAtual && _usuarioLocalAtual.id);
+            var teste = u.teste || {};
+            var textoTeste;
+            if (u.role === 'desenvolvedor') textoTeste = 'Sem vencimento';
+            else if (teste.estado === 'paga') textoTeste = 'Licença ativa';
+            else if (teste.estado === 'desativada') textoTeste = 'Sem vencimento';
+            else if (teste.estado === 'expirada') textoTeste = 'Expirado';
+            else {
+                var dataFim = (teste.expira_em || '').slice(0, 10).split('-').reverse().join('/');
+                textoTeste = (teste.dias_restantes === 1 ? '1 dia restante' : (teste.dias_restantes || 0) + ' dias restantes');
+                if (dataFim) textoTeste += ' · até ' + dataFim;
+            }
+            return '<tr><td>' + escaparHtml(u.username) + (propriaConta ? ' <span class="texto-secundario">(você)</span>' : '') + '</td><td>' + escaparHtml(u.email || '-') +
+                '</td><td><select data-role-usuario="' + u.id + '"' + (propriaConta ? ' disabled' : '') + '>' +
+                ['usuario', 'administrador'].concat(u.role === 'desenvolvedor' ? ['desenvolvedor'] : []).map(function (r) {
+                    return '<option value="' + r + '"' + (u.role === r ? ' selected' : '') + '>' + r + '</option>';
+                }).join('') + '</select></td><td><label><input type="checkbox" data-ativo-usuario="' + u.id + '"' +
+                (u.ativo ? ' checked' : '') + (propriaConta ? ' disabled' : '') + '> Liberado</label></td><td><div>' + escaparHtml(textoTeste) +
+                (u.role === 'desenvolvedor' ? '' : '<div class="usuario-teste-acoes"><button type="button" class="btn btn-secundario btn-sm" data-comando="liberarTesteUsuario" data-id="' + u.id + '">Liberar 30 dias</button>' +
+                    '<button type="button" class="btn btn-secundario btn-sm" data-comando="desativarTesteUsuario" data-id="' + u.id + '">Sem vencimento</button></div>') + '</div></td><td>' + (propriaConta
+                    ? '<span class="texto-secundario">Conta protegida</span>'
+                    : '<div class="tabela-acoes"><button type="button" class="btn btn-secundario btn-sm" data-comando="editarContaDesenvolvedor" data-id="' + u.id + '">Editar</button>' +
+                      '<button type="button" class="btn btn-perigo btn-sm" data-comando="excluirContaDesenvolvedor" data-id="' + u.id + '">Excluir</button></div>') + '</td></tr>';
+        }).join('');
+    } catch (erro) { exibirToast(erro.message, 'error'); }
+}
+
+async function _controlarTesteUsuario(id, acao) {
+    if (_perfilAtual !== 'desenvolvedor') return;
+    var usuario = _usuariosDesenvolvedor.find(function (u) { return Number(u.id) === Number(id); });
+    if (!usuario || usuario.role === 'desenvolvedor') return;
+    if (acao === 'desativar') {
+        var confirmado = await confirmarAcao({
+            titulo: 'Remover vencimento do teste',
+            mensagem: 'A conta de ' + usuario.username + ' ficará liberada sem data de expiração.',
+            textoConfirmar: 'Liberar sem vencimento', icone: 'alerta', variante: 'atencao'
+        });
+        if (!confirmado) return;
+    }
+    try {
+        var resposta = await fetch('/api/auth/local/usuarios/' + id + '/teste', {
+            method: 'POST', headers: CABECALHOS_JSON, body: JSON.stringify({ acao: acao })
+        });
+        var resultado = await resposta.json();
+        if (!resposta.ok) throw new Error(resultado.erro || 'Não foi possível atualizar o período de teste.');
+        await carregarUsuariosDesenvolvedor();
+        exibirToast(acao === 'desativar'
+            ? 'Conta liberada sem vencimento.'
+            : 'Mais 30 dias liberados para ' + usuario.username + '.');
+    } catch (erro) { exibirToast(erro.message, 'error'); }
+}
+
+function liberarTesteUsuario(id) { return _controlarTesteUsuario(id, 'liberar_30_dias'); }
+function desativarTesteUsuario(id) { return _controlarTesteUsuario(id, 'desativar'); }
+
+var _usuariosDesenvolvedor = [];
+var _usuarioLocalAtual = null;
+var _intervaloSincronizacaoLicencaRemota = null;
+
+function iniciarSincronizacaoLicencaRemota() {
+    if (_intervaloSincronizacaoLicencaRemota) return;
+    _intervaloSincronizacaoLicencaRemota = setInterval(function () {
+        if (_sessaoComPrivilegios && _perfilAtual !== 'desenvolvedor') checarLicenca();
+    }, 30000);
+}
+
+async function carregarLicencasRemotas() {
+    if (_perfilAtual !== 'desenvolvedor') return;
+    var corpo = document.getElementById('tabelaLicencasRemotas');
+    var estado = document.getElementById('estadoApiLicencas');
+    if (estado) estado.textContent = 'Consultando API central...';
+    try {
+        var resposta = await fetch('/api/licenca/remota/contas');
+        var dados = await resposta.json();
+        if (!resposta.ok) throw new Error(dados.erro || 'Não foi possível consultar as licenças.');
+        var contas = dados.contas || [];
+        if (estado) estado.textContent = contas.length
+            ? contas.length + ' conta(s) sincronizada(s) com o serviço central.'
+            : 'Nenhuma conta sincronizada ainda. O cliente precisa abrir o sistema conectado à internet.';
+        if (!corpo) return;
+        corpo.innerHTML = contas.map(function (conta) {
+            var status = conta.estado === 'paid' ? 'Pago' : conta.estado === 'suspended' ? 'Suspenso' :
+                conta.estado === 'expired' ? 'Teste expirado' : 'Teste ativo';
+            var dataFim = (conta.expira_em || '').slice(0, 10).split('-').reverse().join('/');
+            var acoes = conta.estado === 'paid'
+                ? '<button type="button" class="btn btn-perigo btn-sm" data-comando="suspenderLicencaRemota" data-arg="' + escaparHtml(conta.license_id) + '">Suspender</button>'
+                : '<button type="button" class="btn btn-primary btn-sm" data-comando="liberarLicencaRemota" data-arg="' + escaparHtml(conta.license_id) + '">Confirmar pagamento</button>' +
+                  '<button type="button" class="btn btn-secundario btn-sm" data-comando="estenderTesteRemoto" data-arg="' + escaparHtml(conta.license_id) + '">Liberar 30 dias</button>' +
+                  (conta.estado === 'suspended' ? '' : '<button type="button" class="btn btn-perigo btn-sm" data-comando="suspenderLicencaRemota" data-arg="' + escaparHtml(conta.license_id) + '">Suspender</button>');
+            return '<tr><td>' + escaparHtml(conta.username || '-') + '</td><td>' + escaparHtml(conta.email || '-') +
+                '</td><td>' + status + '</td><td>' + (dataFim || '-') + '</td><td><div class="tabela-acoes">' + acoes + '</div></td></tr>';
+        }).join('');
+    } catch (erro) {
+        if (estado) estado.textContent = erro.message;
+        if (corpo) corpo.innerHTML = '';
+    }
+}
+
+async function _controlarLicencaRemota(id, acao) {
+    if (_perfilAtual !== 'desenvolvedor') return;
+    var nomes = { paid: 'confirmar pagamento', trial_30_days: 'liberar mais 30 dias', suspend: 'suspender o acesso' };
+    var ok = await confirmarAcao({
+        titulo: 'Atualizar licença do cliente',
+        mensagem: 'Deseja ' + nomes[acao] + ' para esta conta? A alteração será enviada ao servidor central.',
+        textoConfirmar: 'Confirmar', icone: 'alerta', variante: acao === 'suspend' ? 'perigo' : 'atencao'
+    });
+    if (!ok) return;
+    try {
+        var resposta = await fetch('/api/licenca/remota/contas/' + encodeURIComponent(id), {
+            method: 'POST', headers: CABECALHOS_JSON, body: JSON.stringify({ acao: acao })
+        });
+        var dados = await resposta.json();
+        if (!resposta.ok) throw new Error(dados.erro || 'Não foi possível atualizar a licença.');
+        exibirToast('Licença atualizada no servidor central.');
+        await carregarLicencasRemotas();
+    } catch (erro) { exibirToast(erro.message, 'error'); }
+}
+
+function liberarLicencaRemota(id) { return _controlarLicencaRemota(id, 'paid'); }
+function estenderTesteRemoto(id) { return _controlarLicencaRemota(id, 'trial_30_days'); }
+function suspenderLicencaRemota(id) { return _controlarLicencaRemota(id, 'suspend'); }
+
+function editarContaDesenvolvedor(id) {
+    if (_perfilAtual !== 'desenvolvedor') return;
+    var usuario = _usuariosDesenvolvedor.find(function (u) { return Number(u.id) === Number(id); });
+    if (!usuario || Number(usuario.id) === Number(_usuarioLocalAtual && _usuarioLocalAtual.id)) return;
+    document.getElementById('editarContaId').value = usuario.id;
+    document.getElementById('editarContaUsername').value = usuario.username || '';
+    document.getElementById('editarContaEmail').value = usuario.email || '';
+    document.getElementById('editarContaSenha').value = '';
+    abrirModal(document.getElementById('modalEditarContaLocal'));
+}
+
+async function salvarEdicaoConta() {
+    if (_perfilAtual !== 'desenvolvedor') return;
+    var id = document.getElementById('editarContaId').value;
+    var username = document.getElementById('editarContaUsername').value.trim();
+    var senha = document.getElementById('editarContaSenha').value;
+    var emailInput = document.getElementById('editarContaEmail');
+    if (!username) { exibirToast('Informe o nome de usuário.', 'error'); return; }
+    if (!emailInput.checkValidity()) { emailInput.reportValidity(); return; }
+    if (senha && senha.length < 12) { exibirToast('A nova senha deve ter pelo menos 12 caracteres.', 'error'); return; }
+    var dados = { username: username, email: emailInput.value.trim() };
+    if (senha) dados.senha = senha;
+    try {
+        var resposta = await fetch('/api/auth/local/usuarios/' + id, {
+            method: 'PUT', headers: CABECALHOS_JSON, body: JSON.stringify(dados)
+        });
+        var resultado = await resposta.json();
+        if (!resposta.ok) throw new Error(resultado.erro || 'Não foi possível editar a conta.');
+        fecharModal('modalEditarContaLocal');
+        exibirToast('Conta atualizada.');
+        await carregarUsuariosDesenvolvedor();
+    } catch (erro) { exibirToast(erro.message, 'error'); }
+}
+
+async function excluirContaDesenvolvedor(id) {
+    if (_perfilAtual !== 'desenvolvedor') return;
+    var usuario = _usuariosDesenvolvedor.find(function (u) { return Number(u.id) === Number(id); });
+    if (!usuario || Number(usuario.id) === Number(_usuarioLocalAtual && _usuarioLocalAtual.id)) return;
+    var confirmado = await confirmarAcao({
+        titulo: 'Excluir conta',
+        mensagem: 'A conta de ' + usuario.username + ' será removida permanentemente. Os registros do sistema serão mantidos.',
+        textoConfirmar: 'Excluir conta', icone: 'alerta', variante: 'perigo'
+    });
+    if (!confirmado) return;
+    try {
+        var resposta = await fetch('/api/auth/local/usuarios/' + id, { method: 'DELETE' });
+        var resultado = await resposta.json();
+        if (!resposta.ok) throw new Error(resultado.erro || 'Não foi possível excluir a conta.');
+        exibirToast('Conta excluída e removida da lista.');
+        await carregarUsuariosDesenvolvedor();
+    } catch (erro) { exibirToast(erro.message, 'error'); }
+}
+
+async function salvarAcessosUsuarios() {
+    if (_perfilAtual !== 'desenvolvedor') return;
+    var controles = document.querySelectorAll('[data-role-usuario]');
+    for (var i = 0; i < controles.length; i++) {
+        var id = controles[i].getAttribute('data-role-usuario');
+        var ativo = document.querySelector('[data-ativo-usuario="' + id + '"]');
+        var resposta = await fetch('/api/auth/local/usuarios/' + id, {
+            method: 'PUT', headers: CABECALHOS_JSON,
+            body: JSON.stringify({ role: controles[i].value, ativo: !!(ativo && ativo.checked) })
+        });
+        if (!resposta.ok) {
+            var erro = await resposta.json();
+            exibirToast(erro.erro || 'Não foi possível salvar as permissões.', 'error');
+            return;
+        }
+    }
+    exibirToast('Acessos dos usuários atualizados.');
+    carregarUsuariosDesenvolvedor();
 }
 
 // O botao de conexao mora na topbar, ao lado do estado da rede, e ali o espaco
@@ -2184,58 +2577,238 @@ function atualizarVisualBotaoConexao(conta) {
     if (btnConectar) {
         btnConectar.classList.add('conectado');
         btnConectar.classList.remove('carregando');
-        btnConectar.title = 'Conectado como ' + conta + '. Clique para desconectar.';
+        btnConectar.title = 'Conectado como ' + conta + ' (Microsoft). Clique para desconectar.';
     }
-    if (txtConectar) txtConectar.innerText = conta.split('@')[0];
+    if (txtConectar) txtConectar.innerText = 'MS: ' + conta.split('@')[0];
     if (btnEnviar) btnEnviar.disabled = false;
 }
 
-function resetarVisualBotaoConexao() {
-    var btnConectar = document.getElementById('btnConectarMicrosoft');
+function atualizarVisualBotaoConexaoLocal(usuario) {
+    var idAnterior = _usuarioLocalAtual && _usuarioLocalAtual.id;
+    if (idAnterior && usuario && Number(idAnterior) !== Number(usuario.id) && typeof encerrarMapaAoTrocarConta === 'function') {
+        encerrarMapaAoTrocarConta();
+    }
+    _usuarioLocalAtual = usuario || null;
+    var btnConectar = document.getElementById('btnLoginLocal');
     var btnEnviar = document.getElementById('btnEnviarExcel');
-    var txtConectar = document.getElementById('txtBtnConectar');
+    var txtConectar = document.getElementById('txtBtnLocal');
+    var btnAlterarSenha = document.getElementById('btnAlterarSenha');
+    if (btnConectar) {
+        btnConectar.classList.add('conectado');
+        btnConectar.classList.remove('carregando');
+        btnConectar.title = 'Conectado como ' + usuario.username + '. Clique para sair.';
+        btnConectar.setAttribute('data-comando', 'desconectar');
+    }
+    if (txtConectar) txtConectar.innerText = usuario.username;
+    if (btnAlterarSenha) btnAlterarSenha.hidden = false;
+    if (btnEnviar) btnEnviar.disabled = true;
+}
+
+function resetarVisualBotaoConexao() {
+    if (_usuarioLocalAtual && typeof encerrarMapaAoTrocarConta === 'function') encerrarMapaAoTrocarConta();
+    _usuarioLocalAtual = null;
+    var btnConectar = document.getElementById('btnLoginLocal');
+    var btnEnviar = document.getElementById('btnEnviarExcel');
+    var txtConectar = document.getElementById('txtBtnLocal');
+    var btnAlterarSenha = document.getElementById('btnAlterarSenha');
     if (btnConectar) {
         btnConectar.classList.remove('conectado');
-        btnConectar.title = 'Conectar conta Microsoft';
+        btnConectar.title = 'Entrar com usuário e senha';
+        btnConectar.setAttribute('data-comando', 'abrirModalLoginLocal');
     }
-    if (txtConectar) txtConectar.innerText = 'Conectar';
+    if (txtConectar) txtConectar.innerText = 'Login';
+    if (btnAlterarSenha) btnAlterarSenha.hidden = true;
+    var btnMicrosoft = document.getElementById('btnConectarMicrosoft');
+    if (btnMicrosoft) btnMicrosoft.classList.remove('conectado');
+    var textoMicrosoft = document.getElementById('txtBtnConectar');
+    if (textoMicrosoft) textoMicrosoft.textContent = 'Microsoft';
     if (btnEnviar) btnEnviar.disabled = true;
 }
 
 async function conectarMicrosoft() {
-    var estaLogado = await checarLoginExistente();
-    if (estaLogado) {
+    var statusMicrosoft = {};
+    try {
+        statusMicrosoft = await (await fetch('/api/auth/status')).json();
+    } catch (_) {}
+    if (statusMicrosoft.logado) {
         var confirmado = await confirmarAcao({
             titulo: 'Desconectar Conta',
-            mensagem: 'Sua conta Microsoft sera desconectada e o envio de planilhas para o OneDrive deixara de funcionar ate voce reconectar.',
+            mensagem: 'Sua conta sera desconectada.',
             textoConfirmar: 'Desconectar',
             icone: 'desconectar',
             variante: 'atencao'
         });
-        if (confirmado) { await desconectarMicrosoft(); }
+        if (confirmado) {
+            await fetch('/api/auth/logout', { method: 'POST' });
+            var btn = document.getElementById('btnConectarMicrosoft');
+            if (btn) btn.classList.remove('conectado');
+            var texto = document.getElementById('txtBtnConectar');
+            if (texto) texto.textContent = 'Microsoft';
+            var exportar = document.getElementById('btnEnviarExcel');
+            if (exportar) exportar.disabled = true;
+        }
         return;
     }
-    try { exibirToast('Abrindo login...'); await fetch('/api/auth/login'); if(!intervaloChecagem) intervaloChecagem = setInterval(checarLoginExistente, 1500); } catch(_) { exibirToast('Falha ao iniciar login.', 'error'); }
+    try {
+        exibirToast('Abrindo login Microsoft...');
+        await fetch('/api/auth/login');
+        if (!intervaloChecagem) intervaloChecagem = setInterval(async function () {
+            try {
+                var status = await (await fetch('/api/auth/status')).json();
+                if (!status.logado) return;
+                clearInterval(intervaloChecagem);
+                intervaloChecagem = null;
+                atualizarVisualBotaoConexao(status.conta);
+            } catch (_) {}
+        }, 1500);
+    } catch (_) { exibirToast('Falha ao iniciar login.', 'error'); }
 }
 
-async function desconectarMicrosoft() {
+async function loginLocal() {
+    var username = document.getElementById('localUsername').value;
+    var senha = document.getElementById('localSenha').value;
+    if (!username || !senha) { mostrarTelaLogin('Preencha usuário e senha.'); return; }
     try {
-        var resp = await fetch('/api/auth/logout', { method: 'POST' });
-        if (resp.ok) {
-            resetarVisualBotaoConexao();
-            // Sem isto a tela ficaria com o cadastro do operador anterior
-            // ate a proxima requisicao voltar 401 -- dado visivel depois de
-            // desconectar e exatamente o que a desconexao deveria encerrar.
-            _dadosJaCarregados = false;
-            registrarSessaoAusente();
-            exibirToast('Desconectado da Microsoft.');
+        var resp = await fetch('/api/auth/local/login', {
+            method: 'POST', headers: CABECALHOS_JSON, body: JSON.stringify({ username: username, senha: senha })
+        });
+        var dados = await resp.json();
+        if (!resp.ok) { mostrarTelaLogin(dados.erro || 'Não foi possível entrar.'); return; }
+        await checarLoginExistente();
+        await confirmarEntradaLocal(dados.usuario);
+        exibirToast(dados.senha_precisa_ser_atualizada
+            ? 'Login realizado. Atualize sua senha pelo botão de cadeado no topo.'
+            : 'Login realizado como ' + dados.usuario.username + '.');
+    } catch (e) { mostrarTelaLogin('Erro ao conectar ao sistema. Tente novamente.'); }
+}
+
+async function registrarLocal() {
+    var username = document.getElementById('regUsername').value;
+    var senha = document.getElementById('regSenha').value;
+    var email = document.getElementById('regEmail').value;
+    var role = document.getElementById('regRole').value;
+    if (!username || !senha) { exibirToast('Preencha usuário e senha.', 'error'); return; }
+    if (senha.length < 12) { exibirToast('Senha deve ter pelo menos 12 caracteres.', 'error'); return; }
+    try {
+        var endpointCadastro = _perfilAtual === 'desenvolvedor'
+            ? '/api/auth/local/usuarios'
+            : '/api/auth/local/register';
+        var resp = await fetch(endpointCadastro, {
+            method: 'POST', headers: CABECALHOS_JSON, body: JSON.stringify({ username: username, senha: senha, email: email, role: role })
+        });
+        var dados = await resp.json();
+        if (!resp.ok) { exibirToast(dados.erro || 'Erro no registro.', 'error'); return; }
+        fecharModal('modalRegistroLocal');
+        document.getElementById('regSenha').value = '';
+        if (dados.logado) {
+            document.getElementById('regUsername').value = '';
+            document.getElementById('regEmail').value = '';
+            await checarLoginExistente();
+            await confirmarEntradaLocal(dados.usuario);
+            exibirToast('Conta criada. Você entrou como ' + dados.usuario.username + '.');
+        } else {
+            document.getElementById('regUsername').value = '';
+            document.getElementById('regEmail').value = '';
+            document.getElementById('regSenha').value = '';
+            await carregarUsuariosDesenvolvedor();
+            exibirToast('Conta criada e adicionada à lista de usuários.');
         }
+    } catch (e) { exibirToast('Erro ao registrar.', 'error'); }
+}
+
+function abrirModalAlterarSenha() {
+    if (!_usuarioLocalAtual) return;
+    ['senhaAtualLocal', 'senhaNovaLocal', 'senhaNovaConfirmacaoLocal'].forEach(function (id) {
+        var campo = document.getElementById(id);
+        if (campo) campo.value = '';
+    });
+    abrirModal('modalAlterarSenhaLocal');
+    var atual = document.getElementById('senhaAtualLocal');
+    if (atual) atual.focus();
+}
+
+async function alterarSenhaLocal() {
+    if (!_usuarioLocalAtual) return;
+    var atual = document.getElementById('senhaAtualLocal').value;
+    var nova = document.getElementById('senhaNovaLocal').value;
+    var confirmacao = document.getElementById('senhaNovaConfirmacaoLocal').value;
+    if (nova.length < 12) { exibirToast('A nova senha deve ter pelo menos 12 caracteres.', 'error'); return; }
+    if (nova !== confirmacao) { exibirToast('A confirmação da senha não corresponde.', 'error'); return; }
+    try {
+        var resposta = await fetch('/api/auth/local/alterar-senha', {
+            method: 'POST',
+            headers: CABECALHOS_JSON,
+            body: JSON.stringify({ senha_atual: atual, nova_senha: nova })
+        });
+        var dados = await resposta.json();
+        if (!resposta.ok) throw new Error(dados.erro || 'Não foi possível alterar a senha.');
+        fecharModal('modalAlterarSenhaLocal');
+        ['senhaAtualLocal', 'senhaNovaLocal', 'senhaNovaConfirmacaoLocal'].forEach(function (id) {
+            var campo = document.getElementById(id);
+            if (campo) campo.value = '';
+        });
+        exibirToast('Senha alterada com sucesso.');
+    } catch (erro) { exibirToast(erro.message, 'error'); }
+}
+
+function selecionarPaginaInicial(role) {
+    var perfil = role || _perfilAtual;
+    trocarAba(_licencaVencida && perfil === 'desenvolvedor' ? 'desenvolvedor' : 'dashboard');
+}
+
+async function confirmarEntradaLocal(usuario) {
+    if (!usuario) return;
+    // A resposta 200 do login/cadastro já confirma a sessão. Reflete a conta
+    // imediatamente, mesmo se a consulta complementar de /me falhar.
+    _sessaoComPrivilegios = true;
+    atualizarVisualBotaoConexaoLocal(usuario);
+    aplicarPerfilNaInterface(usuario.role);
+    esconderTelaLogin();
+    registrarSessaoPresente();
+    await checarLicenca();
+    iniciarSincronizacaoLicencaRemota();
+    selecionarPaginaInicial(usuario.role);
+    liberarDadosSeOsPortoesAbrirem();
+}
+
+async function configurarDesenvolvedorInicial() {
+    var username = document.getElementById('setupDevUsername').value.trim();
+    var senha = document.getElementById('setupDevSenha').value;
+    var email = document.getElementById('setupDevEmail').value.trim();
+    if (!username || !senha) { mostrarConfiguracaoDesenvolvedor('Preencha usuário e senha.'); return; }
+    if (username.length > 80) { mostrarConfiguracaoDesenvolvedor('O nome de usuário deve ter até 80 caracteres.'); return; }
+    if (senha.length < 12) { mostrarConfiguracaoDesenvolvedor('A senha deve ter pelo menos 12 caracteres.'); return; }
+    try {
+        var resp = await fetch('/api/auth/local/setup', {
+            method: 'POST', headers: CABECALHOS_JSON,
+            body: JSON.stringify({ username: username, senha: senha, email: email })
+        });
+        var dados = await resp.json();
+        if (!resp.ok) { mostrarConfiguracaoDesenvolvedor(dados.erro || 'Erro ao configurar a conta.'); return; }
+        await confirmarEntradaLocal(dados.usuario);
+        document.getElementById('setupDevSenha').value = '';
+        exibirToast('Conta de desenvolvedor criada e sessão iniciada.');
+    } catch (e) { mostrarConfiguracaoDesenvolvedor('Erro ao configurar a conta. Tente novamente.'); }
+}
+
+async function desconectar() {
+    try {
+        // Tenta logout Microsoft
+        await fetch('/api/auth/logout', { method: 'POST' });
+        // Tenta logout local
+        await fetch('/api/auth/local/logout', { method: 'POST' });
+        resetarVisualBotaoConexao();
+        aplicarPerfilNaInterface('usuario');
+        _dadosJaCarregados = false;
+        registrarSessaoAusente();
+        exibirToast('Desconectado.');
     } catch(_) { exibirToast('Erro ao desconectar.', 'error'); }
 }
 
 async function enviarParaExcel() {
-    var estaLogado = await checarLoginExistente();
-    if (!estaLogado) { exibirToast('Conecte-se a Microsoft primeiro.', 'error'); return; }
+    var statusMicrosoft = {};
+    try { statusMicrosoft = await (await fetch('/api/auth/status')).json(); } catch (_) {}
+    if (!statusMicrosoft.logado) { exibirToast('Conecte a Microsoft para exportar planilhas.', 'error'); return; }
     var idsParaEnviar = [];
     if (modoSelecaoAtivo) {
         idsParaEnviar = Array.from(document.querySelectorAll('.client-checkbox:checked')).map(function(cb){ return parseInt(cb.value); });
@@ -2298,6 +2871,7 @@ var mapaMarcadores = [];
 var CHAVE_GEOCACHE = 'adri-geocache';
 var _geocacheCoords = carregarGeocache();
 var _mapaCarregando = false;
+var _controladorMapa = null;
 // Incrementado a cada carregamento do mapa: um carregamento antigo que ainda
 // esteja no meio da fila de 1,1 s por cliente percebe que ficou obsoleto e
 // para, em vez de seguir desenhando marcadores sobre o mapa novo.
@@ -2347,9 +2921,16 @@ function guardarGeocache() {
 // -----------------------------------------------------------------------------
 var CHAVE_CONSENTIMENTO_MAPA = 'adri-mapa-consentimento';
 
+function chaveConsentimentoMapa() {
+    var id = Number(_usuarioLocalAtual && _usuarioLocalAtual.id);
+    return Number.isInteger(id) && id > 0 ? CHAVE_CONSENTIMENTO_MAPA + ':' + id : null;
+}
+
 function mapaAutorizado() {
+    var chave = chaveConsentimentoMapa();
+    if (!chave) return false;
     try {
-        return localStorage.getItem(CHAVE_CONSENTIMENTO_MAPA) === 'sim';
+        return localStorage.getItem(chave) === 'sim';
     } catch (e) {
         // Sem storage nao da para lembrar da resposta, e perguntar de novo a
         // cada abertura e melhor do que assumir um "sim" que ninguem deu.
@@ -2363,14 +2944,16 @@ function _mostrarEstadoDoMapa() {
     var controles = document.getElementById('mapaControles');
     var tela = document.getElementById('mapaClientes');
     if (pedido) pedido.hidden = autorizado;
-    if (controles) controles.hidden = !autorizado;
+    if (controles) controles.hidden = !autorizado || _perfilAtual !== 'desenvolvedor';
     if (tela) tela.hidden = !autorizado;
     return autorizado;
 }
 
 function autorizarMapa() {
+    var chave = chaveConsentimentoMapa();
+    if (!chave) return;
     try {
-        localStorage.setItem(CHAVE_CONSENTIMENTO_MAPA, 'sim');
+        localStorage.setItem(chave, 'sim');
     } catch (e) {
         // Vale para esta sessao mesmo sem conseguir gravar.
         console.warn('[mapa] consentimento nao persistido:', e);
@@ -2381,15 +2964,16 @@ function autorizarMapa() {
 }
 
 function revogarMapa() {
+    var chave = chaveConsentimentoMapa();
     try {
-        localStorage.removeItem(CHAVE_CONSENTIMENTO_MAPA);
+        if (chave) localStorage.removeItem(chave);
     } catch (e) { /* nada a fazer */ }
 
     // Invalida a geracao ANTES de qualquer outra coisa: o laco de
     // geocodificacao consulta `_geracaoMapa` depois de cada `await` e sai
     // sozinho. Sem isto ele seguiria consultando servico externo sobre
     // enderecos que o operador acabou de proibir.
-    _geracaoMapa++;
+    cancelarCarregamentoMapa();
 
     // Revogar sem apagar o que ja foi buscado deixaria as coordenadas de todos
     // os clientes guardadas numa maquina onde o operador acabou de dizer que
@@ -2398,13 +2982,24 @@ function revogarMapa() {
 
     // Esconder o painel nao basta: os marcadores continuam no DOM, cada um com
     // o nome e o endereco do cliente no popup. Quem revoga espera que sumam.
-    if (mapaInstance) {
-        mapaMarcadores.forEach(function (m) { mapaInstance.removeLayer(m); });
-    }
-    mapaMarcadores = [];
-
     _mostrarEstadoDoMapa();
     exibirToast('Autorizacao revogada e coordenadas apagadas.');
+}
+
+function cancelarCarregamentoMapa() {
+    _geracaoMapa++;
+    if (_controladorMapa) _controladorMapa.abort();
+    _controladorMapa = null;
+    _mapaCarregando = false;
+    if (mapaInstance) mapaMarcadores.forEach(function (marcador) {
+        mapaInstance.removeLayer(marcador);
+    });
+    mapaMarcadores = [];
+}
+
+function encerrarMapaAoTrocarConta() {
+    cancelarCarregamentoMapa();
+    _mostrarEstadoDoMapa();
 }
 
 function limparCacheDoMapa(opcoes) {
@@ -2468,7 +3063,8 @@ function initMapa() {
     setTimeout(function() { mapaInstance.invalidateSize(); }, 300);
 }
 
-async function geocodificarCliente(cliente) {
+async function geocodificarCliente(cliente, sinal) {
+    if ((sinal && sinal.aborted) || !mapaAutorizado()) return null;
     var cepLimpo = (cliente.cep || '').replace(/\D/g, '');
     // Cache key usa endereço completo para precisão
     var partes = [cliente.rua, cliente.bairro, cliente.cidade].filter(Boolean);
@@ -2484,15 +3080,19 @@ async function geocodificarCliente(cliente) {
     var uf = '';
     if (cepLimpo.length === 8) {
         try {
-            var viaResp = await fetch('https://viacep.com.br/ws/' + cepLimpo + '/json/');
+            var viaResp = await fetch('https://viacep.com.br/ws/' + cepLimpo + '/json/', { signal: sinal });
             var viaDados = await viaResp.json();
+            if ((sinal && sinal.aborted) || !mapaAutorizado()) return null;
             if (!viaDados.erro) {
                 uf = viaDados.uf || '';
                 // Se não tem rua/bairro no cadastro, usar dados do ViaCEP
                 if (!cliente.rua && viaDados.logradouro) partesEndereco.unshift(viaDados.logradouro);
                 if (!cliente.bairro && viaDados.bairro) partesEndereco.splice(1, 0, viaDados.bairro);
             }
-        } catch(e) { console.warn('ViaCEP falhou:', cepLimpo, e); }
+        } catch(e) {
+            if (sinal && sinal.aborted) return null;
+            console.warn('ViaCEP falhou:', cepLimpo, e);
+        }
     }
     if (uf) partesEndereco.push(uf);
     partesEndereco.push('Brasil');
@@ -2501,30 +3101,40 @@ async function geocodificarCliente(cliente) {
     if (partesEndereco.length > 2) {
         var queryCompleta = partesEndereco.join(', ');
         await new Promise(function(r) { setTimeout(r, 1100); });
-        var coords = await geocodificarCidade(queryCompleta);
+        if ((sinal && sinal.aborted) || !mapaAutorizado()) return null;
+        var coords = await geocodificarCidade(queryCompleta, sinal);
+        if ((sinal && sinal.aborted) || !mapaAutorizado()) return null;
         if (coords) { _geocacheCoords[cacheKey] = coords; guardarGeocache(); return coords; }
     }
 
     // Passo 2: Fallback - apenas cidade + UF
     if (cliente.cidade && cliente.cidade.trim()) {
         await new Promise(function(r) { setTimeout(r, 1100); });
+        if ((sinal && sinal.aborted) || !mapaAutorizado()) return null;
         var queryCidade = cliente.cidade.trim() + (uf ? ', ' + uf : '') + ', Brasil';
-        var coords = await geocodificarCidade(queryCidade);
+        var coords = await geocodificarCidade(queryCidade, sinal);
+        if ((sinal && sinal.aborted) || !mapaAutorizado()) return null;
         if (coords) { _geocacheCoords[cacheKey] = coords; guardarGeocache(); return coords; }
     }
     return null;
 }
 
-async function geocodificarCidade(query) {
+async function geocodificarCidade(query, sinal) {
+    if ((sinal && sinal.aborted) || !mapaAutorizado()) return null;
     try {
         var resp = await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(query) + '&accept-language=pt-BR', {
-            headers: { 'Accept': 'application/json', 'User-Agent': 'AdriPoltronas/1.0 (contato@adripoltronas.com.br)' }
+            headers: { 'Accept': 'application/json', 'User-Agent': 'AdriPoltronas/1.0 (contato@adripoltronas.com.br)' },
+            signal: sinal
         });
         var dados = await resp.json();
+        if ((sinal && sinal.aborted) || !mapaAutorizado()) return null;
         if (dados.length > 0) {
             return { lat: parseFloat(dados[0].lat), lon: parseFloat(dados[0].lon) };
         }
-    } catch(e) { console.warn('Nominatim falhou:', query, e); }
+    } catch(e) {
+        if (sinal && sinal.aborted) return null;
+        console.warn('Nominatim falhou:', query, e);
+    }
     return null;
 }
 // -----------------------------------------------------------------------------
@@ -2547,10 +3157,13 @@ async function carregarMapaClientes() {
     if (!mapaInstance || _mapaCarregando) return;
     _mapaCarregando = true;
     var geracao = ++_geracaoMapa;
+    var controlador = new AbortController();
+    _controladorMapa = controlador;
     try {
-        var resp = await fetch('/api/clientes/mapa');
+        var resp = await fetch('/api/clientes/mapa', { signal: controlador.signal });
         if (!resp.ok) throw new Error('Falha ao buscar dados do mapa');
         var clientes = await resp.json();
+        if (geracao !== _geracaoMapa || controlador.signal.aborted || !mapaAutorizado()) return;
         if (!Array.isArray(clientes) || clientes.length === 0) {
             exibirToast('Nenhum cliente cadastrado no mapa.');
             return;
@@ -2564,7 +3177,7 @@ async function carregarMapaClientes() {
             // obsoleto e precisa sair sem tocar no mapa novo.
             if (geracao !== _geracaoMapa) return;
             var c = clientes[i];
-            var coords = await geocodificarCliente(c);
+            var coords = await geocodificarCliente(c, controlador.signal);
             if (geracao !== _geracaoMapa) return;
             if (coords) {
                 var badgeClass = c.tipo === 'Retirada' ? 'badge-retirada' : 'badge-entrega';
@@ -2595,10 +3208,14 @@ async function carregarMapaClientes() {
             mapaInstance.fitBounds(bounds, { padding: [50, 50], maxZoom: 14 });
         }
     } catch(e) {
+        if (controlador.signal.aborted) return;
         console.error('Erro ao carregar mapa:', e);
         exibirToast('Erro ao carregar mapa.', 'error');
     } finally {
-        _mapaCarregando = false;
+        if (geracao === _geracaoMapa) {
+            _mapaCarregando = false;
+            _controladorMapa = null;
+        }
     }
 }
 
@@ -2633,9 +3250,14 @@ async function carregarMapaClientes() {
 // de modal que pareca numero.
 // -----------------------------------------------------------------------------
 var COMANDOS_PERMITIDOS = [
+    'carregarLicencasRemotas',
     'abrirFormularioEntrega',
     'abrirFormularioPedido',
     'abrirFormularioProduto',
+    'abrirModalLoginLocal',
+    'abrirModalAlterarSenha',
+    'abrirModalRegistroLocal',
+    'abrirCadastroPublico',
     'abrirNotificacoes',
     'adicionarItemAoPedido',
     'alternarSidebar',
@@ -2647,11 +3269,24 @@ var COMANDOS_PERMITIDOS = [
     'enviarParaExcel',
     'executarImportacao',
     'fazerBackupSQLite',
+    'liberarTesteUsuario',
+    'liberarLicencaRemota',
+    'estenderTesteRemoto',
+    'suspenderLicencaRemota',
+    'desativarTesteUsuario',
+    'editarContaDesenvolvedor',
+    'excluirContaDesenvolvedor',
     'fecharModal',
     'fecharNotificacoes',
     'gerarPixDaLicenca',
     'limparCacheDoMapa',
     'limparFiltros',
+    'loginLocal',
+    'registrarLocal',
+    'salvarAcessosUsuarios',
+    'salvarEdicaoConta',
+    'alterarSenhaLocal',
+    'desconectar',
     'revogarMapa',
     'sugerirBairro',
     'toggleFiltro',
@@ -2683,3 +3318,40 @@ function _despacharComando(evento) {
 }
 
 document.addEventListener('click', _despacharComando);
+
+// Controles da moldura Electron. Em navegadores comuns a barra fica oculta e
+// a interface conserva a altura integral da viewport.
+(function configurarBarraDaJanela() {
+    var controles = window.controlesJanela;
+    var barra = document.getElementById('barraJanela');
+    if (!controles || !barra) return;
+
+    document.body.classList.add('electron-app');
+    barra.hidden = false;
+
+    var botaoMinimizar = document.getElementById('btnMinimizarJanela');
+    var botaoMaximizar = document.getElementById('btnMaximizarJanela');
+    var botaoFechar = document.getElementById('btnFecharJanela');
+
+    if (botaoMinimizar) botaoMinimizar.addEventListener('click', function () {
+        void controles.minimizar();
+    });
+    if (botaoMaximizar) botaoMaximizar.addEventListener('click', function () {
+        void controles.alternarMaximizada();
+    });
+    if (botaoFechar) botaoFechar.addEventListener('click', function () {
+        void controles.fechar();
+    });
+
+    controles.aoAlterarEstadoMaximizado(function (maximizada) {
+        if (!botaoMaximizar) return;
+        botaoMaximizar.setAttribute('aria-pressed', String(maximizada));
+        botaoMaximizar.setAttribute('aria-label', maximizada ? 'Restaurar' : 'Maximizar');
+        botaoMaximizar.title = maximizada ? 'Restaurar' : 'Maximizar';
+    });
+
+    var areaArraste = barra.querySelector('.barra-janela__arraste');
+    if (areaArraste) areaArraste.addEventListener('dblclick', function () {
+        void controles.alternarMaximizada();
+    });
+})();

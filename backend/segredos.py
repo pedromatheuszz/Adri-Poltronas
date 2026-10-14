@@ -3,7 +3,8 @@ Cofre das credenciais de integracao.
 
 O problema
 ----------
-`MP_ACCESS_TOKEN` e `GEMINI_API_KEY` viviam em texto puro em
+`MP_ACCESS_TOKEN`, `GEMINI_API_KEY` e o token administrativo da licença
+viviam em texto puro em
 `%APPDATA%\\AdriPoltronas\\.env`. Qualquer processo rodando como o mesmo
 usuario -- e qualquer pessoa que abrisse a pasta -- lia as chaves. A do
 Mercado Pago da acesso total a conta do vendedor: criar cobranca, ler
@@ -59,7 +60,11 @@ NOME_DO_COFRE = ".segredos"
 # Chaves que o cofre guarda. Sao as credenciais de integracao; `ADRI_FLASK_SECRET`
 # fica de fora de proposito -- ele e um segredo de sessao, regeneravel, e
 # perde-lo custa apenas relogin.
-CHAVES_PROTEGIDAS = ("MP_ACCESS_TOKEN", "GEMINI_API_KEY")
+CHAVES_PROTEGIDAS = (
+    "MP_ACCESS_TOKEN",
+    "GEMINI_API_KEY",
+    "ADRI_LICENCA_ADMIN_TOKEN",
+)
 
 _cache: dict | None = None
 
@@ -270,7 +275,8 @@ def _descartar_copia_em_claro(caminho_bak: str, migradas: dict) -> None:
     `.env`. Cumprida essa funcao, ela vira o oposto do que o cofre faz: um
     arquivo permanente, em texto puro, na mesma pasta do banco, contendo o
     `MP_ACCESS_TOKEN` (que da acesso total a conta do vendedor no Mercado Pago
-    -- criar cobranca, ler movimentacao, estornar) e a `GEMINI_API_KEY`. O
+    -- criar cobranca, ler movimentacao, estornar), `GEMINI_API_KEY` e o token
+    administrativo da API central de licencas. O
     trabalho de cifrar ficava metade desfeito, e para sempre.
 
     A conferencia por releitura e o que torna seguro apagar. O risco oposto e
@@ -292,7 +298,8 @@ def _descartar_copia_em_claro(caminho_bak: str, migradas: dict) -> None:
         #
         # `obter()` percorre a precedencia inteira e termina em
         # `return do_ambiente_real or padrao`. Em producao o `load_dotenv()` ja
-        # colocou MP_ACCESS_TOKEN e GEMINI_API_KEY em `os.environ` -- com
+        # colocou MP_ACCESS_TOKEN, GEMINI_API_KEY e o token administrativo em
+        # `os.environ` -- com
         # exatamente o valor que esta sendo migrado. Entao, se o DPAPI cifrasse
         # e NAO conseguisse decifrar de volta, o cofre devolvia vazio, a funcao
         # caia nesse ultimo degrau, entregava o valor do ambiente e a

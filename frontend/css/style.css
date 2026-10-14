@@ -60,6 +60,52 @@ body {
     text-rendering: optimizeLegibility;
 }
 
+/* A barra substitui a moldura do sistema operacional no app Electron. */
+.barra-janela {
+    position: relative;
+    z-index: 10001;
+    display: flex;
+    width: 100%;
+    height: 36px;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--cor-borda);
+    background: var(--cor-superficie);
+    color: var(--cor-texto-2);
+    user-select: none;
+    -webkit-app-region: drag;
+}
+.barra-janela[hidden] { display: none !important; }
+.barra-janela__arraste {
+    display: flex;
+    min-width: 0;
+    height: 100%;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0 0.8rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+.barra-janela__arraste img { border-radius: 4px; object-fit: cover; }
+.barra-janela__controles { display: flex; height: 100%; -webkit-app-region: no-drag; }
+.barra-janela__botao {
+    display: grid;
+    width: 46px;
+    height: 100%;
+    place-items: center;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--cor-texto-2);
+    cursor: pointer;
+}
+.barra-janela__botao:hover { background: var(--cor-hover); color: var(--cor-texto); }
+.barra-janela__botao--fechar:hover { background: #c42b1c; color: #fff; }
+.barra-janela__botao svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.2; }
+.barra-janela__botao .icone-restaurar { display: none; }
+.barra-janela__botao[aria-pressed="true"] .icone-maximizar { display: none; }
+.barra-janela__botao[aria-pressed="true"] .icone-restaurar { display: block; }
+
 /* Rotulo so para leitor de tela. Recorte de 1px em vez de display:none porque
    display:none tira o elemento da arvore acessivel, que e justamente o que se
    quer preservar. */
@@ -112,6 +158,186 @@ body {
     height: 100vh;
     height: 100dvh;
     overflow: hidden;
+}
+.electron-app .app-shell { height: calc(100vh - 36px); height: calc(100dvh - 36px); }
+
+/* A tela de autenticação ocupa a janela inteira e mantém o sistema inerte
+   até que uma conta local válida seja confirmada. */
+.tela-login {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    display: grid;
+    place-items: center;
+    overflow-y: auto;
+    padding: clamp(1.25rem, 4vw, 3rem);
+    color: var(--cor-texto);
+    background: var(--cor-fundo);
+}
+.electron-app .tela-login { inset: 36px 0 0; }
+.tela-login[hidden] { display: none; }
+.tela-pagamento {
+    position: fixed;
+    inset: 0;
+    z-index: 10001;
+    display: grid;
+    place-items: center;
+    overflow-y: auto;
+    padding: clamp(1.25rem, 4vw, 3rem);
+    color: var(--cor-texto);
+    background: var(--cor-fundo);
+}
+.electron-app .tela-pagamento { inset: 36px 0 0; }
+.tela-pagamento[hidden] { display: none; }
+.tela-pagamento__painel {
+    width: min(100%, 34rem);
+    padding: clamp(2rem, 6vw, 3rem);
+    border: 1px solid var(--cor-borda);
+    border-radius: var(--raio-lg);
+    background: var(--cor-superficie);
+    box-shadow: var(--sombra-lg);
+    text-align: center;
+}
+.tela-pagamento__painel h1 {
+    margin: 0 0 var(--esp-5);
+    color: var(--cor-texto);
+    font-size: clamp(1.45rem, 4vw, 1.8rem);
+    line-height: 1.35;
+}
+.tela-pagamento__painel p {
+    margin: 0;
+    color: var(--cor-texto-2);
+    line-height: 1.6;
+}
+.tela-pagamento__painel .tela-pagamento__valor {
+    margin: 0 0 var(--esp-3);
+    color: var(--cor-primaria);
+    font-size: clamp(1.8rem, 5vw, 2.25rem);
+    font-weight: 700;
+}
+.tela-login__painel {
+    width: min(100%, 28rem);
+    padding: clamp(2rem, 6vw, 3rem);
+    border: 1px solid var(--cor-borda);
+    border-radius: var(--raio-lg);
+    background: var(--cor-superficie);
+    box-shadow: var(--sombra-lg);
+}
+.tela-login__logo {
+    display: block;
+    width: 4.5rem;
+    height: 4.5rem;
+    margin: 0 auto 1.4rem;
+    object-fit: cover;
+    border: 1px solid var(--cor-borda);
+    border-radius: 50%;
+    background: var(--cor-superficie-2);
+}
+.tela-login__sobretitulo {
+    margin: 0 0 0.35rem;
+    color: var(--cor-texto-2);
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-align: center;
+    text-transform: uppercase;
+}
+.tela-login__painel h1 {
+    margin: 0;
+    color: var(--cor-texto);
+    font-size: clamp(1.7rem, 4vw, 2.1rem);
+    text-align: center;
+}
+.tela-login__descricao {
+    margin: 0.7rem 0 1.8rem;
+    color: var(--cor-texto-2);
+    line-height: 1.55;
+    text-align: center;
+}
+.tela-login__formulario { display: grid; gap: 1.2rem; }
+.tela-login__campo { display: grid; gap: 0.45rem; }
+.tela-login__campo > span:first-child {
+    color: var(--cor-texto);
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+.tela-login__entrada {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    min-height: 3.2rem;
+    padding: 0 0.75rem;
+    border: 1px solid var(--cor-borda-forte);
+    border-radius: var(--raio-md);
+    background: var(--cor-superficie-2);
+    transition: border-color 150ms ease, background 150ms ease;
+}
+.tela-login__entrada:focus-within {
+    border-color: var(--cor-foco);
+    box-shadow: var(--sombra-foco);
+}
+.tela-login__entrada svg {
+    width: 1.15rem;
+    height: 1.15rem;
+    flex: 0 0 auto;
+    fill: none;
+    stroke: var(--cor-texto-2);
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.7;
+}
+.tela-login__entrada input {
+    width: 100%;
+    min-width: 0;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--cor-texto);
+    font: inherit;
+}
+.tela-login__entrada input::placeholder { color: var(--cor-texto-3); }
+.tela-login__entrar {
+    min-height: 3.25rem;
+    margin-top: 0.35rem;
+    border: 0;
+    border-radius: var(--raio-md);
+    background: var(--cor-primaria);
+    color: var(--cor-texto-invertido);
+    font: inherit;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    cursor: pointer;
+    transition: filter 150ms ease, transform 150ms ease;
+}
+.tela-login__entrar:hover { background: var(--cor-primaria-forte); transform: translateY(-1px); }
+.tela-login__criar-conta {
+    display: block;
+    margin: 1rem auto 0;
+    padding: 0.35rem 0.6rem;
+    border: 0;
+    background: transparent;
+    color: var(--cor-primaria);
+    font: inherit;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+.tela-login__criar-conta:hover { color: var(--cor-primaria-forte); text-decoration: underline; }
+.tela-login__erro {
+    margin: 0 0 1rem;
+    padding: 0.75rem 0.9rem;
+    border: 1px solid var(--cor-perigo-contorno);
+    border-radius: var(--raio-md);
+    background: var(--cor-perigo-suave);
+    color: var(--cor-perigo-texto);
+    font-size: 0.9rem;
+}
+.tela-login__rodape {
+    margin: 1.4rem 0 0;
+    color: var(--cor-texto-2);
+    font-size: 0.78rem;
+    line-height: 1.45;
+    text-align: center;
 }
 
 /* --- Barra lateral -------------------------------------------------------- */
@@ -199,7 +425,13 @@ body {
     display: flex;
     flex-direction: column;
     gap: 2px;
+    flex: 1 1 auto;
+    min-height: 0;
 }
+
+/* O acesso de desenvolvedor fica separado das abas comuns, junto ao rodape
+   da barra lateral. */
+#tab-desenvolvedor { margin-top: auto; }
 
 /* Rotulo que agrupa modulos. So aparece com a barra expandida -- recolhida,
    um texto de 10px viraria borrao. */
@@ -959,6 +1191,13 @@ td.col-acoes { text-align: right; }
     justify-content: flex-end;
 }
 
+.usuario-teste-acoes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--esp-2);
+    margin-top: var(--esp-2);
+}
+
 /* Coluna de selecao: so existe quando o modo de selecao esta ligado. */
 th.col-checkbox, td.col-checkbox { display: none !important; width: 0; padding: 0; }
 body.modo-selecao-ativo th.col-checkbox,
@@ -1439,6 +1678,12 @@ body.modo-selecao-ativo tbody tr:hover td { background: var(--cor-selecao); }
     margin-bottom: var(--esp-4);
 }
 .form-grid-modal .input-group { margin-bottom: 0; }
+
+.campo-ajuda {
+    margin: calc(-1 * var(--esp-2)) 0 var(--esp-4);
+    color: var(--cor-texto-2);
+    font-size: var(--texto-sm);
+}
 
 /* Resultado da importacao em lote. Nasce oculto; o JS acrescenta
    `importar-ok` ou `importar-erro`, que tambem tornam o bloco visivel. Antes
@@ -2014,6 +2259,11 @@ td .empty-state { padding: var(--esp-10) var(--esp-4); }
 .modal-formulario { text-align: left; }
 .modal-formulario .modal-title,
 .modal-formulario .modal-msg { text-align: center; }
+#modalProduto .modal-actions {
+    justify-content: flex-end;
+    gap: var(--esp-3);
+    margin-top: var(--esp-6);
+}
 .modal-box-larga { max-width: 860px; }
 
 .pedido-cabecalho {
@@ -2393,6 +2643,7 @@ td .empty-state { padding: var(--esp-10) var(--esp-4); }
     .form-actions .btn { width: 100%; }
     .modal-actions { flex-direction: column-reverse; }
     .modal-btn { width: 100%; }
+    #modalProduto .modal-actions { justify-content: flex-start; gap: 16px; }
 }
 
 /* Telas altas e largas ganham mais respiro sem esticar a linha de leitura. */
@@ -2495,6 +2746,25 @@ button, [role="tab"], summary { touch-action: manipulation; }
    Licenca de uso
    ----------------------------------------------------------------------------- */
 .app-shell.licenca-vencida main > .tab-content { display: none !important; }
+.app-shell.licenca-vencida main > #aba-desenvolvedor:not([hidden]) { display: block !important; }
+.app-shell.licenca-vencida #painelLicenca {
+    position: fixed;
+    z-index: 10000;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    overflow-y: auto;
+    padding: clamp(1.25rem, 4vw, 3rem);
+    background: var(--cor-fundo);
+}
+.electron-app .app-shell.licenca-vencida #painelLicenca { inset: 36px 0 0; }
+.app-shell.licenca-vencida #painelLicenca[hidden] { display: none !important; }
+.app-shell.licenca-vencida #painelLicenca .painel-sem-conexao__caixa {
+    width: min(100%, 34rem);
+    padding: clamp(2rem, 6vw, 3rem);
+    border-radius: var(--raio-lg);
+    background: var(--cor-superficie);
+}
 
 .licenca-valor {
     font-size: 1.6rem;
@@ -2614,4 +2884,28 @@ button, [role="tab"], summary { touch-action: manipulation; }
 @media (max-width: 900px) {
     .btn-conexao { padding: 0 var(--esp-2); }
     .btn-conexao #txtBtnConectar { display: none; }
+}
+
+/* Wrapper para os botoes de conexao (Microsoft + Local) */
+.conexao-wrapper {
+    display: flex;
+    align-items: center;
+    gap: var(--esp-2);
+}
+
+/* Estilo secundario para o botao de login local */
+.btn-conexao.btn-secundario {
+    background: var(--cor-superficie);
+    border-color: var(--cor-borda);
+    color: var(--cor-texto-2);
+}
+.btn-conexao.btn-secundario:hover {
+    background: var(--cor-hover);
+    color: var(--cor-texto);
+}
+.btn-conexao.btn-secundario svg {
+    flex: 0 0 auto;
+}
+.dev-licencas-remotas {
+    margin-top: 1.5rem;
 }

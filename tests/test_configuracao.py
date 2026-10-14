@@ -82,7 +82,8 @@ def test_o_modelo_nao_carrega_valor_de_credencial():
     formato conhecido; este teste pega o caso generico -- qualquer credencial
     com valor preenchido.
     """
-    credenciais = {'GEMINI_API_KEY', 'MP_ACCESS_TOKEN', 'ADRI_FLASK_SECRET', 'FERNET_KEY'}
+    credenciais = {'GEMINI_API_KEY', 'MP_ACCESS_TOKEN', 'ADRI_FLASK_SECRET', 'FERNET_KEY',
+                   'ADRI_LICENCA_ADMIN_TOKEN'}
     preenchidas = []
 
     with open(MODELO, encoding='utf-8') as arquivo:
@@ -103,7 +104,8 @@ def test_as_variaveis_essenciais_continuam_documentadas():
     """
     documentadas = _nomes_documentados()
     essenciais = {'ADRI_FLASK_SECRET', 'ADRI_MICROSOFT_CLIENT_ID',
-                  'GEMINI_API_KEY', 'MP_ACCESS_TOKEN', 'ADRI_DB_PATH'}
+                  'GEMINI_API_KEY', 'MP_ACCESS_TOKEN', 'ADRI_DB_PATH',
+                  'ADRI_LICENCA_API_URL', 'ADRI_LICENCA_ADMIN_TOKEN'}
 
     assert essenciais <= documentadas, (
         f"sumiram do .env.example: {sorted(essenciais - documentadas)}")
@@ -126,6 +128,8 @@ CONFIGURAVEIS_NA_INSTALACAO = {
     'ADRI_BACKUP_EXTRA',
     'GEMINI_API_KEY',
     'MP_ACCESS_TOKEN',
+    'ADRI_LICENCA_API_URL',
+    'ADRI_LICENCA_ADMIN_TOKEN',
 }
 
 # Variaveis que existem so para desenvolvimento ou teste e nao fazem sentido no

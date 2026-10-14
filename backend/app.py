@@ -5,6 +5,7 @@ from logging.handlers import RotatingFileHandler
 import uuid
 import json
 import sys
+import hmac
 from flask import (
     Flask,
     g,
@@ -23,6 +24,7 @@ import security
 import microsoft
 import capacidade
 import licenca
+import licenca_remota
 from limites import limiter
 from erp.core.contexto import (
     ContextoOperacao,
@@ -222,19 +224,8 @@ def _csp_header() -> str:
 
 _METODOS_QUE_ALTERAM_ESTADO = frozenset({'POST', 'PUT', 'PATCH', 'DELETE'})
 
-# Rotas que chegam DE FORA por desenho, e que por isso nao podem ser medidas
-# pelas regras do trafego local.
-#
-# Hoje esta VAZIA. Ate a 1.4.2 continha o webhook do Asaas, que era o unico
-# caminho pelo qual algo da internet falava com este backend. Removida a
-# integracao, todo o trafego e local -- e as tres isencoes que existiam para
-# ele (origem, capacidade e host de loopback) sairam junto.
-#
-# O conjunto fica no lugar, e nao o `if` some: a proxima integracao que
-# receber chamada de fora precisa deste mesmo tratamento, e encontra aqui o
-# motivo escrito.
-ROTAS_QUE_CHEGAM_DE_FORA = frozenset()
-
+# Todas as rotas da API são locais. As únicas exceções de capacidade são o
+# callback OAuth e a sonda de identidade; nenhuma devolve dados de negócio.
 ALIASES_LOOPBACK = config.ALIASES_LOOPBACK
 
 
@@ -278,8 +269,6 @@ def _nome_do_host(host: str) -> str:
 
 @app.before_request
 def _exigir_host_de_loopback():
-    if request.path in ROTAS_QUE_CHEGAM_DE_FORA:
-        return None
     if _nome_do_host(request.host) in config.ALIASES_LOOPBACK:
         return None
     log.warning("[SEGURANCA] Host recusado: %s -> %s", request.host, request.path)
@@ -422,10 +411,13 @@ def _erro_http(e):
 #   /api/health -- e a sonda de identidade. O Electron e o app Qt perguntam a
 #          ela QUEM esta na porta antes de adotar o backend, e isso acontece
 #          muito antes de qualquer login. Nao devolve dado de negocio.
-#   /, /manifest.json, /sw.js -- e a casca da PWA, que precisa carregar para
-#          o operador ter onde clicar em "Conectar".
+#   /, /manifest.json, /sw.js -- a interface que precisa carregar antes de
+#          o operador escolher se quer entrar com uma conta.
 ROTAS_SEM_AUTH = frozenset({
     '/api/auth/login', '/api/auth/status', '/api/auth/logout',
+    '/api/auth/local/login', '/api/auth/local/status',
+    '/api/auth/local/register', '/api/auth/local/setup',
+    '/api/auth/local/me',
     '/api/health',
     '/', '/manifest.json', '/sw.js',
     '/callback',
@@ -433,26 +425,7 @@ ROTAS_SEM_AUTH = frozenset({
 
 
 def _verificar_autenticacao():
-    """
-    Exige sessao em todo o /api/, leitura inclusive.
-
-    Ate a 1.3.0 o bloqueio valia so para metodos que alteram estado, e QUALQUER
-    GET em /api/ respondia sem sessao. Isso nao era uma folga pequena: as rotas
-    que entregam dados pessoais em bloco sao todas GET -- /api/clientes,
-    /api/clientes/mapa, /api/pagamentos, /api/relatorios/exportar e, o pior
-    caso, /api/backup/sqlite, que devolve uma copia integral do banco com
-    nome, CEP e endereco de todos os clientes.
-
-    Fechar a leitura nao muda o que o operador consegue fazer: sem sessao ele
-    ja nao conseguia cadastrar, editar nem apagar nada, porque a autenticacao
-    deste ERP e a sessao Microsoft (limitacao conhecida, registrada em
-    CONTRIBUTING.md). O que muda e que a conta de quem le passa a ser a mesma
-    de quem escreve.
-
-    Em modo TESTING, permite todas as requisicoes para manter compatibilidade
-    com testes -- ver test_autenticacao.py, que desliga o modo justamente para
-    exercitar este guarda.
-    """
+    """Exige uma sessão local para toda API que não seja de autenticação."""
     if app.config.get('TESTING'):
         return None
 
@@ -462,38 +435,40 @@ def _verificar_autenticacao():
     if request.method == 'GET' and not request.path.startswith('/api/'):
         return None
 
-    sessao = database.obter_sessao()
-    if sessao and sessao.get('token'):
-        conta = sessao.get('conta', '')
-        # Conferida aqui TAMBEM, e nao so no /callback: uma sessao gravada
-        # antes de a allowlist existir -- ou antes de a conta sair dela --
-        # continuaria valendo para sempre, ja que nada reavalia a linha depois
-        # de gravada.
-        if not config.conta_autorizada(conta):
-            log.warning("[AUTH] Sessao de conta fora da allowlist: %s", conta)
-            security.log_evento_seguro(
-                "AUTH_CONTA_NAO_AUTORIZADA", f"Conta: {conta}", "warning")
-            database.excluir_sessao()
-            # `codigo` existe para a tela nao ter de casar prosa em portugues:
-            # este 403 e o MESMO status que `_exigir_capacidade` usa para dizer
-            # "Acesso negado.", e sem um discriminador a interface so poderia
-            # separar os dois comparando a mensagem -- que muda quando alguem
-            # reescreve o texto.
-            return jsonify({
-                "erro": "Esta conta nao tem permissao para usar o sistema.",
-                "codigo": "conta_nao_autorizada",
-            }), 403
-        g.erp_usuario_identificador = conta
+    sessao_info = _obter_sessao_valida()
+    if sessao_info:
+        sessao = sessao_info['dados']
+        username = sessao.get('username', '')
+        user_id = sessao.get('user_id')
+        usuario_local = database.obter_usuario_por_id(user_id) if user_id else None
+        if not usuario_local or not usuario_local.get('ativo'):
+            database.excluir_sessao_local()
+            return jsonify({"erro": "Esta conta foi desativada.", "codigo": "conta_inativa"}), 401
+        g.erp_usuario_identificador = username
+        g.erp_usuario_role = usuario_local.get('role', 'usuario')
+        g.erp_usuario_id = usuario_local.get('id')
         return None
 
-    # OPTIONS fica de fora porque e o preflight do proprio navegador: ele nao
-    # carrega credencial nenhuma por definicao, e responder 401 nele so faz a
-    # requisicao real nem chegar a ser tentada.
-    if request.path.startswith('/api/') and request.method != 'OPTIONS':
-        log.warning("[AUTH] Requisicao sem sessao bloqueada: %s %s", request.method, request.path)
-        security.log_evento_seguro("AUTH_BLOQUEIO", f"Sem sessao: {request.method} {request.path}", "warning")
-        return jsonify({"erro": "Autenticacao necessaria."}), 401
+    if request.method == 'OPTIONS':
+        return None
 
+    log.warning("[AUTH] Requisicao sem login local bloqueada: %s %s", request.method, request.path)
+    return jsonify({
+        "erro": "Entre com uma conta local para acessar o sistema.",
+        "codigo": "autenticacao_necessaria",
+    }), 401
+
+def _obter_sessao_valida():
+    """Confere a sessão persistida contra o cookie HttpOnly do cliente."""
+    sessao_local = database.obter_sessao_local()
+    token_cookie = request.cookies.get(database.NOME_COOKIE_SESSAO_LOCAL, '')
+    token_salvo = (sessao_local or {}).get('token', '')
+    if (
+        token_cookie
+        and token_salvo
+        and hmac.compare_digest(token_cookie, token_salvo)
+    ):
+        return {'tipo': 'local', 'dados': sessao_local}
     return None
 
 
@@ -506,9 +481,6 @@ def _bloquear_requisicao_de_origem_externa():
         return None
     if not request.path.startswith('/api/'):
         return None
-    if request.path in ROTAS_QUE_CHEGAM_DE_FORA:
-        return None
-
     aceitas = _origens_aceitas()
 
     origem = request.headers.get('Origin')
@@ -556,9 +528,9 @@ def _aplicar_seguranca_requisicao():
 # ---------------------------------------------------------------------------
 # LICENCA DE USO
 # ---------------------------------------------------------------------------
-# Trinta dias de teste a partir da primeira abertura; depois, licenca paga.
-# Ver `licenca.py` para onde o estado mora e por que em dois lugares, e para o
-# limite honesto do que um controle local alcanca.
+# O acesso de contas comuns usa o periodo de teste gravado por usuario; uma
+# licenca paga da instalacao libera todas as contas. O desenvolvedor pode
+# acessar o painel para controlar cada periodo.
 #
 # Este guarda roda DEPOIS do de sessao, de proposito: quem nao esta autenticado
 # no app nao precisa saber em que pe esta a licenca dele. E responde 402
@@ -566,6 +538,7 @@ def _aplicar_seguranca_requisicao():
 # -- a interface distingue "pague" de "conecte-se" so pelo status.
 ROTAS_SEM_LICENCA = frozenset({
     '/api/health', '/api/auth/login', '/api/auth/status', '/api/auth/logout',
+    '/api/auth/local/register', '/api/auth/local/setup', '/api/auth/local/usuarios',
     '/callback',
 }) | licenca.ROTAS_ISENTAS
 
@@ -578,10 +551,27 @@ def _exigir_licenca():
         return None
     if request.path in ROTAS_SEM_LICENCA:
         return None
-    if licenca.esta_liberado():
+    if request.path.startswith('/api/auth/local/'):
+        return None
+    role = getattr(g, 'erp_usuario_role', '')
+    if role == 'desenvolvedor':
         return None
 
-    situacao = licenca.situacao()
+    if licenca.situacao()['estado'] == licenca.ESTADO_PAGA:
+        return None
+    user_id = getattr(g, 'erp_usuario_id', None)
+    if user_id and licenca_remota.api_configurada():
+        remota = licenca_remota.situacao_em_cache(user_id)
+        if remota:
+            if remota['estado'] in (licenca.ESTADO_TESTE, licenca.ESTADO_PAGA, licenca.ESTADO_DESATIVADA):
+                return None
+            situacao = remota
+            log.warning("[LICENCA] Requisição bloqueada pela licença central: %s %s",
+                        request.method, request.path)
+            return jsonify({"erro": "Período de teste encerrado.", "licenca": situacao}), 402
+    situacao = licenca.situacao_usuario(user_id) if user_id else licenca.situacao()
+    if situacao['estado'] in (licenca.ESTADO_TESTE, licenca.ESTADO_PAGA, licenca.ESTADO_DESATIVADA):
+        return None
     log.warning("[LICENCA] Requisicao bloqueada, licenca %s: %s %s",
                 situacao['estado'], request.method, request.path)
     return jsonify({
@@ -609,6 +599,7 @@ def _iniciar_contexto_operacao():
         origem=origem,
         correlation_id=correlation_recebido,
         usuario_identificador=getattr(g, 'erp_usuario_identificador', ''),
+        usuario_role=getattr(g, 'erp_usuario_role', ''),
         ip_hash=anonimizar_ip(get_remote_address(), str(app.secret_key)),
         rota=request.path,
         metodo=request.method,
@@ -650,15 +641,7 @@ def _aplicar_cabecalhos_de_seguranca(resposta):
 # ---------------------------------------------------------------------------
 @app.route('/')
 def index():
-    m = database.obter_metricas_dashboard()
-    total = m['total_clientes'] or 1
-    pct = round(((m['cadastros_30d'] or 0) / total) * 100)
-    return render_template('index.html',
-        TOTAL=m['total_clientes'],
-        ENTREGAS=m['total_entrega'],
-        RETIRADAS=m['total_retirada'],
-        NOVOS=pct,
-    )
+    return render_template('index.html')
 
 
 @app.route('/callback')
@@ -669,7 +652,7 @@ def auth_callback():
 
     code = request.args.get('code')
     state_recebido = request.args.get('state', '')
-    log.info("[CALLBACK] state=%s, code=%s...", state_recebido, (code or '')[:8])
+    log.info("[CALLBACK] Retorno OAuth recebido.")
 
     if not code:
         return render_template_string(config._CALLBACK_TEMPLATE, titulo="Erro na autenticacao", erro=True,
@@ -677,7 +660,7 @@ def auth_callback():
 
     dados_pendentes = config._oauth_pending.pop(state_recebido, None) if state_recebido else None
     if not dados_pendentes:
-        log.warning("[CALLBACK] state '%s' not found.", state_recebido)
+        log.warning("[CALLBACK] Estado OAuth ausente, inválido ou expirado.")
         return render_template_string(config._CALLBACK_TEMPLATE, titulo="Erro de seguranca", erro=True,
             mensagem="Sessao de login invalida ou expirada.", instrucao="Feche esta aba e reinicie o login."), 400
 
@@ -691,13 +674,13 @@ def auth_callback():
     data = urllib.parse.urlencode(payload).encode('utf-8')
 
     try:
-        with urllib.request.urlopen(urllib.request.Request(config.URL_TOKEN_MICROSOFT, data=data, method='POST')) as resposta:  # noqa: S310 - URL montada de constante do proprio codigo, sempre https
+        with urllib.request.urlopen(urllib.request.Request(config.URL_TOKEN_MICROSOFT, data=data, method='POST'), timeout=15) as resposta:  # noqa: S310 - URL montada de constante do proprio codigo, sempre https
             res_dados = json.loads(resposta.read().decode('utf-8'))
             token_acesso = res_dados.get('access_token')
 
             req_perfil = urllib.request.Request("https://graph.microsoft.com/v1.0/me",
                 headers={"Authorization": f"Bearer {token_acesso}"})
-            with urllib.request.urlopen(req_perfil) as resp_perfil:  # noqa: S310 - URL montada de constante do proprio codigo, sempre https
+            with urllib.request.urlopen(req_perfil, timeout=15) as resp_perfil:  # noqa: S310 - URL montada de constante do proprio codigo, sempre https
                 dados_perfil = json.loads(resp_perfil.read().decode('utf-8'))
                 email_usuario = dados_perfil.get('userPrincipalName', 'Conta Conectada')
 
@@ -707,9 +690,14 @@ def auth_callback():
             # legitimo desconectado -- `salvar_sessao` substitui a sessao
             # anterior.
             if not config.conta_autorizada(email_usuario):
-                log.warning("[CALLBACK] Conta fora da allowlist recusada: %s", email_usuario)
+                log.warning("[CALLBACK] Conta fora da allowlist recusada.")
                 security.log_evento_seguro(
-                    "OAUTH_CONTA_RECUSADA", f"Conta nao autorizada: {email_usuario}", "warning")
+                    "OAUTH_CONTA_RECUSADA", "Conta Microsoft nao autorizada", "warning")
+                if request.headers.get('Accept') == 'application/json':
+                    return jsonify({
+                        "erro": "Esta conta nao tem permissao para usar o sistema.",
+                        "codigo": "conta_nao_autorizada",
+                    }), 403
                 return render_template_string(
                     config._CALLBACK_TEMPLATE, titulo="Conta nao autorizada", erro=True,
                     mensagem=f"A conta {email_usuario} nao tem permissao para usar este sistema.",
@@ -717,17 +705,19 @@ def auth_callback():
 
             # `refresh_token` so vem porque `offline_access` esta nos escopos.
             # E ele que evita mandar o operador refazer o login a cada hora.
+            role = config.obter_role(email_usuario)
             database.salvar_sessao(
                 token_acesso,
                 email_usuario,
                 refresh_token=res_dados.get('refresh_token'),
                 expira_em=microsoft.calcular_expiracao(res_dados.get('expires_in')),
+                role=role,
             )
-            security.log_evento_seguro("OAUTH_LOGIN", f"Login realizado: {email_usuario}")
+            security.log_evento_seguro("OAUTH_LOGIN", "Login Microsoft realizado")
             return render_template_string(config._CALLBACK_TEMPLATE, titulo="Autenticacao Concluida com Sucesso!",
                 mensagem="Credenciais registradas com seguranca.", instrucao=f"Conta: {email_usuario}")
     except urllib.error.HTTPError as e:
-        log.error("OAuth HTTPError: %s %s", e.code, e.read().decode('utf-8', errors='replace'))
+        log.error("OAuth HTTPError: código HTTP %s.", e.code)
         return render_template_string(config._CALLBACK_TEMPLATE, titulo="Erro na autenticacao", erro=True,
             mensagem="Nao foi possivel obter token.", instrucao="Tente novamente."), 400
     except Exception as e:
@@ -750,12 +740,13 @@ def service_worker():
 # Import blueprints no fim do modulo
 # ---------------------------------------------------------------------------
 from blueprints import (  # noqa: E402
-    auth_bp, clientes_bp,
+    auth_bp, auth_local_bp, clientes_bp,
     ia_bp, entregas_bp, dashboard_bp, notificacoes_bp, excel_bp,
     produtos_bp, pedidos_bp, backup_bp, licenca_bp
 )
 
 app.register_blueprint(auth_bp)
+app.register_blueprint(auth_local_bp)
 app.register_blueprint(clientes_bp)
 app.register_blueprint(ia_bp)
 app.register_blueprint(entregas_bp)

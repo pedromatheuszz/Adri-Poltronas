@@ -6,6 +6,7 @@ from flask import Blueprint, request, jsonify
 import database
 import validators
 from erp.comercial import estados, repositorio
+from permissoes import exigir_permissao
 
 log = logging.getLogger("adri.entregas")
 
@@ -34,6 +35,7 @@ def _validar_vinculo_com_pedido(pedido_id, cliente_id):
 
 
 @entregas_bp.route('', methods=['GET'])
+@exigir_permissao("entregas.ver_todas")
 def listar_entregas():
     """Lista entregas agendadas."""
     status = request.args.get('status')
@@ -41,6 +43,7 @@ def listar_entregas():
 
 
 @entregas_bp.route('', methods=['POST'])
+@exigir_permissao("entregas.criar")
 def criar_entrega():
     """Agenda uma nova entrega."""
     entrega, erros = validators.validar_entrega(request.get_json(silent=True) or {})
@@ -76,6 +79,7 @@ def criar_entrega():
 
 
 @entregas_bp.route('/<int:entrega_id>/status', methods=['PUT'])
+@exigir_permissao("entregas.editar")
 def atualizar_status_entrega(entrega_id):
     """Atualiza status de uma entrega."""
     dados = request.get_json(silent=True) or {}
