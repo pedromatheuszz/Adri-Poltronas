@@ -494,6 +494,25 @@ jobs:
       shell: pwsh
       run: |
         $ErrorActionPreference = 'Stop'
+
+        # O MOTIVO DA FALHA SAI COMO ANOTACAO, junto com o fim do stderr do
+        # backend. Este passo tem uma duzia de verificacoes e, sem isto, uma
+        # reprovacao aparece so como "exit code 1" para quem nao abre o log
+        # (que exige login). O stderr importa porque e nele que o backend
+        # explica por que se recusou a subir.
+        $saidaBackend = Join-Path $env:RUNNER_TEMP 'backend-fumaca.out.log'
+        $erroBackend = Join-Path $env:RUNNER_TEMP 'backend-fumaca.err.log'
+        trap {
+          $linhas = @("$_")
+          if (Test-Path $erroBackend) {
+            $linhas += '--- stderr do backend instalado (final) ---'
+            $linhas += @(Get-Content $erroBackend -Tail 25 -ErrorAction SilentlyContinue)
+          }
+          $mensagem = ($linhas -join "`n") -replace '%', '%25' -replace "`r", '' -replace "`n", '%0A'
+          Write-Host "::error title=Teste de fumaca do instalador::$mensagem"
+          break
+        }
+
         $instalador = (Get-ChildItem dist-instalador/*.exe | Select-Object -First 1).FullName
         $destino = Join-Path $env:RUNNER_TEMP 'AdriInstalado'
 
@@ -515,7 +534,8 @@ jobs:
         $env:ADRI_DB_PATH = $banco
         $env:ADRI_API_TOKEN = 'token-de-fumaca'
         $env:ADRI_PORTA = '5051'
-        $servidor = Start-Process -FilePath $backend -PassThru -WindowStyle Hidden
+        $servidor = Start-Process -FilePath $backend -PassThru -WindowStyle Hidden `
+          -RedirectStandardOutput $saidaBackend -RedirectStandardError $erroBackend
 
         try {
           $saude = $null
