@@ -84,12 +84,43 @@ jobs:
     # A cobertura minima e um piso, nao uma meta. Ela existe para impedir que
     # codigo novo entre sem teste nenhum -- sem o `--cov-fail-under`, o job
     # ficava verde com a cobertura caindo a cada PR e ninguem via.
+    #
+    # O RESUMO DAS FALHAS SAI COMO ANOTACAO
+    # O log de um job so abre para quem esta logado e tem acesso ao repositorio;
+    # a anotacao aparece no topo da pagina do PR e na API publica. Sem ela, um
+    # job que reprova so em uma versao do Python -- como aconteceu com 3.10 e
+    # 3.11 -- e uma linha vermelha sem motivo para quem nao abre o log inteiro.
+    # Mesma tecnica do passo do electron-builder, mais abaixo.
     - name: Run tests with coverage
       working-directory: backend
-      run: >-
-        python -m pytest ../tests -v --tb=short
-        --cov=. --cov-report=term-missing --cov-report=xml:../coverage.xml
-        --cov-fail-under=80
+      shell: bash
+      env:
+        # Com a saida num pipe o Python usa a codepage do Windows e estoura ao
+        # imprimir um caractere fora dela. Vale so para stdin/stdout/stderr:
+        # nao muda o encoding padrao de `open()`, que os testes exercitam.
+        PYTHONIOENCODING: utf-8
+        COLUMNS: '200'
+      run: |
+        set +e
+        python -m pytest ../tests -v --tb=short \
+          --cov=. --cov-report=term-missing --cov-report=xml:../coverage.xml \
+          --cov-fail-under=80 2>&1 | tee ../pytest.log
+        CODIGO=${PIPESTATUS[0]}
+        set -e
+        if [ "$CODIGO" -eq 0 ]; then
+          exit 0
+        fi
+        # Do "short test summary info" em diante: um FAILED por linha, com o
+        # motivo, e a linha da cobertura quando e ela que reprova.
+        RESUMO=$(sed -n '/short test summary info/,$p' ../pytest.log | head -n 60)
+        if [ -z "$RESUMO" ]; then
+          RESUMO=$(tail -n 40 ../pytest.log)
+        fi
+        MENSAGEM=$(printf '%s\n' "$RESUMO" \
+          | sed 's/%/%25/g; s/\r/ /g' \
+          | awk '{ printf "%s%%0A", $0 }')
+        echo "::error title=pytest reprovou no Python ${{ matrix.python-version }} (codigo $CODIGO)::$MENSAGEM"
+        exit 1
 
     - name: Upload coverage reports
       if: matrix.python-version == '3.12'
