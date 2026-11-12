@@ -55,13 +55,16 @@ def test_a_copia_sai_cifrada_e_nao_e_um_sqlite_legivel(banco):
     assert backup._cifrada(destino) is True
 
 
-def test_a_copia_cifrada_decifra_num_banco_com_os_mesmos_dados(banco):
+def test_a_copia_cifrada_decifra_num_banco_com_os_mesmos_dados(banco, tmp_path):
     """
     Nao da para comparar BYTES com o arquivo original: o snapshot que a API
     `Connection.backup()` produz nao e byte a byte com o arquivo em disco
     (o `-wal` ainda nao foi comprimido para dentro dele). O que a copia
-    precisa devolver ao decifrar e um BANCO com os mesmos dados -- e o
-    `deserialize` abre exatamente isso, sem arquivo no meio.
+    precisa devolver ao decifrar e um BANCO com os mesmos dados.
+
+    O conteudo decifrado e gravado num arquivo e aberto por ele, e nao por
+    `Connection.deserialize`: esse metodo so existe a partir do Python 3.11, e
+    o projeto roda tambem no 3.10 -- la o teste morria com AttributeError.
     """
     destino = backup.criar_backup(banco, backup.MOTIVO_DIARIO)
 
@@ -70,11 +73,14 @@ def test_a_copia_cifrada_decifra_num_banco_com_os_mesmos_dados(banco):
     claro = security.decifrar_bytes(conteudo)
     assert claro is not None
 
-    memoria = sqlite3.connect(":memory:")
-    memoria.deserialize(claro)
-    assert memoria.execute("SELECT COUNT(*) FROM clientes").fetchone()[0] == 3
-    assert memoria.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
-    memoria.close()
+    decifrado = tmp_path / "decifrado.db"
+    decifrado.write_bytes(claro)
+    conexao = sqlite3.connect(str(decifrado))
+    try:
+        assert conexao.execute("SELECT COUNT(*) FROM clientes").fetchone()[0] == 3
+        assert conexao.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    finally:
+        conexao.close()
 
 
 def test_backup_em_claro_quando_nao_ha_fonte_de_chave(banco, monkeypatch):
