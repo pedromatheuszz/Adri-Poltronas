@@ -190,6 +190,174 @@ def dotnet():
     return True
 
 
+# =============================================================================
+# Assinatura de codigo
+# =============================================================================
+# O Windows exibe o aviso do SmartScreen para executaveis nao assinados: para
+# um instalador que sai por download ou pendrive, e a diferenca entre a
+# cliente instalar e ligar achando que baixou virus. O SECURITY.md sempre
+# disse que o app nao e assinado; este comando e o caminho para mudar isso
+# sem virar receita solta em documento.
+#
+# As credenciais vem do AMBIENTE e nunca de arquivo versionado:
+#   ADRI_CERT_THUMBPRINT  SHA-1 do certificado no repositorio do usuario
+#   ADRI_CERT_ARQUIVO     arquivo .pfx, junto com ADRI_CERT_SENHA
+#   ADRI_CARIMBO          servidor de carimbo RFC 3161 (opcional)
+CARIMBO_RFC3161_PADRAO = "http://timestamp.digicert.com"
+
+
+def validar_thumbprint(valor):
+    """
+    Normaliza o SHA-1 do certificado, ou None se nao for um SHA-1.
+
+    Aceita espacos (o Windows copia o thumbprint com espacos entre os pares)
+    e maiuscula/minuscula. Recusa qualquer outra coisa: um thumbprint errado
+    so faria o signtool procurar um certificado que nao existe, com uma
+    mensagem generica -- o erro tem de nascer aqui, onde da para explicar.
+    """
+    limpo = (valor or "").replace(" ", "").strip().upper()
+    if len(limpo) != 40:
+        return None
+    if any(caractere not in "0123456789ABCDEF" for caractere in limpo):
+        return None
+    return limpo
+
+
+def executaveis_para_assinar():
+    """
+    O instalador e o backend que o instalador carrega.
+
+    O backend viaja em extraResources: assinar so o instalador deixa o
+    servidor que escuta em 127.0.0.1 sem assinatura, e ele e justamente o
+    processo que o SmartScreen e os antivirus mais desconfiam.
+    """
+    alvos = []
+    if INSTALADOR_DIR.is_dir():
+        alvos += sorted(INSTALADOR_DIR.glob("*.exe"))
+    backend_exe = DIST_DIR / "AdriPoltronasBackend" / "AdriPoltronasBackend.exe"
+    if backend_exe.is_file():
+        alvos.append(backend_exe)
+    return alvos
+
+
+def argumentos_de_assinatura(exe, thumbprint, arquivo_pfx, carimbo):
+    """
+    A linha de comando do signtool, montada em lista e nunca em shell.
+
+    `/tr` com `/td`: carimbo RFC 3161 pela rede, que faz a assinatura
+    continuar valida depois do certificado expirar. Sem carimbo, o
+    instalador volta a ser "desconhecido" no dia em que o certificado vence.
+    """
+    args = ["sign", "/fd", "SHA256", "/td", "SHA256", "/tr", carimbo]
+    if thumbprint:
+        args += ["/sha1", thumbprint]
+    else:
+        args += ["/f", str(arquivo_pfx)]
+    args.append(str(exe))
+    return args
+
+
+def localizar_signtool():
+    """
+    Onde mora o signtool.exe, ou None quando nao ha Windows SDK.
+
+    `which` primeiro: quem tem o SDK no PATH ganha o caminho curto. O resto
+    percorre as pastas do Windows Kits, pegando a versao mais recente -- o
+    numero entre `bin` e `x64` muda a cada release do SDK.
+    """
+    encontrado = shutil.which("signtool")
+    if encontrado:
+        return encontrado
+
+    kits = Path("C:/Program Files (x86)/Windows Kits/10")
+    padroes = [
+        "bin/*/x64/signtool.exe",
+        "bin/*/x86/signtool.exe",
+        "App Certification Kit/signtool.exe",
+    ]
+    for padrao in padroes:
+        achados = sorted(kits.glob(padrao))
+        if achados:
+            # O curinga em bin/*/ e a versao do SDK: a ordenacao lexica
+            # deixa a mais recente por ultimo.
+            return str(achados[-1])
+    return None
+
+
+def assinar():
+    """Assina os executaveis gerados e confere cada assinatura no fim."""
+    print("🖋  Assinatura de codigo...")
+
+    alvos = executaveis_para_assinar()
+    if not alvos:
+        print("❌ Nada para assinar. Rode `python build.py installer` antes.")
+        print("   (Procurando em dist-instalador/ e dist/AdriPoltronasBackend/)")
+        return False
+
+    thumbprint = validar_thumbprint(os.environ.get("ADRI_CERT_THUMBPRINT", ""))
+    arquivo_pfx = os.environ.get("ADRI_CERT_ARQUIVO", "").strip()
+    senha = os.environ.get("ADRI_CERT_SENHA", "")
+    carimbo = os.environ.get("ADRI_CARIMBO", "").strip() or CARIMBO_RFC3161_PADRAO
+
+    if not thumbprint and not (arquivo_pfx and senha):
+        print("❌ Sem credencial de assinatura. Use uma das duas formas:")
+        print("   set ADRI_CERT_THUMBPRINT=<SHA-1 do certificado no repositorio do usuario>")
+        print("   ou")
+        print("   set ADRI_CERT_ARQUIVO=<caminho do .pfx>")
+        print("   set ADRI_CERT_SENHA=<senha do .pfx>")
+        print()
+        print("   Certificado de teste (so silencia o aviso na sua maquina):")
+        print("     New-SelfSignedCertificate -Type Custom -Subject 'CN=Adri Poltronas'")
+        print("     -KeyUsage DigitalSignature -FriendlyName 'Adri Poltronas (teste)'")
+        print("     -CertStoreLocation Cert:\\CurrentUser\\My -TextExtension @('2.5.29.37")
+        print("     ={text}1.3.6.1.5.5.7.3.3')")
+        print("   Certificado de verdade: Autoridade Certificadora (OV/EV).")
+        return False
+    if "ADRI_CERT_THUMBPRINT" in os.environ and not thumbprint:
+        print("❌ ADRI_CERT_THUMBPRINT nao parece um SHA-1 (40 caracteres hex).")
+        print("   O valor vem do campo 'Impressao digital' do certificado.")
+        return False
+    if arquivo_pfx and not Path(arquivo_pfx).is_file():
+        print(f"❌ ADRI_CERT_ARQUIVO nao existe: {arquivo_pfx}")
+        return False
+
+    signtool = localizar_signtool()
+    if not signtool:
+        print("❌ signtool.exe nao encontrado. Instale o Windows SDK")
+        print("   (Apps > Windows > 'Windows Software Development Kit').")
+        return False
+
+    for alvo in alvos:
+        print(f"  ✍  {alvo.name}")
+        # Lista, e nao string para o shell: a senha do .pfx nunca aparece em
+        # linha de comando visivel a outros processos... exceto quando o
+        # formato exige, que e o caso do /p. Por isso o .pfx e a segunda
+        # opcao: o thumbprint no repositorio do usuario nao expoe nada.
+        comando = [signtool] + argumentos_de_assinatura(
+            alvo, thumbprint, arquivo_pfx, carimbo)
+        if senha:
+            comando += ["/p", senha]
+        resultado = subprocess.run(comando, capture_output=True, text=True)  # noqa: S603 - signtool vem do SDK e os argumentos sao montados por argumentos_de_assinatura, testados
+        if resultado.returncode != 0:
+            print(f"❌ Falhou: {resultado.stdout}{resultado.stderr}")
+            return False
+
+        # Assinar sem conferir e prometer sem olhar: o verify /pa exige a
+        # cadeia ate uma raiz confiavel, nao apenas a presenca de bytes.
+        verificacao = subprocess.run(
+            # signtool vem do SDK local e o alvo e o executavel do proprio
+            # build: nada aqui vem de fora da maquina de quem assina.
+            [signtool, "verify", "/pa", "/all", str(alvo)],  # noqa: S603
+            capture_output=True, text=True)
+        if verificacao.returncode != 0:
+            print(f"❌ Assinatura gravada mas nao verificou: {verificacao.stdout}")
+            return False
+        print("  ✓ Assinado e verificado.")
+
+    print("✅ Executaveis assinados.")
+    return True
+
+
 def help_cmd():
     """Mostra ajuda."""
     print("""
@@ -204,6 +372,7 @@ Comandos:
   clean         Remove arquivos e diretórios gerados
   build         Empacota o backend (testes → lint → PyInstaller)
   installer     Build + electron-builder (instalador completo)
+  assinar       Assina instalador e backend com signtool (ver BUILD_GUIDE.md)
   qt            Compila e testa a janela Qt (precisa de QT_PREFIX_PATH)
   dotnet        Restaura, compila e testa a solution .NET/Avalonia
   help          Mostra esta mensagem
@@ -211,6 +380,7 @@ Comandos:
 Exemplos:
   python build.py test
   python build.py build
+  python build.py assinar
   python build.py clean
     """)
     return True
@@ -219,9 +389,9 @@ def main():
     if len(sys.argv) < 2:
         help_cmd()
         sys.exit(0)
-    
+
     comando = sys.argv[1]
-    
+
     commands = {
         "test": test,
         "lint": lint,
@@ -229,6 +399,7 @@ def main():
         "clean": clean,
         "build": build,
         "installer": installer,
+        "assinar": assinar,
         "qt": qt,
         "dotnet": dotnet,
         "help": help_cmd,

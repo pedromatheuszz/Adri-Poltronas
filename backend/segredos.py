@@ -64,7 +64,25 @@ CHAVES_PROTEGIDAS = (
     "MP_ACCESS_TOKEN",
     "GEMINI_API_KEY",
     "ADRI_LICENCA_ADMIN_TOKEN",
+    # Senha das cópias de segurança portáteis: quem a lê abre o banco inteiro
+    # gravado no pendrive.
+    "ADRI_BACKUP_SENHA",
+    # Chaves locais de vínculo: não são credenciais de serviço, mas precisam
+    # continuar protegidas pela DPAPI para sobreviver a cópia/reinstalação.
+    "ADRI_DESENVOLVEDOR_DISPOSITIVO",
+    "ADRI_DESENVOLVEDOR_IPS",
+    "ADRI_LICENCA_INSTALLATION_ID",
 )
+
+# Chaves que podem ser importadas de arquivos `.env`. Os marcadores DPAPI de
+# dispositivo só podem ser criados pelo fluxo autenticado, nunca pela edição
+# de configuração do usuário.
+CHAVES_MIGRAVEIS = frozenset({
+    "MP_ACCESS_TOKEN",
+    "GEMINI_API_KEY",
+    "ADRI_LICENCA_ADMIN_TOKEN",
+    "ADRI_BACKUP_SENHA",
+})
 
 _cache: dict | None = None
 
@@ -130,6 +148,15 @@ def obter(nome: str, padrao: str = "") -> str:
         return do_cofre
 
     return do_ambiente_real or padrao
+
+
+def obter_do_cofre(nome: str, padrao: str = "") -> str:
+    """Lê exclusivamente um valor DPAPI, ignorando variáveis de ambiente.
+
+    Use para vínculos de dispositivo e autorizações que não podem ser
+    substituídos por um valor que o próprio usuário colocou no ambiente.
+    """
+    return _ler_cofre().get(nome, padrao)
 
 
 _origem_env: set = set()
@@ -226,7 +253,7 @@ def migrar_do_env(caminho_env: str) -> list:
             continue
         nome, _, valor = despida.partition("=")
         nome, valor = nome.strip(), valor.strip()
-        if nome in CHAVES_PROTEGIDAS and valor:
+        if nome in CHAVES_MIGRAVEIS and valor:
             em_texto[nome] = valor
 
     if not em_texto:

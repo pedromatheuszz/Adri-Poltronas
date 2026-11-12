@@ -25,6 +25,12 @@ python build.py build         # 1. PyInstaller empacota o backend
 python build.py installer     # 2. electron-builder gera o instalador
 make installer                # Alternative
 
+# Code signing (opcional; ver docs/code-signing.md)
+python build.py assinar       # Assina instalador + backend com signtool
+make assinar                  # Alternative
+# Credenciais: ADRI_CERT_THUMBPRINT (repositório do usuário)
+#              ou ADRI_CERT_ARQUIVO + ADRI_CERT_SENHA (arquivo .pfx)
+
 # Development
 npm start                     # Run application (janela Electron)
 python build.py qt            # Compila e testa a janela Qt (alternativa)

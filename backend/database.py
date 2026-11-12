@@ -781,7 +781,7 @@ def obter_teste_usuario(user_id: int) -> dict | None:
 
 
 def obter_identidade_licenca_remota(user_id: int) -> dict | None:
-    """Cria e devolve a identidade remota estável da conta local."""
+    """Cria e devolve a identidade remota; o segredo fica protegido por DPAPI."""
     import secrets
     import uuid
 
@@ -794,13 +794,18 @@ def obter_identidade_licenca_remota(user_id: int) -> dict | None:
         if not linha:
             return None
         conta = dict(linha)
-        if not conta.get("licenca_remota_id") or not conta.get("licenca_remota_segredo"):
+        if not conta.get("licenca_remota_id"):
             conta["licenca_remota_id"] = str(uuid.uuid4())
             conta["licenca_remota_segredo"] = secrets.token_urlsafe(32)
+            try:
+                segredo_cifrado = security.cifrar(conta["licenca_remota_segredo"])
+            except Exception:
+                log_db.exception("[LICENCA] Não foi possível proteger a credencial local.")
+                return None
             conexao.execute(
                 "UPDATE usuarios SET licenca_remota_id = ?, licenca_remota_segredo = ? "
                 "WHERE id = ? AND (licenca_remota_id = '' OR licenca_remota_segredo = '')",
-                (conta["licenca_remota_id"], conta["licenca_remota_segredo"], user_id),
+                (conta["licenca_remota_id"], segredo_cifrado, user_id),
             )
             linha = conexao.execute(
                 "SELECT id, username, email, role, licenca_remota_id, "
@@ -808,19 +813,66 @@ def obter_identidade_licenca_remota(user_id: int) -> dict | None:
                 (user_id,),
             ).fetchone()
             conta = dict(linha)
+
+        segredo_salvo = conta.get("licenca_remota_segredo") or ""
+        if not segredo_salvo:
+            # Um ID central sem a chave original não pode ser recuperado com
+            # uma chave aleatória nova: isso desligaria a conta no servidor.
+            return None
+        if segredo_salvo.startswith((security.PREFIXO_DPAPI, security.PREFIXO_PLAIN)):
+            segredo_claro = security.decifrar(segredo_salvo)
+            if not segredo_claro:
+                return None
+        else:
+            # Migra segredos antigos em texto claro antes de usá-los. A coluna
+            # continua igual, mas a cópia do SQLite deixa de revelar a chave.
+            segredo_claro = segredo_salvo
+            try:
+                segredo_cifrado = security.cifrar(segredo_claro)
+            except Exception:
+                log_db.exception("[LICENCA] Não foi possível migrar a credencial local para DPAPI.")
+                return None
+            conexao.execute(
+                "UPDATE usuarios SET licenca_remota_segredo = ? WHERE id = ?",
+                (segredo_cifrado, user_id),
+            )
+        conta["licenca_remota_segredo"] = segredo_claro
         return conta
 
 
-def gravar_licenca_remota(user_id: int, situacao: dict) -> None:
-    """Guarda a última resposta válida do servidor para consultas locais rápidas."""
+def gravar_licenca_remota(user_id: int, situacao: dict, prova: str = "") -> None:
+    """
+    Guarda a última resposta válida do servidor para consultas locais rápidas.
+
+    `prova` é a resposta assinada pela central. Quando a assinatura é exigida,
+    é dela que o estado é lido de volta -- as demais colunas são texto que
+    qualquer editor de SQLite altera.
+    """
     with conectar() as conexao:
         conexao.execute(
             "UPDATE usuarios SET licenca_remota_estado = ?, "
             "licenca_remota_expira_em = ?, licenca_remota_verificada_em = ?, "
-            "licenca_remota_offline_ate = ? WHERE id = ?",
+            "licenca_remota_offline_ate = ?, licenca_remota_prova = ? WHERE id = ?",
             (situacao.get("estado_central", situacao.get("estado", "")),
              situacao.get("expira_em", ""), situacao.get("verificada_em", ""),
-             situacao.get("offline_ate", ""), user_id),
+             situacao.get("offline_ate", ""), prova or "", user_id),
+        )
+
+
+def invalidar_licenca_remota_cache(user_id: int) -> None:
+    """Registra uma recusa central e impede nova validação a cada requisição."""
+    agora = datetime.now().replace(microsecond=0).strftime('%Y-%m-%dT%H:%M:%S')
+    revalidar = (datetime.now() + timedelta(minutes=1)).replace(
+        microsecond=0
+    ).strftime('%Y-%m-%dT%H:%M:%S')
+    with conectar() as conexao:
+        conexao.execute(
+            # A prova assinada sai junto: ela atestava um estado que a central
+            # acabou de desdizer.
+            "UPDATE usuarios SET licenca_remota_estado = 'suspended', "
+            "licenca_remota_expira_em = '', licenca_remota_verificada_em = ?, "
+            "licenca_remota_offline_ate = ?, licenca_remota_prova = '' WHERE id = ?",
+            (agora, revalidar, user_id),
         )
 
 
@@ -830,7 +882,9 @@ def obter_licenca_remota_cache(user_id: int) -> dict | None:
             "SELECT licenca_remota_estado AS estado, "
             "licenca_remota_expira_em AS expira_em, "
             "licenca_remota_verificada_em AS verificada_em, "
-            "licenca_remota_offline_ate AS offline_ate FROM usuarios WHERE id = ?",
+            "licenca_remota_offline_ate AS offline_ate, "
+            "licenca_remota_prova AS prova, "
+            "licenca_remota_id AS license_id FROM usuarios WHERE id = ?",
             (user_id,),
         ).fetchone()
         return dict(linha) if linha else None

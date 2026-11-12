@@ -360,12 +360,20 @@ def health():
     descobrir se a capacidade em maos serve. Nao devolve dado de negocio.
     """
     apresentado = capacidade.apresentado_em(request.headers, request.cookies)
-    return jsonify({
+    corpo = {
         "servico": "adri-poltronas",
         "versao": config.VERSAO_DO_APP,
         "capacidade_exigida": capacidade.esta_ativa(),
         "capacidade_aceita": (not capacidade.esta_ativa()) or capacidade.confere(apresentado),
-    })
+    }
+    # Quem manda um desafio recebe a prova de que este processo conhece o
+    # token -- sem que o token precise sair de quem pergunta. E o caminho que
+    # a janela do Electron usa; `capacidade_aceita`, acima, segue existindo
+    # para quem ainda apresenta o cabecalho. Ver `capacidade.prova_do_desafio`.
+    desafio = request.args.get('desafio')
+    if desafio is not None:
+        corpo["prova"] = capacidade.prova_do_desafio(desafio)
+    return jsonify(corpo)
 
 
 # ---------------------------------------------------------------------------
@@ -444,6 +452,17 @@ def _verificar_autenticacao():
         if not usuario_local or not usuario_local.get('ativo'):
             database.excluir_sessao_local()
             return jsonify({"erro": "Esta conta foi desativada.", "codigo": "conta_inativa"}), 401
+        if usuario_local.get('role') == 'desenvolvedor':
+            # A sessão também fica no SQLite. Exigi-la novamente por
+            # dispositivo impede que copiar banco e cookie transfira o painel
+            # de desenvolvedor para outro computador.
+            from blueprints.auth_local import _autorizar_dispositivo_desenvolvedor
+
+            if not _autorizar_dispositivo_desenvolvedor():
+                return jsonify({
+                    "erro": "A sessão de desenvolvedor não pertence a este computador autorizado.",
+                    "codigo": "dispositivo_desenvolvedor_nao_autorizado",
+                }), 403
         g.erp_usuario_identificador = username
         g.erp_usuario_role = usuario_local.get('role', 'usuario')
         g.erp_usuario_id = usuario_local.get('id')
@@ -557,18 +576,34 @@ def _exigir_licenca():
     if role == 'desenvolvedor':
         return None
 
-    if licenca.situacao()['estado'] == licenca.ESTADO_PAGA:
-        return None
     user_id = getattr(g, 'erp_usuario_id', None)
     if user_id and licenca_remota.api_configurada():
         remota = licenca_remota.situacao_em_cache(user_id)
-        if remota:
-            if remota['estado'] in (licenca.ESTADO_TESTE, licenca.ESTADO_PAGA, licenca.ESTADO_DESATIVADA):
-                return None
-            situacao = remota
-            log.warning("[LICENCA] Requisição bloqueada pela licença central: %s %s",
-                        request.method, request.path)
-            return jsonify({"erro": "Período de teste encerrado.", "licenca": situacao}), 402
+        if licenca_remota.cache_precisa_sincronizar(user_id):
+            remota = licenca_remota.sincronizar_usuario(user_id) or remota
+        if licenca_remota.cache_precisa_sincronizar(user_id):
+            # Sem validação central anterior, cair para os 30 dias locais
+            # permitiria criar contas novas indefinidamente sem internet.
+            return jsonify({
+                "erro": "Não foi possível validar a licença agora. Verifique a conexão e tente novamente.",
+                "codigo": "licenca_indisponivel",
+            }), 503
+        if remota and remota['estado'] in (
+                licenca.ESTADO_TESTE, licenca.ESTADO_PAGA, licenca.ESTADO_DESATIVADA):
+            return None
+        situacao = remota or {
+            "estado": licenca.ESTADO_EXPIRADA,
+            "dias_restantes": 0,
+            "origem": "central",
+        }
+        log.warning("[LICENCA] Requisição bloqueada pela licença central: %s %s",
+                    request.method, request.path)
+        return jsonify({"erro": "Período de teste encerrado.", "licenca": situacao}), 402
+
+    # Instalações locais sem serviço central continuam usando a licença
+    # tradicional. Com API configurada, a decisão remota é autoritativa.
+    if licenca.situacao()['estado'] == licenca.ESTADO_PAGA:
+        return None
     situacao = licenca.situacao_usuario(user_id) if user_id else licenca.situacao()
     if situacao['estado'] in (licenca.ESTADO_TESTE, licenca.ESTADO_PAGA, licenca.ESTADO_DESATIVADA):
         return None
@@ -742,7 +777,8 @@ def service_worker():
 from blueprints import (  # noqa: E402
     auth_bp, auth_local_bp, clientes_bp,
     ia_bp, entregas_bp, dashboard_bp, notificacoes_bp, excel_bp,
-    produtos_bp, pedidos_bp, backup_bp, licenca_bp
+    produtos_bp, pedidos_bp, estoque_bp, relatorios_bp,
+    backup_bp, licenca_bp
 )
 
 app.register_blueprint(auth_bp)
@@ -755,6 +791,8 @@ app.register_blueprint(notificacoes_bp)
 app.register_blueprint(excel_bp)
 app.register_blueprint(produtos_bp)
 app.register_blueprint(pedidos_bp)
+app.register_blueprint(estoque_bp)
+app.register_blueprint(relatorios_bp)
 app.register_blueprint(backup_bp)
 app.register_blueprint(licenca_bp)
 

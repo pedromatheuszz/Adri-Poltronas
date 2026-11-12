@@ -74,7 +74,7 @@
             <div id="etapaSetupDesenvolvedor" hidden>
                 <p class="tela-login__sobretitulo">Configuração inicial</p>
                 <h1 id="tituloSetupDesenvolvedor">Crie a conta de desenvolvedor</h1>
-                <p class="tela-login__descricao">Esta conta administra os acessos e os períodos de teste. Ela será criada uma única vez nesta instalação.</p>
+                <p class="tela-login__descricao">Esta conta administra os acessos e os períodos de teste. A criação exige a chave privada do fornecedor e o computador autorizado.</p>
                 <form id="formSetupDesenvolvedor" class="tela-login__formulario">
                     <label class="tela-login__campo">
                         <span>Usuário</span>
@@ -94,6 +94,13 @@
                         <span class="tela-login__entrada">
                             <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
                             <input type="password" id="setupDevSenha" required minlength="12" maxlength="72" autocomplete="new-password" placeholder="Crie uma senha forte">
+                        </span>
+                    </label>
+                    <label class="tela-login__campo">
+                        <span>Chave de ativação do fornecedor</span>
+                        <span class="tela-login__entrada">
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="10" width="18" height="11" rx="2"/><path d="M7 10V7a5 5 0 0 1 10 0v3"/></svg>
+                            <input type="password" id="setupDevAtivacao" required autocomplete="off" placeholder="Chave privada do fornecedor">
                         </span>
                     </label>
                     <button type="submit" class="tela-login__entrar">Criar e entrar</button>
@@ -190,6 +197,13 @@
                     data-comando="trocarAba" data-arg="mapa">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
                 <span class="nav-tab-rotulo">Mapa</span>
+            </button>
+            <p class="nav-grupo" role="presentation">Financeiro</p>
+            <button type="button" class="nav-tab" role="tab" id="tab-relatorios" tabindex="-1"
+                    aria-selected="false" aria-controls="aba-relatorios" title="Relatorios"
+                    data-comando="trocarAba" data-arg="relatorios">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>
+                <span class="nav-tab-rotulo">Relatorios</span>
             </button>
             <button type="button" class="nav-tab" role="tab" id="tab-desenvolvedor" tabindex="-1"
                     aria-selected="false" aria-controls="aba-desenvolvedor" title="Desenvolvedor"
@@ -398,7 +412,7 @@
                 <p>Libere ou limite o acesso e escolha o perfil de cada conta.</p>
                 <section class="card" aria-labelledby="controleTesteTitulo">
                     <h3 class="card-title" id="controleTesteTitulo">Teste por conta</h3>
-                    <p>Cada conta comum inicia com 30 dias. Você pode liberar mais 30 dias ou remover o vencimento individualmente.</p>
+                    <p>A primeira conta da instalação recebe o teste automático. Contas adicionais aguardam liberação; você controla o teste e o acesso de cada usuário.</p>
                 </section>
                 <button type="button" class="btn btn-secundario" data-comando="abrirModalRegistroLocal">Cadastrar conta</button>
                 <div class="tabela-rolagem">
@@ -520,6 +534,7 @@
                                     <th scope="col" class="col-nome">Descricao</th>
                                     <th scope="col">Unidade</th>
                                     <th scope="col" class="valor">Preco de venda</th>
+                                    <th scope="col">Estoque</th>
                                     <th scope="col" class="col-acoes">Acoes</th>
                                 </tr>
                             </thead>
@@ -842,12 +857,76 @@
             </section>
 
             <!-- ============================================================
-                 PAGAMENTOS
-                 ============================================================ -->
-
-            <!-- ============================================================
                  RELATORIOS
+                 A leitura reunida do que vive espalhado: as parcelas de
+                 todos os pedidos numa tabela so, com o resumo calculado
+                 pelo backend SOBRE as MESMAS linhas filtradas.
                  ============================================================ -->
+            <section id="aba-relatorios" class="tab-content" hidden
+                     role="tabpanel" aria-labelledby="tab-relatorios" tabindex="0">
+                <section class="card">
+                    <div class="secao-topo">
+                        <h2 class="card-title card-title-icone">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg>
+                            Parcelas a receber
+                        </h2>
+                        <button type="button" class="btn btn-secundario" id="btnExportarRelatorio">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+                            Exportar Excel
+                        </button>
+                    </div>
+
+                    <div class="lista-toolbar">
+                        <div class="input-group">
+                            <label class="visually-hidden" for="relDataDe">Vencimento a partir de</label>
+                            <input type="date" id="relDataDe" autocomplete="off">
+                        </div>
+                        <div class="input-group">
+                            <label class="visually-hidden" for="relDataAte">Vencimento ate</label>
+                            <input type="date" id="relDataAte" autocomplete="off">
+                        </div>
+                        <div class="input-group">
+                            <label class="visually-hidden" for="relFiltroSituacao">Filtrar por situacao</label>
+                            <select id="relFiltroSituacao">
+                                <option value="">Todas as situacoes</option>
+                                <option value="Pendente">Pendentes</option>
+                                <option value="atrasadas">Em atraso</option>
+                                <option value="Recebido">Recebidas</option>
+                                <option value="Cancelado">Canceladas</option>
+                            </select>
+                        </div>
+                        <button type="button" class="btn btn-secundario" id="btnAplicarFiltrosRelatorio">
+                            Aplicar
+                        </button>
+                    </div>
+
+                    <!-- Os totais vem prontos do backend: resumo calculado em
+                         outra consulta seria resumo que diverge da tabela. -->
+                    <dl class="pedido-totais" id="relResumo">
+                        <div><dt>A receber</dt><dd>—</dd></div>
+                        <div><dt>Em atraso</dt><dd>—</dd></div>
+                        <div><dt>Recebido</dt><dd>—</dd></div>
+                    </dl>
+
+                    <div class="tabela-rolagem">
+                        <table>
+                            <caption class="visually-hidden">Parcelas a receber</caption>
+                            <thead>
+                                <tr>
+                                    <th scope="col">Vencimento</th>
+                                    <th scope="col" class="col-nome">Cliente</th>
+                                    <th scope="col">Pedido</th>
+                                    <th scope="col">Parcela</th>
+                                    <th scope="col" class="valor">Valor</th>
+                                    <th scope="col">Situacao</th>
+                                    <th scope="col">Forma</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tabelaRelatorioParcelas"></tbody>
+                        </table>
+                    </div>
+                </section>
+            </section>
         </main>
         </div><!-- /.container -->
 
@@ -1298,6 +1377,81 @@
     </dialog>
 
     <!-- ================================================================
+         ESTOQUE DO PRODUTO
+         O razao (entradas e saidas) e a disponibilidade derivada dos
+         pedidos aprovados. Total zero = catalogo puro: sem razao lancado,
+         o produto nao controla estoque e nenhum pedido e conferido.
+         ================================================================ -->
+    <dialog class="modal-overlay" id="modalEstoque" aria-labelledby="estoqueTitulo">
+        <div class="modal-box modal-box-media modal-formulario">
+            <h2 class="modal-title" id="estoqueTitulo">Estoque</h2>
+
+            <p class="modal-msg" id="estoqueSemRazao" hidden></p>
+
+            <dl class="pedido-totais" id="estoqueRetrato"></dl>
+
+            <div class="lista-toolbar">
+                <div class="input-group">
+                    <label class="visually-hidden" for="estPeriodoDe">Periodo a partir de</label>
+                    <input type="date" id="estPeriodoDe" autocomplete="off">
+                </div>
+                <div class="input-group">
+                    <label class="visually-hidden" for="estPeriodoAte">Periodo ate</label>
+                    <input type="date" id="estPeriodoAte" autocomplete="off">
+                </div>
+            </div>
+            <p class="modal-msg texto-secundario">
+                Sem datas, a consulta mostra os proximos 30 dias.
+            </p>
+
+            <div class="tabela-rolagem">
+                <table>
+                    <caption class="visually-hidden">Movimentos do estoque</caption>
+                    <thead>
+                        <tr>
+                            <th scope="col">Quando</th>
+                            <th scope="col">Tipo</th>
+                            <th scope="col" class="valor">Qtd</th>
+                            <th scope="col" class="col-nome">Motivo</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tabelaMovimentosEstoque"></tbody>
+                </table>
+            </div>
+
+            <form id="formMovimentoEstoque">
+                <div class="form-grid-modal">
+                    <div class="input-group">
+                        <label for="estMovTipo">Tipo</label>
+                        <select id="estMovTipo">
+                            <option value="aquisicao">Entrada (aquisicao)</option>
+                            <option value="baixa">Saida (baixa/avaria)</option>
+                            <option value="ajuste">Ajuste de contagem</option>
+                        </select>
+                    </div>
+                    <div class="input-group">
+                        <!-- Sem `min`: no ajuste de contagem o sinal e livre --
+                             e o proprio ajuste que diz se entrou ou saiu. Nos
+                             outros tipos, a tela compoe o sinal pelo tipo. -->
+                        <label for="estMovQuantidade">Quantidade</label>
+                        <input type="number" id="estMovQuantidade" step="1" value="1">
+                    </div>
+                </div>
+                <div class="input-group">
+                    <label for="estMovMotivo">Motivo (opcional)</label>
+                    <input type="text" class="modal-input" id="estMovMotivo" maxlength="200"
+                           placeholder="Ex.: segunda remessa, avaria no transporte">
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="modal-btn modal-btn-cancelar"
+                            data-comando="fecharModal" data-arg="modalEstoque">Fechar</button>
+                    <button type="submit" class="modal-btn modal-btn-confirmar">Lancar movimento</button>
+                </div>
+            </form>
+        </div>
+    </dialog>
+
+    <!-- ================================================================
          REGISTRO LOCAL
          ================================================================ -->
     <dialog class="modal-overlay" id="modalRegistroLocal" aria-labelledby="modalRegistroLocalTitulo">
@@ -1388,9 +1542,15 @@
     <script src="/vendor/leaflet/leaflet.js"></script>
     <script src="/vendor/chartjs/chart.umd.min.js"></script>
     <script src="/js/offline.js?v=v103"></script>
-    <script src="/js/app.js?v=v104"></script>
-    <!-- Modulo comercial: Produtos, Pedidos e Agenda de Entregas.
-         Arquivo separado porque app.js ja passa de 2.000 linhas. -->
-    <script src="/js/comercial.js?v=v103"></script>
+    <script src="/js/app.js?v=v105"></script>
+    <!-- Subsistema de licenca: painel de bloqueio, teste e Pix. Arquivo
+         proprio desde a 1.5.2 -- ver o cabecalho de licenca.js para a regra
+         de chamadas cruzadas (toda em tempo de execucao). -->
+    <script src="/js/licenca.js?v=v105"></script>
+    <!-- Modulo comercial: Produtos (com estoque), Pedidos e Agenda de
+         Entregas. Arquivo separado porque app.js ja passa de 2.000 linhas. -->
+    <script src="/js/comercial.js?v=v105"></script>
+    <!-- Relatorios: parcelas a receber com resumo e exportacao. -->
+    <script src="/js/relatorios.js?v=v105"></script>
 </body>
 </html>

@@ -36,6 +36,10 @@ var SITUACAO_ENTREGA = {
 
 var _pedidoAberto = null;
 var _cacheProdutos = [];
+// Resumo de estoque por produto (id -> retrato de hoje). Vazio quando a
+// consulta falha: a lista de produtos nao pode quebrar junto com ele.
+var _cacheEstoque = {};
+var _estoqueAberto = null;
 
 
 function _brl(valor) {
@@ -128,9 +132,16 @@ async function _umaDeCadaVez(chave, tarefa) {
 // =============================================================================
 async function carregarProdutos() {
     var busca = (document.getElementById('prodFiltroBusca') || {}).value || '';
-    mostrarEsqueleto('tabelaProdutos', 5, 4);
+    mostrarEsqueleto('tabelaProdutos', 6, 4);
     try {
         _cacheProdutos = await _pedirApi('/api/produtos?busca=' + encodeURIComponent(busca.trim()));
+        // O resumo de estoque e consulta separada e de melhor esforco: se
+        // falhar, a lista segue com a coluna dizendo "—" em vez de sumir.
+        try {
+            _cacheEstoque = {};
+            var resumo = await _pedirApi('/api/estoque/resumo');
+            resumo.forEach(function (r) { _cacheEstoque[r.produto_id] = r; });
+        } catch (_) { _cacheEstoque = {}; }
         renderizarProdutos(_cacheProdutos);
     } catch (erro) {
         renderizarProdutos([]);
@@ -142,19 +153,30 @@ function renderizarProdutos(produtos) {
     var corpo = document.getElementById('tabelaProdutos');
     if (!corpo) return;
     if (!produtos.length) {
-        corpo.innerHTML = linhaEstadoVazio(5, 'Nenhum produto no catalogo',
+        corpo.innerHTML = linhaEstadoVazio(6, 'Nenhum produto no catalogo',
             'Cadastre os modelos de poltrona para poder lancar itens nos pedidos.');
         return;
     }
+    var podeMexer = ['desenvolvedor', 'administrador', 'usuario'].indexOf(_perfilAtual) >= 0;
     corpo.innerHTML = produtos.map(function (p) {
         var descricao = escaparHtml(p.descricao);
+        var estoque = _cacheEstoque[p.id];
+        // Total zero e catalogo puro: a coluna diz "—", nao "0" -- zero
+        // disponivel significaria "nao alugue", e sem razao lancado o
+        // produto NAO controla estoque.
+        var celulaEstoque = (estoque && estoque.configurado)
+            ? '<strong>' + estoque.disponivel + '</strong> de ' + estoque.total +
+              '<br><small class="texto-secundario">' + estoque.locado + ' em locacao</small>'
+            : '—';
         return '<tr>' +
             '<td><strong>' + escaparHtml(p.codigo) + '</strong></td>' +
             '<td class="col-nome" title="' + descricao + '">' + descricao + '</td>' +
             '<td>' + escaparHtml(p.unidade) + '</td>' +
             '<td class="valor">' + _brl(p.preco_venda) + '</td>' +
+            '<td class="centro col-estoque">' + celulaEstoque + '</td>' +
             '<td class="col-acoes"><div class="tabela-acoes">' +
-            (['desenvolvedor', 'administrador', 'usuario'].indexOf(_perfilAtual) >= 0 ?
+            (podeMexer ?
+            '<button type="button" class="btn btn-secundario btn-sm" data-estoque="' + p.id + '">Estoque</button>' +
             '<button type="button" class="btn btn-secundario btn-sm" data-produto="' + p.id + '">Editar</button>' +
             '<button type="button" class="btn btn-perigo btn-sm" data-inativar="' + p.id + '">Inativar</button>' : '') +
             '</div></td></tr>';
@@ -217,6 +239,143 @@ async function inativarProduto(produtoId) {
     } catch (erro) {
         exibirToast(erro.message, 'error');
     }
+}
+
+
+// =============================================================================
+// Estoque
+// =============================================================================
+// O razao (total, movimentos) e do backend; a reserva e derivada dos pedidos
+// aprovados e faturados. A tela so apresenta e lancam movimento -- nunca
+// decide quem esta livre, porque quem decide e a janela de aluguel do item.
+var ROTULO_TIPO_MOVIMENTO = {
+    aquisicao: 'Entrada (aquisicao)',
+    baixa: 'Saida (baixa/avaria)',
+    ajuste: 'Ajuste de contagem'
+};
+
+async function abrirModalEstoque(produtoId) {
+    var produto = _cacheProdutos.find(function (p) { return String(p.id) === String(produtoId); });
+    if (produto) {
+        document.getElementById('estoqueTitulo').textContent =
+            'Estoque - ' + produto.codigo;
+    }
+    _estoqueAberto = produtoId;
+    var form = document.getElementById('formMovimentoEstoque');
+    if (form) form.reset();
+    await consultarEstoque();
+    abrirModal('modalEstoque');
+}
+
+async function consultarEstoque() {
+    var produtoId = _estoqueAberto;
+    if (!produtoId) return;
+
+    var de = (document.getElementById('estPeriodoDe') || {}).value || '';
+    var ate = (document.getElementById('estPeriodoAte') || {}).value || '';
+    var params = new URLSearchParams();
+    if (de.trim() && ate.trim()) {
+        params.set('inicio', de.trim());
+        params.set('fim', ate.trim());
+    }
+    try {
+        var retrato = await _pedirApi(
+            '/api/produtos/' + produtoId + '/estoque' +
+            (params.toString() ? '?' + params.toString() : ''));
+        _renderizarRetratoEstoque(retrato);
+    } catch (erro) {
+        exibirToast(erro.message, 'error');
+    }
+}
+
+function _renderizarRetratoEstoque(retrato) {
+    var de = retrato.periodo ? retrato.periodo.inicio : '';
+    var ate = retrato.periodo ? retrato.periodo.fim : '';
+    var janela = 'de ' + _dataBR(de) + ' a ' + _dataBR(ate);
+
+    // Disponivel negativo aparece como esta, em vermelho: e o razao dizendo
+    // que ha mais poltrona prometida do que existia no papel -- esconder
+    // com max(0, ...) transformaria o alerta mais importante em silencio.
+    var disponivel = retrato.disponivel;
+    var classeDisponivel = disponivel < 0 ? ' rel-resumo-negativo' : '';
+
+    document.getElementById('estoqueRetrato').innerHTML =
+        '<div><dt>Total</dt><dd>' + retrato.total + '</dd></div>' +
+        '<div><dt>Em locacao (' + escaparHtml(janela) + ')</dt><dd>' + retrato.locado +
+            (retrato.sem_janela ? '<br><small class="texto-secundario">' + retrato.sem_janela +
+             ' sem data de devolucao</small>' : '') + '</dd></div>' +
+        '<div><dt>Em negociacao</dt><dd>' + retrato.em_negociacao + '</dd></div>' +
+        '<div class="rel-resumo-a-receber' + classeDisponivel + '"><dt>Disponivel</dt><dd>' +
+            disponivel + '</dd></div>';
+
+    if (!retrato.configurado) {
+        var aviso = document.getElementById('estoqueSemRazao');
+        if (aviso) {
+            aviso.hidden = false;
+            aviso.textContent = 'Este produto ainda nao controla estoque: ' +
+                'lance o primeiro movimento (aquisicao) para comecar a conferir ' +
+                'disponibilidade nos pedidos.';
+        }
+    } else {
+        var aviso = document.getElementById('estoqueSemRazao');
+        if (aviso) aviso.hidden = true;
+    }
+
+    var corpo = document.getElementById('tabelaMovimentosEstoque');
+    if (!corpo) return;
+    var movimentos = retrato.movimentos || [];
+    corpo.innerHTML = movimentos.length ? movimentos.map(function (m) {
+        var tipo = ROTULO_TIPO_MOVIMENTO[m.tipo] || m.tipo;
+        var sinal = m.delta > 0 ? '+' : '';
+        return '<tr>' +
+            '<td class="centro">' + escaparHtml(_dataBR(m.criado_em)) + '</td>' +
+            '<td>' + escaparHtml(tipo) + '</td>' +
+            '<td class="direita">' + sinal + m.delta + '</td>' +
+            '<td class="col-nome">' + escaparHtml(m.motivo || '—') + '</td>' +
+            '</tr>';
+    }).join('') : '<tr><td colspan="4"><div class="empty-state">' +
+        '<p>Nenhum movimento lancado.</p></div></td></tr>';
+}
+
+async function lancarMovimentoDeEstoque(evento) {
+    evento.preventDefault();
+    var produtoId = _estoqueAberto;
+    if (!produtoId) return;
+
+    var tipo = (document.getElementById('estMovTipo') || {}).value || 'aquisicao';
+    var bruto = parseInt((document.getElementById('estMovQuantidade') || {}).value, 10);
+
+    // A UI traduz "quantidade" em delta pelo tipo: aquisicao entra, baixa
+    // sai. No ajuste, o sinal digitado vale -- e o backend segue sendo a
+    // ultima palavra sobre o que o razao aceita.
+    var delta;
+    if (tipo === 'aquisicao') delta = Math.abs(bruto);
+    else if (tipo === 'baixa') delta = -Math.abs(bruto);
+    else delta = bruto;
+
+    if (!delta) {
+        exibirToast('Informe a quantidade do movimento.', 'error');
+        return;
+    }
+
+    var chave = 'estoque:' + produtoId;
+    await _umaDeCadaVez(chave, async function () {
+        try {
+            await _pedirApi('/api/produtos/' + produtoId + '/estoque/movimentos',
+                _json({
+                    delta: delta,
+                    tipo: tipo,
+                    motivo: (document.getElementById('estMovMotivo') || {}).value || ''
+                }));
+            exibirToast('Movimento lancado.');
+            var form = document.getElementById('formMovimentoEstoque');
+            if (form) form.reset();
+            await consultarEstoque();
+            carregarProdutos();
+        } catch (erro) {
+            exibirToast(erro.message, 'error');
+        }
+    });
 }
 
 
@@ -807,6 +966,9 @@ function registrarEventosComerciais() {
 
     liga('formProduto', 'submit', salvarProduto);
     liga('formPedido', 'submit', salvarPedido);
+    liga('formMovimentoEstoque', 'submit', lancarMovimentoDeEstoque);
+    liga('estPeriodoDe', 'change', consultarEstoque);
+    liga('estPeriodoAte', 'change', consultarEstoque);
     liga('pedDataInicioAluguel', 'input', function (evento) { _mascararDiaMes(evento.currentTarget); });
     liga('pedDataFimAluguel', 'input', function (evento) { _mascararDiaMes(evento.currentTarget); });
     liga('formFaturamento', 'submit', faturar);
@@ -837,6 +999,8 @@ function registrarEventosComerciais() {
                 return String(p.id) === alvo.dataset.produto;
             });
             if (produto) abrirFormularioProduto(produto);
+        } else if (alvo.dataset.estoque) {
+            abrirModalEstoque(parseInt(alvo.dataset.estoque, 10));
         } else if (alvo.dataset.inativar) {
             inativarProduto(parseInt(alvo.dataset.inativar, 10));
         } else if (alvo.dataset.pedido) {

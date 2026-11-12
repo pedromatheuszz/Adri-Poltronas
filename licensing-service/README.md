@@ -23,7 +23,13 @@ Esta é a opção mais rápida e simples, sem necessidade de alugar servidor nem
    Se fizer deploy por Python nativo:
    - **Root Directory**: `licensing-service`
    - **Build Command**: `pip install -r requirements.txt`
-   - **Start Command**: `gunicorn --workers 2 --threads 4 --timeout 30 app:app`
+   - **Start Command**: `gunicorn --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 30 app:app`
+
+   > O `--bind 0.0.0.0:$PORT` é obrigatório: o Render só conversa com a
+   > porta da variável `PORT`, e o gunicorn sozinho escuta em
+   > `127.0.0.1:8000` — sem o bind, o deploy sobe e a URL responde 502
+   > para sempre. (O Dockerfile já faz o bind; esse aviso vale só para o
+   > caminho Python.)
 4. Na aba **Environment**, adicione as seguintes variáveis:
    - `DATABASE_URL`: a connection string copiada do Neon.
    - `LICENSE_ADMIN_TOKEN`: token aleatório de 64 caracteres (gere com `python -c "import secrets; print(secrets.token_hex(32))"`).
@@ -91,10 +97,54 @@ a internet. A liberação de pagamento no painel é propagada no próximo contat
 do aplicativo, que consulta a API a cada 30 segundos. Uma licença validada
 recentemente continua funcionando offline por até 72 horas.
 
+## Assinar as respostas (fecha o contorno da licença)
+
+Sem assinatura, o aplicativo acredita em qualquer servidor para o qual
+`ADRI_LICENCA_API_URL` aponte e no que estiver gravado no cache local — basta
+um servidor falso respondendo `"paid"`, ou uma linha de SQL no banco do
+cliente. Com assinatura, o serviço assina (Ed25519) o estado, a validade, a
+conta, a instalação e o instante da resposta, e o aplicativo só aceita o que
+confere com a chave pública embutida nele.
+
+A exigência fica **desligada** enquanto a chave pública não estiver no código.
+Ative nesta ordem — inverter os passos 2 e 4 tranca os clientes do lado de
+fora, porque o aplicativo passaria a exigir uma assinatura que o serviço ainda
+não emite:
+
+1. Gere o par, uma única vez, no computador do fornecedor:
+   `python licensing-service/gerar_chave_de_assinatura.py`
+2. Configure a linha `LICENSE_SIGNING_KEY=...` nas variáveis de ambiente do
+   serviço (aba **Environment** do Render, ou o `.env` do Docker Compose) e
+   publique. É a chave **privada**: quem a tiver emite licenças válidas. Não
+   vai para o repositório nem para nenhuma instalação de cliente.
+3. Confirme que o serviço passou a assinar: a resposta de
+   `/v1/licenses/sync` ganha o campo `prova`.
+4. Cole a linha `CHAVE_PUBLICA_DA_CENTRAL = "..."` em
+   `backend/licenca_remota.py`, gere o instalador e distribua. A chave
+   pública não é segredo.
+
+A partir da versão com a chave pública, uma resposta sem assinatura válida é
+ignorada, o cache só libera o uso a partir da prova assinada (as colunas de
+texto servem apenas para lembrar uma recusa), a prova copiada de outro
+computador não vale e a janela offline de 72 horas conta do instante em que o
+servidor respondeu. Instalações antigas, sem a chave, continuam funcionando
+como antes.
+
+Limites: atrasar o relógio do Windows ainda estica a janela offline, e quem
+altera o executável altera também a chave embutida. Trocar o par invalida as
+provas já emitidas — os aplicativos com a chave antiga deixam de reconhecer o
+serviço até serem atualizados.
+
 ## API e estados
 
 - `POST /v1/licenses/sync`: cliente consulta a licença usando um ID e segredo
-  aleatórios próprios. A primeira sincronização inicia um período de 30 dias.
+  aleatórios próprios e o identificador estável da instalação Windows. A
+  primeira conta da instalação recebe 30 dias; novas contas começam suspensas
+  até o desenvolvedor liberar o teste ou o pagamento. A central limita a três
+  novas instalações em teste por IP a cada 30 dias; guarda apenas um hash
+  pseudônimo do endereço, nunca o IP em texto.
+- `GET /v1/admin/verify`: valida a credencial administrativa sem devolver
+  dados de clientes; exige o mesmo `Bearer` privado.
 - `GET /v1/admin/licenses`: lista as contas; exige `Bearer` com o token admin.
 - `POST /v1/admin/licenses/{id}`: ação `paid`, `trial_30_days` ou `suspend`;
   exige o token admin. `paid` libera permanentemente até uma suspensão manual.
@@ -106,7 +156,13 @@ comparação de prefixo e não é devolvida nas respostas. O dono da máquina do
 cliente controla o software local, então nenhuma barreira comercial embarcada
 no aplicativo impede adulteração deliberada do executável ou do relógio.
 
-O identificador de conta é criado uma vez no SQLite de cada instalação. Apagar
-esse banco apaga também a identidade local; o produto não usa um cadastro de
-conta hospedado. Mantenha backups do servidor e do banco local conforme a
-política de suporte da empresa.
+O identificador de conta é criado no SQLite. O serviço central vincula cada
+licença à instalação Windows e conserva o direito ao primeiro teste em uma
+tabela própria: apagar ou recriar o banco local não reinicia os 30 dias. Copiar
+um banco licenciado para outro computador não transfere a licença; a troca de
+computador exige atendimento manual do fornecedor. Mantenha backups do servidor
+e do banco local conforme a política de suporte da empresa.
+
+O cliente espera até 90 segundos pela sincronização para acomodar a inicialização
+de instâncias Render gratuitas. A primeira validação exige internet; somente
+uma licença já validada pode usar a janela offline de até 72 horas.

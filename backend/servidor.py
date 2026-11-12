@@ -21,6 +21,7 @@ if DIRETORIO_BACKEND not in sys.path:
 import database  # noqa: E402
 from erp.core import backup  # noqa: E402
 from erp.core import idempotencia  # noqa: E402
+from erp.core import protecao_dados  # noqa: E402
 import capacidade  # noqa: E402
 from app import app  # noqa: E402
 
@@ -107,6 +108,19 @@ def preparar_banco() -> None:
     de backups apontada na mensagem.
     """
     caminho = database.obter_caminho_banco_absoluto()
+
+    # Banco em pasta de rede e recusa, nao aviso. O SQLite sobre SMB perde
+    # escritas e corrompe -- o proprio SECURITY.md diz que base compartilhada
+    # nao e suportada. Deixar abrir e "ver no que da" transformaria a base de
+    # clientes num experimento. A saida e explicita, e feia de escrever de
+    # proposito: quem a define esta assumindo a corrupcao documentada.
+    if protecao_dados.em_pasta_de_rede(caminho) and not protecao_dados.rede_permitida_explicitamente():
+        raise ErroDePreparacaoDoBanco(
+            "O banco de dados esta numa pasta de rede, e este aplicativo nao "
+            "suporta isso: o SQLite corrompe em compartilhamento SMB. Copie o "
+            "banco para uma pasta local (o padrao e %APPDATA%\\AdriPoltronas) "
+            "e aponte ADRI_DB_PATH para ela.", caminho,
+        )
 
     try:
         import migrations_manager
@@ -226,9 +240,15 @@ def proteger_credenciais() -> None:
         import config
         import segredos
 
-        migradas = segredos.migrar_do_env(config.caminho_env_do_usuario())
-        if migradas:
-            log.info("Credenciais movidas para o cofre cifrado: %s", ", ".join(migradas))
+        # O checkout de desenvolvimento e o aplicativo instalado podem ter
+        # dois arquivos de configuração. `load_dotenv()` lê o arquivo do
+        # projeto primeiro e o do usuário depois, sem sobrescrever valores já
+        # definidos; assim, o projeto vence. Migrar na ordem inversa conserva
+        # no cofre o valor que efetivamente prevalece.
+        for caminho in (config.caminho_env_do_usuario(), config.caminho_env_do_projeto()):
+            migradas = segredos.migrar_do_env(caminho)
+            if migradas:
+                log.info("Credenciais movidas para o cofre cifrado: %s", ", ".join(migradas))
     except Exception:
         log.exception("Nao foi possivel proteger as credenciais; seguindo assim mesmo")
 
@@ -239,6 +259,31 @@ def main() -> int:
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
     proteger_credenciais()
+
+    caminho_banco = database.obter_caminho_banco_absoluto()
+    try:
+        protecao_armazenamento = protecao_dados.avaliar_local_do_banco(caminho_banco)
+    except Exception:
+        # Sem um resultado confiável não afirmamos que o disco está protegido;
+        # a limitação fica registrada e o processo segue para não bloquear
+        # máquinas em que o Windows não permite consultar o estado.
+        log.exception("Nao foi possivel confirmar a protecao do disco do banco")
+        protecao_armazenamento = {"caminho": caminho_banco, "em_rede": False, "bitlocker": None}
+
+    if (
+        protecao_armazenamento.get("bitlocker") is False
+        and os.environ.get(protecao_dados.VARIAVEL_PERMITIR_DISCO_SEM_BITLOCKER) != "1"
+    ):
+        mensagem = (
+            "O Windows confirmou que o disco do banco está sem BitLocker. "
+            "Ative BitLocker/Criptografia do dispositivo e abra novamente. "
+            "Para assumir conscientemente o risco, configure "
+            "ADRI_PERMITIR_BANCO_SEM_BITLOCKER=1 no .env do aplicativo."
+        )
+        log.error("[PROTECAO] %s", mensagem)
+        print(MARCADOR_FALHA_BANCO, file=sys.stderr, flush=True)
+        print(mensagem, file=sys.stderr, flush=True)
+        return 3
 
     try:
         preparar_banco()
@@ -253,6 +298,16 @@ def main() -> int:
     except Exception:
         log.exception("Nao foi possivel inicializar o banco de dados local")
         return 1
+
+    # O banco abriu; agora o que se pode dizer sobre a protecao dele em
+    # repouso. Aviso, nunca bloqueio: consultar BitLocker e melhor esforco, e
+    # falhar aqui nao pode custar a abertura de um sistema que ja esta pronto.
+    try:
+        protecao_dados.avisar_protecao_do_banco(
+            caminho_banco, situacao=protecao_armazenamento
+        )
+    except Exception:
+        log.exception("Nao foi possivel avaliar a protecao do banco; seguindo.")
 
     log.info("Servidor em http://%s:%s/", HOST, PORTA)
     if capacidade.esta_ativa():

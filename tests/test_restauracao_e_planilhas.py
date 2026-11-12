@@ -107,12 +107,21 @@ def test_restaurar_guarda_o_estado_atual_antes_de_trocar(client):
     salvaguarda = [c for c in copias if c['motivo'] == backup.MOTIVO_PRE_MIGRACAO]
     assert salvaguarda, "o estado anterior a restauracao nao foi preservado"
 
-    # E a salvaguarda contem mesmo o que estava la.
+    # E a salvaguarda contem mesmo o que estava la. Desde a 1.5.2 a copia sai
+    # CIFRADA: conferir o conteudo exige o mesmo caminho da restauracao --
+    # decifrar para um temporario, ler, apagar o claro. Abrir o arquivo com
+    # sqlite3 direto agora prova apenas que ele nao e um SQLite.
     caminho_salvaguarda = os.path.join(
         backup.pasta_de_backups(caminho), salvaguarda[0]['arquivo']
     )
-    with closing(sqlite3.connect(caminho_salvaguarda)) as conexao:
-        nomes = {linha[0] for linha in conexao.execute("SELECT nome FROM clientes")}
+    legivel = backup._materializar_copia(caminho_salvaguarda)
+    assert legivel, "a salvaguarda nao decifrou"
+    try:
+        with closing(sqlite3.connect(legivel)) as conexao:
+            nomes = {linha[0] for linha in conexao.execute("SELECT nome FROM clientes")}
+    finally:
+        if legivel != caminho_salvaguarda:
+            os.remove(legivel)
     assert 'Perdido na restauracao' in nomes
 
 

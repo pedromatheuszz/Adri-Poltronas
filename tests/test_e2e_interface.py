@@ -25,11 +25,15 @@ Sem o Playwright instalado, o arquivo inteiro e pulado -- a suite normal nao
 depende dele. No CI ha um job proprio.
 """
 import contextlib
+import json
 import os
 import socket
 import subprocess
 import sys
+import threading
 import time
+from datetime import datetime, timedelta, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
@@ -43,6 +47,49 @@ RAIZ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 BACKEND = os.path.join(RAIZ, 'backend')
 
 TIMEOUT_BOOT_S = 40
+TOKEN_E2E_SESSAO_LOCAL = 'token-de-sessao-local-ponta-a-ponta'
+
+
+class _HandlerLicencaE2E(BaseHTTPRequestHandler):
+    """API central mínima para exercitar o fluxo sem depender do Render."""
+
+    def do_POST(self):
+        if self.path != '/v1/licenses/sync':
+            self.send_error(404)
+            return
+        tamanho = int(self.headers.get('Content-Length', '0'))
+        dados = json.loads(self.rfile.read(tamanho) or b'{}')
+        agora = datetime.now(timezone.utc)
+        estado = self.server.estado_licenca
+        expiracao = agora - timedelta(days=1) if estado == 'expired' else agora + timedelta(days=30)
+        resposta = json.dumps({
+            'license_id': dados.get('license_id', ''),
+            'username': dados.get('username', ''),
+            'email': dados.get('email', ''),
+            'estado': estado,
+            'inicio_em': agora.strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'expira_em': expiracao.strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'pago_em': '',
+            'atualizado_em': agora.strftime('%Y-%m-%dT%H:%M:%SZ'),
+        }).encode('utf-8')
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(resposta)))
+        self.end_headers()
+        self.wfile.write(resposta)
+
+    def log_message(self, _formato, *_argumentos):
+        return
+
+
+def _iniciar_licenca_e2e(estado):
+    servidor = ThreadingHTTPServer(('127.0.0.1', 0), _HandlerLicencaE2E)
+    servidor.estado_licenca = estado
+    servidor.daemon_threads = True
+    thread = threading.Thread(target=servidor.serve_forever, daemon=True)
+    thread.start()
+    url = f'http://127.0.0.1:{servidor.server_address[1]}'
+    return servidor, thread, url
 
 
 def _porta_livre() -> int:
@@ -59,14 +106,10 @@ def _porta_livre() -> int:
 
 def _semear_sessao(caminho_do_banco) -> None:
     """
-    Grava uma sessao Microsoft no banco de teste.
+    Grava uma sessão local e uma conexão Microsoft no banco de teste.
 
-    Nao e conveniencia: sem ela, POST/PUT/DELETE em /api/* respondem 401. A
-    autenticacao do ERP e o OAuth da Microsoft -- conceitualmente errado, e
-    documentado como pendencia em CONTRIBUTING.md --, entao criar cliente
-    exige estar "conectado ao OneDrive". Um teste ponta a ponta que ignorasse
-    isso nao exercitaria o fluxo do operador; exercitaria um sistema em que
-    ninguem consegue cadastrar nada.
+    O login local é obrigatório para usar o ERP; a sessão Microsoft fica
+    presente para os testes da integração opcional com OneDrive/Excel.
     """
     sys.path.insert(0, BACKEND)
     import database
@@ -75,6 +118,10 @@ def _semear_sessao(caminho_do_banco) -> None:
     database.DB_PATH = str(caminho_do_banco)
     try:
         database.criar_tabela()
+        user_id = database.criar_usuario(
+            'operador', 'senha-local-e2e-forte', 'usuario', 'operador@exemplo.local')
+        database.salvar_sessao_local(
+            TOKEN_E2E_SESSAO_LOCAL, user_id, 'operador', 'usuario')
         database.salvar_sessao("token-de-teste", "operador@exemplo.local")
     finally:
         database.DB_PATH = original
@@ -102,15 +149,21 @@ def _semear_cliente(caminho_do_banco) -> None:
 
 
 @contextlib.contextmanager
-def _backend_no_ar(banco):
+def _backend_no_ar(banco, estado_licenca='trial'):
     """Sobe o backend real sobre `banco` e devolve a URL base."""
     porta = _porta_livre()
+    central, thread_central, url_central = _iniciar_licenca_e2e(estado_licenca)
 
     ambiente = {
         **os.environ,
         'ADRI_DB_PATH': str(banco),
+        'APPDATA': str(banco.parent / 'appdata'),
         'ADRI_PORTA': str(porta),
         'PYTHONUNBUFFERED': '1',
+        'ADRI_LICENCA_API_URL': url_central,
+        # Nenhum segredo da máquina de quem roda o E2E deve habilitar o
+        # bootstrap do desenvolvedor no banco temporário.
+        'ADRI_LICENCA_ADMIN_TOKEN': '',
     }
     # Sem ADRI_API_TOKEN: a capacidade e injetada pelo Electron, e aqui o
     # navegador e o Playwright. Testar a capacidade e trabalho de
@@ -143,6 +196,9 @@ def _backend_no_ar(banco):
         limite = time.time() + TIMEOUT_BOOT_S
         while time.time() < limite:
             if processo.poll() is not None:
+                central.shutdown()
+                central.server_close()
+                thread_central.join(timeout=3)
                 pytest.fail(
                     "o backend morreu ao subir:\n"
                     + log.read_text(encoding="utf-8", errors="replace")
@@ -154,6 +210,9 @@ def _backend_no_ar(banco):
                 time.sleep(0.25)
         else:
             processo.kill()
+            central.shutdown()
+            central.server_close()
+            thread_central.join(timeout=3)
             pytest.fail(f"o backend nao respondeu em {TIMEOUT_BOOT_S}s")
 
         try:
@@ -164,6 +223,9 @@ def _backend_no_ar(banco):
                 processo.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 processo.kill()
+            central.shutdown()
+            central.server_close()
+            thread_central.join(timeout=3)
 
 
 @pytest.fixture(scope="module")
@@ -190,8 +252,7 @@ def servidor_licenca_vencida(tmp_path_factory):
     banco = tmp_path_factory.mktemp("e2e-licenca") / "e2e.db"
     _semear_sessao(banco)
     _semear_cliente(banco)
-    _vencer_licenca(banco)
-    with _backend_no_ar(banco) as base:
+    with _backend_no_ar(banco, estado_licenca='expired') as base:
         yield base
 
 
@@ -267,7 +328,7 @@ def _preparar_contexto(navegador):
 
 @pytest.fixture
 def pagina_sem_sessao(navegador, servidor_sem_sessao):
-    """A tela de quem abre o app sem nunca ter conectado a conta."""
+    """A tela de login de quem abre o app sem uma sessão local."""
     contexto = _preparar_contexto(navegador)
     pagina = contexto.new_page()
 
@@ -279,7 +340,7 @@ def pagina_sem_sessao(navegador, servidor_sem_sessao):
     # que as esconde enquanto o painel esta na tela. Esperar por visibilidade
     # aqui daria timeout justamente quando o comportamento esta CERTO.
     pagina.wait_for_selector("#aba-dashboard", state="attached", timeout=15000)
-    pagina.wait_for_selector("#painelSemConexao", timeout=15000)
+    pagina.wait_for_selector("#telaLogin:not([hidden])", timeout=15000)
     pagina.erros_de_javascript = erros
 
     yield pagina
@@ -295,9 +356,13 @@ def pagina_licenca_vencida(navegador, servidor_licenca_vencida):
     erros = []
     pagina.on("pageerror", lambda erro: erros.append(str(erro)))
 
+    contexto.add_cookies([{
+        'name': 'adri_sessao_local', 'value': TOKEN_E2E_SESSAO_LOCAL,
+        'url': servidor_licenca_vencida, 'sameSite': 'Strict',
+    }])
     pagina.goto(servidor_licenca_vencida, wait_until="load")
     pagina.wait_for_selector("#aba-dashboard", state="attached", timeout=15000)
-    pagina.wait_for_selector("#painelLicenca", timeout=15000)
+    pagina.wait_for_selector("#telaPagamento:not([hidden])", timeout=15000)
     pagina.erros_de_javascript = erros
 
     yield pagina
@@ -323,6 +388,11 @@ def pagina(navegador, servidor):
     # Os ladrilhos do mapa continuam cortados: vem da rede por natureza, e
     # desenhar o mapa nao e o que nenhum destes testes verifica.
     contexto.route("**tile.openstreetmap.org/**", lambda rota: rota.abort())
+
+    contexto.add_cookies([{
+        'name': 'adri_sessao_local', 'value': TOKEN_E2E_SESSAO_LOCAL,
+        'url': servidor, 'sameSite': 'Strict',
+    }])
 
     # `load`, e nao `networkidle`: o Service Worker mantem trafego de fundo, e
     # a pagina nunca fica "ociosa" pelo criterio do Playwright.
@@ -571,10 +641,12 @@ def test_o_foco_do_teclado_e_visivel(pagina):
 # assusta com erro. Ela explica e oferece o caminho.
 # =============================================================================
 def test_sem_sessao_a_tela_pede_conexao(pagina_sem_sessao):
-    painel = pagina_sem_sessao.locator("#painelSemConexao")
-    assert painel.is_visible()
-    assert "Conecte sua conta Microsoft" in painel.inner_text()
-    assert pagina_sem_sessao.locator("#btnConectarPeloPainel").is_visible()
+    tela = pagina_sem_sessao.locator("#telaLogin")
+    assert tela.is_visible()
+    assert pagina_sem_sessao.locator("#formLoginLocal").is_visible()
+    assert pagina_sem_sessao.locator("#localUsername").is_visible()
+    assert pagina_sem_sessao.locator("#localSenha").is_visible()
+    assert pagina_sem_sessao.locator("#etapaLogin [data-comando=\"abrirCadastroPublico\"]").is_visible()
 
 
 def test_sem_sessao_nenhum_numero_do_dashboard_aparece(pagina_sem_sessao):
@@ -583,12 +655,9 @@ def test_sem_sessao_nenhum_numero_do_dashboard_aparece(pagina_sem_sessao):
     precisa sumir, senao "R$ 0,00 em atraso" continua legivel -- e continua
     mentindo.
     """
-    for identificador in ("metricTotalClientes", "metricEntregas", "metricRetiradas"):
-        elemento = pagina_sem_sessao.locator("#" + identificador)
-        if elemento.count():
-            assert not elemento.is_visible(), f"{identificador} visivel sem sessao"
-
-    assert not pagina_sem_sessao.locator("#aba-dashboard").is_visible()
+    casca = pagina_sem_sessao.locator("#appShell")
+    assert casca.get_attribute("aria-hidden") == "true"
+    assert casca.evaluate("el => el.inert") is True
 
 
 def test_sem_sessao_o_cadastro_nao_vaza_para_a_tela(pagina_sem_sessao):
@@ -615,18 +684,16 @@ def test_sem_sessao_nao_ha_erro_de_javascript(pagina_sem_sessao):
 
 
 def test_sem_sessao_trocar_de_aba_nao_revela_conteudo(pagina_sem_sessao):
-    """O painel vale para o app inteiro, e nao so para a aba de abertura."""
-    for aba in ("clientes", "produtos", "entregas"):
-        pagina_sem_sessao.click(f'[data-comando="trocarAba"][data-arg="{aba}"]')
-        pagina_sem_sessao.wait_for_timeout(300)
-        assert pagina_sem_sessao.locator("#painelSemConexao").is_visible()
-        assert not pagina_sem_sessao.locator(f"#aba-{aba}").is_visible()
+    """Sem sessão, nem o app nem a navegação ficam interativos."""
+    assert pagina_sem_sessao.locator("#telaLogin").is_visible()
+    assert pagina_sem_sessao.locator("#appShell").evaluate("el => el.inert") is True
 
 
 def test_com_sessao_o_painel_nao_atrapalha(pagina):
     """A outra direcao: fechar demais seria a mesma regressao ao contrario."""
     painel = pagina.locator("#painelSemConexao")
     assert not painel.is_visible()
+    assert not pagina.locator("#telaLogin").is_visible()
     assert pagina.locator("#aba-dashboard").is_visible()
 
 
@@ -638,19 +705,17 @@ def test_com_sessao_o_painel_nao_atrapalha(pagina):
 # pagar -- e ela precisa estar a um clique, com o valor a vista.
 # =============================================================================
 def test_licenca_vencida_a_tela_pede_pagamento(pagina_licenca_vencida):
-    painel = pagina_licenca_vencida.locator("#painelLicenca")
+    painel = pagina_licenca_vencida.locator("#telaPagamento")
     assert painel.is_visible()
-    assert "Seu periodo de teste terminou" in painel.inner_text()
-    assert "R$ 1.500,00" in painel.inner_text()
-    assert pagina_licenca_vencida.locator("#btnGerarPixLicenca").is_visible()
+    assert "Pagamento necessário para continuar. Período de teste encerrado" in painel.inner_text()
+    assert "R$ 2.000,00" in painel.inner_text()
+    assert "Entre em contato com o fornecedor para efetuar o pagamento" in painel.inner_text()
+    assert not pagina_licenca_vencida.locator("#btnGerarPixLicenca").is_visible()
 
 
 def test_licenca_vencida_nenhum_numero_aparece(pagina_licenca_vencida):
     """Os zeros do HTML sao tao mentirosos aqui quanto no estado sem conexao."""
-    assert not pagina_licenca_vencida.locator("#aba-dashboard").is_visible()
-    metrica = pagina_licenca_vencida.locator("#metricTotalClientes")
-    if metrica.count():
-        assert not metrica.is_visible()
+    assert pagina_licenca_vencida.locator("#appShell").evaluate("el => el.inert") is True
 
 
 def test_licenca_vencida_o_cadastro_nao_vaza(pagina_licenca_vencida):
@@ -689,7 +754,7 @@ def test_licenca_vencida_nao_ha_erro_de_javascript(pagina_licenca_vencida):
 
 def test_licenca_vigente_nao_mostra_o_painel(pagina):
     """A direcao oposta: bloquear quem esta em dia seria a regressao inversa."""
-    assert not pagina.locator("#painelLicenca").is_visible()
+    assert not pagina.locator("#telaPagamento").is_visible()
     assert pagina.locator("#aba-dashboard").is_visible()
 
 
@@ -772,7 +837,7 @@ def test_conectado_o_botao_mostra_a_conta_e_o_title_traz_o_endereco(pagina):
         timeout=10000,
     )
     botao = pagina.locator("#btnConectarMicrosoft")
-    assert botao.inner_text().strip() == "operador"
+    assert botao.inner_text().strip() == "MS: operador"
     assert "operador@exemplo.local" in botao.get_attribute("title")
 
 
@@ -835,7 +900,8 @@ def test_autorizar_libera_o_mapa_e_o_estado_persiste(pagina):
 
     pagina.wait_for_selector("#mapaClientes", state="visible", timeout=10000)
     assert pagina.is_hidden("#mapaConsentimento")
-    assert pagina.is_visible("#mapaControles")
+    # As ações de apagar/revogar são restritas ao perfil de desenvolvedor.
+    assert pagina.is_hidden("#mapaControles")
 
     # Sai da aba e volta: o pedido nao pode reaparecer.
     pagina.click('[data-comando="trocarAba"][data-arg="dashboard"]')
@@ -856,19 +922,15 @@ def test_revogar_apaga_as_coordenadas_guardadas(pagina):
     pagina.evaluate(
         "localStorage.setItem('adri-geocache',"
         " JSON.stringify({'rua x,centro,joinville': [-26.30, -48.84]}));"
-        "localStorage.setItem('adri-mapa-consentimento', 'sim');"
+        "localStorage.setItem('adri-mapa-consentimento:1', 'sim');"
     )
     pagina.reload(wait_until="load")
     pagina.click('[data-comando="trocarAba"][data-arg="mapa"]')
-    pagina.wait_for_selector("#mapaControles", state="visible", timeout=10000)
+    pagina.wait_for_selector("#mapaClientes", state="visible", timeout=10000)
 
-    assert pagina.evaluate("localStorage.getItem('adri-geocache')") != '{}'
-
-    pagina.click('[data-comando="revogarMapa"]')
-    pagina.wait_for_selector("#mapaConsentimento", state="visible", timeout=10000)
-
-    assert pagina.evaluate("localStorage.getItem('adri-geocache')") is None
-    assert pagina.evaluate("localStorage.getItem('adri-mapa-consentimento')") is None
+    assert pagina.is_hidden("#mapaControles")
+    assert pagina.evaluate("localStorage.getItem('adri-geocache')") is not None
+    assert pagina.evaluate("localStorage.getItem('adri-mapa-consentimento:1')") == 'sim'
 
 
 def test_apagar_coordenadas_nao_revoga_a_autorizacao(pagina):
@@ -880,15 +942,13 @@ def test_apagar_coordenadas_nao_revoga_a_autorizacao(pagina):
     pagina.evaluate(
         "localStorage.setItem('adri-geocache',"
         " JSON.stringify({'rua x,centro,joinville': [-26.30, -48.84]}));"
-        "localStorage.setItem('adri-mapa-consentimento', 'sim');"
+        "localStorage.setItem('adri-mapa-consentimento:1', 'sim');"
     )
     pagina.reload(wait_until="load")
     pagina.click('[data-comando="trocarAba"][data-arg="mapa"]')
-    pagina.wait_for_selector("#mapaControles", state="visible", timeout=10000)
+    pagina.wait_for_selector("#mapaClientes", state="visible", timeout=10000)
 
-    pagina.click('[data-comando="limparCacheDoMapa"]')
-    pagina.wait_for_timeout(300)
-
-    assert pagina.evaluate("localStorage.getItem('adri-geocache')") is None
-    assert pagina.evaluate("localStorage.getItem('adri-mapa-consentimento')") == 'sim'
+    assert pagina.is_hidden("#mapaControles")
+    assert pagina.evaluate("localStorage.getItem('adri-geocache')") is not None
+    assert pagina.evaluate("localStorage.getItem('adri-mapa-consentimento:1')") == 'sim'
     assert pagina.is_hidden("#mapaConsentimento")

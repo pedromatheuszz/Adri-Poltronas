@@ -69,6 +69,37 @@ python build.py installer  # -> dist-instalador/
 make installer
 ```
 
+### Assinatura de código (opcional, recomendado)
+```bash
+python build.py assinar    # assina e verifica dist-instalador/*.exe e o backend
+```
+Assina o instalador **e** o `AdriPoltronasBackend.exe` que ele transporta —
+o segundo é o processo que escuta em `127.0.0.1`, e é justamente o que o
+antivírus mais desconfia. Inclui carimbo RFC 3161: sem ele, a assinatura
+morre no dia em que o certificado expira.
+
+Credenciais pelo ambiente, nunca por arquivo versionado:
+
+| Variável | O que é |
+|---|---|
+| `ADRI_CERT_THUMBPRINT` | SHA-1 do certificado no repositório do usuário (campo "Impressão digital"). Copie com espaços: o comando normaliza. |
+| `ADRI_CERT_ARQUIVO` + `ADRI_CERT_SENHA` | Arquivo `.pfx` e senha — segunda opção; o thumbprint não expõe nada em linha de comando. |
+| `ADRI_CARIMBO` | Servidor de carimbo RFC 3161. Padrão: `http://timestamp.digicert.com`. |
+
+Requisito: Windows SDK (`signtool.exe`). Sem credencial, sem SDK ou sem
+build, o comando para na primeira coisa que falta e diz como resolver.
+
+Certificado de teste (silencia o aviso na sua máquina, não a dos clientes):
+```powershell
+New-SelfSignedCertificate -Type Custom -Subject 'CN=Adri Poltronas' `
+  -KeyUsage DigitalSignature -FriendlyName 'Adri Poltronas (teste)' `
+  -CertStoreLocation Cert:\CurrentUser\My `
+  -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3')
+# O thumbprint sai do proprio comando; use-o em ADRI_CERT_THUMBPRINT.
+```
+Para os clientes deixarem de ver o SmartScreen, e preciso certificado de
+Autoridade Certificadora (OV ou EV) — o autoassinado serve so de ensaio.
+
 ### Desenvolvimento Local
 ```bash
 # App completo (compila o TypeScript e abre a janela)
@@ -207,19 +238,31 @@ Adri Poltronas/
 │   ├── blueprints/         # Modularização de rotas
 │   ├── database.py         # SQLite ORM
 │   ├── validators.py       # Validação de entrada
-│   ├── security.py         # Criptografia
-│   ├── asaas.py            # Integração Asaas
+│   ├── security.py         # Criptografia (DPAPI/Fernet)
+│   ├── planilha.py         # Construção de XLSX formatado
 │   ├── config.py           # Configurações
 │   ├── migrations_manager.py # Gerenciador de migrações
+│   ├── erp/
+│   │   ├── core/           # dinheiro, auditoria, backup, idempotência,
+│   │   │                   # protecao_dados (rede/BitLocker), contexto
+│   │   └── comercial/     # estados, servico, repositorio, estoque, relatorios
 │   └── requirements.txt
 ├── frontend/
 │   ├── css/style.css
-│   ├── js/app.js
+│   ├── css/tokens.css
+│   ├── js/app.js          # Núcleo: sessão, abas, clientes, mapa, toasts
+│   ├── js/licenca.js      # Subsistema de licença (painel, Pix, verificação)
+│   ├── js/comercial.js    # Produtos+estoque, pedidos, entregas
+│   ├── js/relatorios.js   # Aba Relatórios (parcelas, exportação)
 │   ├── js/offline.js
 │   └── manifest.json
 ├── tests/
 │   ├── test_api.py         # Testes de API
 │   ├── test_database.py    # Testes de banco
+│   ├── test_estoque.py     # Razão e reserva de estoque
+│   ├── test_relatorios.py  # Relatório financeiro e exportação
+│   ├── test_backup_cifrado.py # Cópia de segurança cifrada
+│   ├── test_protecao_dados.py # Rede, BitLocker, recusa de boot
 │   └── test_validators.py  # Testes de validação
 ├── migrations/             # Alembic migrations
 ├── docs/

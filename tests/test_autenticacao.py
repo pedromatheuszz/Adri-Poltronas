@@ -43,11 +43,27 @@ def app_real(monkeypatch, tmp_path):
     """O app com os guardas ligados, sobre um banco descartavel e vazio."""
     banco = str(tmp_path / 'auth.db')
     monkeypatch.setenv('ADRI_DB_PATH', banco)
+    monkeypatch.setenv('APPDATA', str(tmp_path / 'appdata'))
     monkeypatch.setenv(capacidade.VARIAVEL_DE_AMBIENTE, TOKEN_DE_CAPACIDADE)
     monkeypatch.delenv(capacidade.VARIAVEL_DE_DESLIGAMENTO, raising=False)
 
     import app as modulo_app
     import database
+    import licenca_remota
+    import segredos
+
+    # Este arquivo mede o guarda de AUTENTICACAO. O de licenca vem logo depois
+    # dele na fila e, com a API central configurada, sincroniza a conta pela
+    # rede antes de deixar passar -- os testes "com sessao" so ficavam verdes
+    # porque alcancavam o servico de producao e registravam la uma conta nova
+    # a cada execucao. Sem central, vale o periodo de teste local da conta
+    # recem-criada, que e o que estes cenarios precisam.
+    monkeypatch.setattr(licenca_remota, 'api_configurada', lambda: False)
+
+    # Os testes de autenticação não devem ler nem escrever o cofre real do
+    # desenvolvedor; cada caso usa um perfil temporário e cache limpo.
+    monkeypatch.setattr(segredos, '_cache', {})
+    monkeypatch.setattr(segredos, '_origem_env', set())
 
     monkeypatch.setattr(database, 'DB_PATH', banco)
     database.criar_tabela()
@@ -181,8 +197,18 @@ def test_status_de_login_responde_sem_sessao(sem_sessao):
     assert resposta.get_json()['logado'] is False
 
 
-def test_setup_inicial_cria_desenvolvedor_uma_unica_vez(app_real):
+def test_setup_inicial_cria_desenvolvedor_uma_unica_vez(app_real, monkeypatch):
     modulo_app, database = app_real
+    from blueprints import auth_local
+    import licenca_remota
+    import segredos
+
+    chave = 'chave-de-fornecedor-falsa-com-comprimento-suficiente-para-testes'
+    monkeypatch.setattr(licenca_remota, 'validar_token_admin', lambda valor: valor == chave)
+    monkeypatch.setattr(auth_local, '_ip_publico_atual', lambda: '203.0.113.10')
+    monkeypatch.setattr(licenca_remota, 'identidade_instalacao', lambda: 'identidade-fixa-de-teste')
+    assert segredos.gravar({auth_local.CHAVE_ATIVACAO_DESENVOLVEDOR: chave})
+
     cabecalhos_setup = {**CABECALHOS, 'Origin': 'http://localhost'}
     with modulo_app.app.test_client() as cliente:
         estado = cliente.get('/api/auth/local/status', headers=CABECALHOS).get_json()
@@ -194,6 +220,7 @@ def test_setup_inicial_cria_desenvolvedor_uma_unica_vez(app_real):
                 'username': 'proprietario',
                 'senha': 'uma-senha-forte-de-teste',
                 'email': 'dev@exemplo.local',
+                'chave_ativacao': chave,
             },
             headers=cabecalhos_setup,
         )
@@ -206,7 +233,8 @@ def test_setup_inicial_cria_desenvolvedor_uma_unica_vez(app_real):
 
         novamente = cliente.post(
             '/api/auth/local/setup',
-            json={'username': 'outro', 'senha': 'mais-uma-senha-longa-e-forte'},
+            json={'username': 'outro', 'senha': 'mais-uma-senha-longa-e-forte',
+                  'chave_ativacao': chave},
             headers=cabecalhos_setup,
         )
         assert novamente.status_code == 409
@@ -309,8 +337,13 @@ def test_controles_de_desenvolvedor_exigem_cookie_de_sessao(app_real):
     assert resposta.status_code == 401
 
 
-def test_desenvolvedor_gerencia_teste_individual(app_real):
+def test_desenvolvedor_gerencia_teste_individual(app_real, monkeypatch):
     modulo_app, database = app_real
+    from blueprints import auth_local
+
+    # Este caso cobre o controle individual; a validação de dispositivo tem
+    # testes próprios e não deve depender de rede ou da máquina de quem roda.
+    monkeypatch.setattr(auth_local, '_autorizar_dispositivo_desenvolvedor', lambda **_kwargs: True)
     cliente_id = database.criar_usuario('cliente-teste', 'senha-local-de-teste', 'usuario')
     cabecalhos = {**CABECALHOS, 'Origin': 'http://localhost'}
     with modulo_app.app.test_client() as cliente:

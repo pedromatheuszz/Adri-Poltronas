@@ -2330,6 +2330,24 @@ td .empty-state { padding: var(--esp-10) var(--esp-4); }
     color: var(--cor-texto);
 }
 
+/* --- Resumo do relatorio financeiro -----------------------------------------
+   Tres caixas lado a lado no lugar da lista empilhada do pedido: no
+   relatorio elas competem entre si pela atencao, e empilhadas a de baixo
+   sempre ganharia. Atraso ganha cor propria -- e o numero que pede
+   providencia; disponivel negativa idem, no estoque. */
+#relResumo { flex-direction: row; gap: var(--esp-3); flex-wrap: wrap; }
+#relResumo > div {
+    flex: 1 1 160px;
+    flex-direction: column;
+    gap: var(--esp-1);
+    padding: var(--esp-3) var(--esp-4);
+    border: 1px solid var(--cor-borda);
+    border-radius: var(--raio-md);
+}
+#relResumo dd { font-size: var(--texto-lg); font-weight: var(--peso-semi); }
+.rel-resumo-atrasado dd { color: var(--cor-perigo); }
+.rel-resumo-negativo dd { color: var(--cor-perigo); }
+
 /* --- Agenda de entregas ---------------------------------------------------
    Agrupada por dia: e assim que a equipe consulta de manha. "Hoje" e
    "Atrasadas" ganham uma faixa de acento a esquerda -- o segundo sinal,

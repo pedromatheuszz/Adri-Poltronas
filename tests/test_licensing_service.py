@@ -1,5 +1,4 @@
 """Testes da API central de licenças (licensing-service/app.py)."""
-import hashlib
 import sys
 import types
 from unittest.mock import MagicMock

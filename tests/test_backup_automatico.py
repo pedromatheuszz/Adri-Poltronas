@@ -40,14 +40,24 @@ def banco(tmp_path):
 # =============================================================================
 # A copia
 # =============================================================================
-def test_backup_gera_arquivo_integro_e_com_os_mesmos_dados(banco):
+def test_backup_gera_arquivo_integro_e_com_os_mesmos_dados(banco, tmp_path):
+    """
+    A copia sai CIFRADA em repouso (ver test_backup_cifrado.py), entao a
+    prova de que ela e utilizavel e restaurar de fato: decifrar, verificar
+    integridade e gravar o conteudo num banco novo. E o mesmo caminho que
+    a tela de restauracao percorre -- nao existe leitor mais honesto.
+    """
     destino = backup.criar_backup(banco, backup.MOTIVO_DIARIO)
 
     assert destino and os.path.exists(destino)
-    copia = sqlite3.connect(destino)
-    assert copia.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
-    assert copia.execute("SELECT COUNT(*) FROM clientes").fetchone()[0] == 3
-    copia.close()
+    alvo = str(tmp_path / "restaurado.db")
+    ok, mensagem = backup.restaurar(alvo, destino)
+    assert ok, mensagem
+
+    restaurado = sqlite3.connect(alvo)
+    assert restaurado.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    assert restaurado.execute("SELECT COUNT(*) FROM clientes").fetchone()[0] == 3
+    restaurado.close()
 
 
 def test_backup_fica_em_pasta_ao_lado_do_banco(banco):

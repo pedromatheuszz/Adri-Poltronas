@@ -55,6 +55,7 @@ aviso no log e visivel em `/api/health`, e serve apenas para rodar
 """
 from __future__ import annotations
 
+import hashlib
 import hmac
 import logging
 import os
@@ -127,6 +128,14 @@ def _token_de_reserva() -> str:
     return token
 
 
+def _token_configurado() -> str:
+    """O segredo desta instalacao, esteja a exigencia ligada ou nao."""
+    do_ambiente = (os.environ.get(VARIAVEL_DE_AMBIENTE) or "").strip()
+    if do_ambiente:
+        return do_ambiente
+    return _token_de_reserva()
+
+
 def token_esperado() -> str:
     """
     Token desta execucao, ou string vazia quando a exigencia esta desligada.
@@ -138,10 +147,59 @@ def token_esperado() -> str:
     """
     if desligada_explicitamente():
         return ""
-    do_ambiente = (os.environ.get(VARIAVEL_DE_AMBIENTE) or "").strip()
-    if do_ambiente:
-        return do_ambiente
-    return _token_de_reserva()
+    return _token_configurado()
+
+
+# -----------------------------------------------------------------------------
+# Prova de identidade por desafio
+#
+# A sonda do Electron mandava o token no cabecalho de `/api/health` para
+# perguntar "voce o aceita?". O problema e a ordem: o token saia ANTES de se
+# saber quem estava na porta. Qualquer processo que ocupasse 127.0.0.1:5000
+# primeiro -- inclusive o de outro usuario do Windows na mesma maquina, que
+# nao le o arquivo do perfil -- recebia o segredo de graca, respondia
+# "aceito", era adotado como backend e passava a receber o login.
+#
+# Agora quem pergunta manda um numero aleatorio e quem responde devolve o
+# HMAC dele com o token. O token nunca viaja na sonda; so quem ja o conhece
+# consegue produzir a resposta, e um desafio novo a cada pergunta impede
+# reaproveitar resposta antiga.
+# -----------------------------------------------------------------------------
+PREFIXO_DA_PROVA = "adri-health-v1:"
+_CARACTERES_DO_DESAFIO = frozenset("0123456789abcdef")
+TAMANHO_MINIMO_DO_DESAFIO = 32
+TAMANHO_MAXIMO_DO_DESAFIO = 128
+
+
+def desafio_valido(desafio: str | None) -> bool:
+    """Hexadecimal minusculo, com entropia suficiente para nao se repetir."""
+    if not isinstance(desafio, str):
+        return False
+    if not TAMANHO_MINIMO_DO_DESAFIO <= len(desafio) <= TAMANHO_MAXIMO_DO_DESAFIO:
+        return False
+    return all(c in _CARACTERES_DO_DESAFIO for c in desafio)
+
+
+def prova_do_desafio(desafio: str | None) -> str:
+    """
+    HMAC-SHA256 do desafio com o token, ou vazio quando nao ha o que provar.
+
+    Usa o token CONFIGURADO, e nao o esperado: com a exigencia desligada para
+    desenvolvimento o backend continua sabendo quem e, e a janela continua
+    precisando dessa prova antes de confiar nele. O prefixo fixo separa este
+    uso de qualquer outro HMAC que um dia venha a ser feito com o mesmo
+    segredo.
+    """
+    if not desafio_valido(desafio):
+        return ""
+    token = _token_configurado()
+    if not token:
+        return ""
+    return hmac.new(
+        token.encode("utf-8"),
+        (PREFIXO_DA_PROVA + desafio).encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
 
 
 # `esta_ativa()` roda em todo request. O aviso de desligamento sai uma vez por

@@ -126,10 +126,12 @@ CONFIGURAVEIS_NA_INSTALACAO = {
     'ADRI_FLASK_SECRET',
     'ADRI_CONTAS_AUTORIZADAS',
     'ADRI_BACKUP_EXTRA',
+    'ADRI_BACKUP_SENHA',
     'GEMINI_API_KEY',
     'MP_ACCESS_TOKEN',
     'ADRI_LICENCA_API_URL',
     'ADRI_LICENCA_ADMIN_TOKEN',
+    'ADRI_PERMITIR_BANCO_SEM_BITLOCKER',
 }
 
 # Variaveis que existem so para desenvolvimento ou teste e nao fazem sentido no
@@ -137,6 +139,7 @@ CONFIGURAVEIS_NA_INSTALACAO = {
 # esquecimento.
 SO_PARA_DESENVOLVIMENTO = {
     'ADRI_DB_PATH',            # aponta o banco para outro lugar
+    'ADRI_PERMITIR_BANCO_EM_REDE',  # assume, por escrito, o banco em SMB
     'MP_API_URL',              # duble local do Mercado Pago
     'ADRI_MICROSOFT_CLIENT_ID',  # troca a aplicacao Azure
     'ADRI_API_SEM_TOKEN',      # desliga a capacidade, para o `make dev`

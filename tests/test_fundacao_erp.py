@@ -253,10 +253,12 @@ def test_migrations_reconstroem_schema_integral_em_banco_novo(tmp_path, monkeypa
     # Cabeca da cadeia de migrations. Atualizar junto ao acrescentar uma
     # revisao nova -- e o que garante que ela entrou na cadeia, e nao ficou
     # pendurada fora dela.
-    assert revisao == "f2d71a9c0b64"
+    assert revisao == "a9d4c6e18f27"
     # O modulo comercial: sem estas tres, pagamento e entrega continuam
     # pendurados no cliente, sem saber a que venda pertencem.
     assert {"produtos", "pedidos", "pedido_itens"} <= tabelas
+    # O razao do estoque nasce junto com o controle da 1.5.2.
+    assert "estoque_movimentos" in tabelas
     assert {"ativo", "excluido_em"} <= colunas_clientes
     # Sem estas duas a sessao Microsoft nao pode ser renovada e o operador
     # volta a refazer o login a cada hora para exportar uma planilha.

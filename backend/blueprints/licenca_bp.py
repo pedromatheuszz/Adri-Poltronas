@@ -41,16 +41,22 @@ def status():
             "dias_restantes": None,
             "teste_modo": "desativado",
         }
+    elif getattr(g, 'erp_usuario_id', None) and licenca_remota.api_configurada():
+        user_id = g.erp_usuario_id
+        remota = licenca_remota.sincronizar_usuario(user_id)
+        if remota is None:
+            remota = licenca_remota.situacao_em_cache(user_id)
+        if licenca_remota.cache_precisa_sincronizar(user_id):
+            return jsonify({
+                "erro": "Não foi possível validar a licença agora. Verifique a conexão e tente novamente.",
+                "codigo": "licenca_indisponivel",
+            }), 503
+        situacao = remota
     elif licenca.situacao()['estado'] == licenca.ESTADO_PAGA:
         situacao = licenca.situacao()
     else:
         user_id = getattr(g, 'erp_usuario_id', None)
-        remota = licenca_remota.sincronizar_usuario(user_id) if user_id else None
-        if remota:
-            situacao = remota
-        else:
-            cache = licenca_remota.situacao_em_cache(user_id) if user_id else None
-            situacao = cache or (licenca.situacao_usuario(user_id) if user_id else licenca.situacao())
+        situacao = licenca.situacao_usuario(user_id) if user_id else licenca.situacao()
     situacao['mercadopago_configurado'] = mercadopago.esta_configurado()
     return jsonify(situacao), 200
 

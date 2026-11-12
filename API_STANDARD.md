@@ -68,12 +68,12 @@ log da aplicação, para rastrear o caso sem expor o stack trace:
 | Status | Uso | Onde aparece |
 |--------|-----|--------------|
 | 200 | Sucesso geral | GET, PUT, confirmações |
-| 201 | Recurso criado | POST de cliente, produto, pedido, item, entrega |
-| 400 | Requisição inválida | Falha de validação, arquivo ilegível |
+| 201 | Recurso criado | POST de cliente, produto, pedido, item, entrega, movimento de estoque |
+| 400 | Requisição inválida | Falha de validação, arquivo ilegível, filtro de relatório impossível |
 | 401 | Não autenticado | Sessão Microsoft ausente ou expirada |
 | 403 | Proibido | Origem externa (`Origin`/`Referer`); token de capacidade ausente; conta fora da allowlist |
 | 404 | Não encontrado | Cliente, pedido, parcela ou entrega inexistente |
-| 409 | Conflito de estado | Situação do pedido incompatível; cliente com vínculos em aberto |
+| 409 | Conflito de estado | Situação do pedido incompatível; cliente com vínculos em aberto; estoque insuficiente no período do item |
 | 402 | Licença requerida | Teste de 30 dias vencido sem licença paga |
 | 502 | Falha em serviço externo | Erro retornado pelo Microsoft Graph ou pelo Mercado Pago |
 | 503 | Operação em andamento | `Idempotency-Key` reenviada enquanto a primeira ainda executa |

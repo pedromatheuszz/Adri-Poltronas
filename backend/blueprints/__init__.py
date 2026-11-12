@@ -8,7 +8,8 @@ from .entregas import entregas_bp
 from .dashboard import dashboard_bp
 from .notificacoes import notificacoes_bp
 from .excel import excel_bp
-from .comercial import produtos_bp, pedidos_bp
+from .comercial import produtos_bp, pedidos_bp, estoque_bp
+from .relatorios import relatorios_bp
 from .backup import backup_bp
 from .licenca_bp import licenca_bp
 
@@ -23,6 +24,8 @@ __all__ = [
     'excel_bp',
     'produtos_bp',
     'pedidos_bp',
+    'estoque_bp',
+    'relatorios_bp',
     'backup_bp',
     'licenca_bp',
 ]

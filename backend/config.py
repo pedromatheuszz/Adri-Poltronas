@@ -37,13 +37,30 @@ GEMINI_API_KEY=
 # LICENCA_E_PAGAMENTO.md para como grava-lo sem passar por arquivo de texto.
 MP_ACCESS_TOKEN=
 
-# Pasta extra para onde copiar os backups (opcional). Um pendrive ou uma pasta
-# sincronizada resolve o caso em que a maquina inteira se perde.
+# Pasta extra para onde copiar os backups (opcional): um pendrive ou uma pasta
+# sincronizada, para o caso em que a maquina inteira se perde.
 ADRI_BACKUP_EXTRA=
+
+# Senha das copias que vao para a pasta extra (12 caracteres ou mais).
+#
+# SEM ELA a copia externa so abre nesta conta do Windows -- se o computador
+# for roubado ou o disco parar, ela nao recupera nada. COM ELA a copia abre em
+# qualquer computador: instale o aplicativo, defina a MESMA senha aqui, copie
+# o arquivo para a pasta "backups" ao lado do banco e use Restaurar.
+#
+# Anote a senha FORA deste computador. Ao abrir o aplicativo ela sai deste
+# arquivo e vai para o cofre cifrado; sem a anotacao, perde-se junto com a
+# maquina, e a copia fica fechada para sempre.
+ADRI_BACKUP_SENHA=
+
+# O banco contém dados pessoais e exige criptografia do disco. O sistema se
+# recusa a iniciar quando consegue confirmar que o BitLocker está desligado.
+# Use 1 apenas se você assumir explicitamente o risco.
+ADRI_PERMITIR_BANCO_SEM_BITLOCKER=0
 
 # Licença central. Configure ADRI_LICENCA_API_URL também nas instalações dos
 # clientes. ADRI_LICENCA_ADMIN_TOKEN existe somente no computador do vendedor.
-ADRI_LICENCA_API_URL=
+ADRI_LICENCA_API_URL=https://adri-poltronas-licenses.onrender.com
 ADRI_LICENCA_ADMIN_TOKEN=
 """
 
@@ -62,6 +79,12 @@ def caminho_env_do_usuario() -> str:
     if not appdata:
         return ''
     return os.path.join(appdata, 'AdriPoltronas', '.env')
+
+
+def caminho_env_do_projeto() -> str:
+    """`.env` da raiz do checkout, usado em desenvolvimento local."""
+    raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(raiz, '.env')
 
 
 def garantir_modelo_env() -> str:

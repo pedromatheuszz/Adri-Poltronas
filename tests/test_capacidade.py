@@ -225,6 +225,12 @@ def cliente_com_guarda_ligado(monkeypatch, tmp_path):
 
     import app as modulo_app
     import database
+    import licenca_remota
+
+    # O que se mede aqui e a capacidade. Com a API central configurada, o
+    # guarda de licenca sincronizaria a conta pela rede com o servico de
+    # producao; sem ela vale o periodo de teste local da conta recem-criada.
+    monkeypatch.setattr(licenca_remota, 'api_configurada', lambda: False)
 
     monkeypatch.setattr(database, 'DB_PATH', str(tmp_path / 'guarda.db'))
     database.criar_tabela()
@@ -265,6 +271,74 @@ def test_sonda_de_identidade_responde_sem_token(cliente_com_guarda_ligado):
     assert resposta.status_code == 200
     assert resposta.get_json()['servico'] == 'adri-poltronas'
     assert resposta.get_json()['capacidade_aceita'] is False
+
+
+# =============================================================================
+# Prova por desafio
+#
+# A sonda do Electron mandava o token no cabecalho ANTES de saber quem estava
+# na porta. Quem ocupasse 127.0.0.1:5000 primeiro recebia o segredo. Agora a
+# janela manda um numero aleatorio e so confia em quem devolve o HMAC dele.
+# =============================================================================
+DESAFIO = 'ab' * 32
+
+
+def _prova_esperada(token, desafio):
+    import hashlib
+    import hmac
+    return hmac.new(token.encode(), (capacidade.PREFIXO_DA_PROVA + desafio).encode(),
+                    hashlib.sha256).hexdigest()
+
+
+def test_sonda_prova_que_conhece_o_token_sem_recebe_lo(cliente_com_guarda_ligado):
+    resposta = cliente_com_guarda_ligado.get('/api/health?desafio=' + DESAFIO)
+
+    assert resposta.status_code == 200
+    corpo = resposta.get_json()
+    assert corpo['prova'] == _prova_esperada('token-do-app', DESAFIO)
+    # A pergunta nao levou o token: quem responde nao aprende nada com ela.
+    assert corpo['capacidade_aceita'] is False
+
+
+def test_a_prova_muda_com_o_desafio(cliente_com_guarda_ligado):
+    """Resposta capturada de uma sonda nao serve para a seguinte."""
+    uma = cliente_com_guarda_ligado.get('/api/health?desafio=' + DESAFIO).get_json()['prova']
+    outra = cliente_com_guarda_ligado.get('/api/health?desafio=' + 'cd' * 32).get_json()['prova']
+    assert uma and outra and uma != outra
+
+
+def test_a_prova_nao_revela_o_token(cliente_com_guarda_ligado):
+    resposta = cliente_com_guarda_ligado.get('/api/health?desafio=' + DESAFIO)
+    assert 'token-do-app' not in resposta.get_data(as_text=True)
+
+
+@pytest.mark.parametrize('desafio', [
+    '',                      # vazio
+    'ab' * 8,                # curto demais para nao se repetir
+    'AB' * 32,               # fora do alfabeto combinado
+    'zz' * 32,
+    'ab' * 100,              # longo demais
+    'ab' * 16 + '&x=1',
+])
+def test_desafio_malformado_nao_recebe_prova(cliente_com_guarda_ligado, desafio):
+    from urllib.parse import quote
+    corpo = cliente_com_guarda_ligado.get('/api/health?desafio=' + quote(desafio)).get_json()
+    assert corpo['prova'] == ''
+
+
+def test_sem_desafio_a_sonda_nao_inclui_prova(cliente_com_guarda_ligado):
+    assert 'prova' not in cliente_com_guarda_ligado.get('/api/health').get_json()
+
+
+def test_prova_existe_mesmo_com_a_exigencia_desligada(desligada, monkeypatch):
+    """
+    Desligar a exigencia e uma facilidade de desenvolvimento; nao pode virar
+    um jeito de qualquer processo se passar pelo backend. A janela so adota
+    quem prova conhecer o token, esteja a exigencia ligada ou nao.
+    """
+    monkeypatch.setenv(capacidade.VARIAVEL_DE_AMBIENTE, 'token-de-dev')
+    assert capacidade.token_esperado() == ''
+    assert capacidade.prova_do_desafio(DESAFIO) == _prova_esperada('token-de-dev', DESAFIO)
 
 
 def test_cabecalho_aceito_semeia_o_cookie(cliente_com_guarda_ligado):

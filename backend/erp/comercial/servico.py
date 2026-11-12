@@ -21,7 +21,7 @@ import sqlite3
 
 import database
 import validators
-from erp.comercial import estados, repositorio
+from erp.comercial import estados, estoque, repositorio
 from erp.core import dinheiro
 from erp.core.auditoria import registrar_evento
 
@@ -167,6 +167,14 @@ def inativar_produto(produto_id: int) -> None:
 # =============================================================================
 def _hoje() -> str:
     return datetime.date.today().isoformat()
+
+
+def _data_brasileira(iso: str) -> str:
+    """AAAA-MM-DD -> DD/MM/AAAA, para mensagem que o operador le."""
+    partes = str(iso or "")[:10].split("-")
+    if len(partes) != 3:
+        return iso or ""
+    return f"{partes[2]}/{partes[1]}/{partes[0]}"
 
 
 def _exigir_pedido(conexao, pedido_id: int) -> dict:
@@ -422,6 +430,7 @@ def criar_pedido(dados: dict) -> dict:
 
 def atualizar_pedido(pedido_id: int, dados: dict) -> dict:
     with database.conectar() as conexao:
+        conexao.execute("BEGIN IMMEDIATE")
         pedido = _exigir_pedido(conexao, pedido_id)
         _exigir_editavel(pedido)
         campos = _validar_cabecalho(conexao, dados)
@@ -447,6 +456,7 @@ def _validar_data_aluguel(data_str: str, nome_campo: str) -> str:
 
 def adicionar_item(pedido_id: int, dados: dict) -> dict:
     with database.conectar() as conexao:
+        conexao.execute("BEGIN IMMEDIATE")
         pedido = _exigir_pedido(conexao, pedido_id)
         _exigir_editavel(pedido)
 
@@ -493,6 +503,33 @@ def adicionar_item(pedido_id: int, dados: dict) -> dict:
         # Sem informar, herda a do catalogo.
         descricao = (dados.get("descricao") or "").strip() or produto["descricao"]
 
+        # Disponibilidade no periodo. Vale so para produto com razao
+        # configurado (total > 0): total zero e o catalogo puro, e conferir
+        # reserva nele recusaria item de produto que nunca prometeu controle.
+        #
+        # E conferencia, nao reserva: o item entra em pedido editavel, que
+        # ainda nao consome estoque. Quem reserva e a aprovacao -- mas o
+        # operador precisa ouvir "nao tem" ANTES de montar o pedido inteiro
+        # em cima de uma poltrona que nao existe.
+        if estoque.total_do_produto(conexao, produto_id) > 0:
+            janela = estoque.situacao_do_produto(
+                conexao, produto_id,
+                inicio=data_inicio or _hoje(),
+                fim=data_fim or estoque._SEM_FIM,
+            )
+            if janela["disponivel"] < quantidade:
+                levantar = (
+                    f"Produto {produto['codigo']}: restam {janela['disponivel']} "
+                    f"unidade(s) disponivel(is) no periodo "
+                )
+                levantar += (
+                    f"de {_data_brasileira(data_inicio or _hoje())}"
+                    if not data_fim else
+                    f"de {_data_brasileira(data_inicio)} a {_data_brasileira(data_fim)}"
+                )
+                levantar += f"; o item pede {quantidade}."
+                raise ConflitoDeSituacao(levantar)
+
         repositorio.inserir_item(conexao, pedido_id, {
             "produto_id": produto_id,
             "descricao": descricao[:300],
@@ -512,6 +549,7 @@ def adicionar_item(pedido_id: int, dados: dict) -> dict:
 
 def remover_item(pedido_id: int, item_id: int) -> dict:
     with database.conectar() as conexao:
+        conexao.execute("BEGIN IMMEDIATE")
         pedido = _exigir_pedido(conexao, pedido_id)
         _exigir_editavel(pedido)
         if repositorio.remover_item(conexao, pedido_id, item_id) == 0:
@@ -564,7 +602,15 @@ def abrir_pedido(pedido_id: int) -> dict:
 
 def aprovar_pedido(pedido_id: int) -> dict:
     with database.conectar() as conexao:
+        # A validação de disponibilidade e a mudança de estado precisam ser
+        # serializadas: sem o lock, duas aprovações simultâneas podem validar
+        # o mesmo saldo e reservar as últimas unidades ao mesmo tempo.
+        conexao.execute("BEGIN IMMEDIATE")
         pedido = _exigir_pedido(conexao, pedido_id)
+        try:
+            estoque.validar_aprovacao_pedido(conexao, pedido_id)
+        except estoque.EstoqueInvalido as erro:
+            raise ConflitoDeSituacao(str(erro)) from erro
         atualizado = _transicionar(conexao, pedido, estados.APROVADO)
         registrar_evento(conexao, acao="comercial.pedido.aprovado", entidade="pedido",
                          entidade_id=pedido_id, valores_anteriores=pedido,
@@ -684,3 +730,96 @@ def faturar_pedido(pedido_id: int, dados: dict) -> dict:
     # em dois endpoints e a inconsistencia que a tela paga depois.
     resultado["parcelas"] = [_parcela_para_tela(p) for p in emitidas]
     return resultado
+
+
+# =============================================================================
+# Estoque
+# =============================================================================
+# O razao e a leitura vivem em `erp/comercial/estoque.py`; daqui para baixo e
+# a camada de aplicacao: traducao de erro de dominio, auditoria e a forma do
+# payload que a API devolve.
+def _validar_periodo_de_estoque(inicio: str, fim: str) -> tuple[str, str]:
+    """
+    Aceita as duas datas ou nenhuma; devolve o periodo efetivo da consulta.
+
+    O padrao sem datas e trinta dias a partir de hoje: e a janela em que uma
+    locacao nasce na pratica -- a pergunta "o que sobra daqui a seis meses"
+    existe, e quem quiser fazela informa as datas.
+    """
+    if bool(inicio) != bool(fim):
+        raise ErroDeNegocio("Informe as datas de inicio e fim, ou nenhuma.")
+    if inicio:
+        if not validators.data_valida(inicio) or not validators.data_valida(fim):
+            raise ErroDeNegocio("Datas do periodo invalidas. Use AAAA-MM-DD.")
+        if fim < inicio:
+            raise ErroDeNegocio("O fim do periodo nao pode vir antes do inicio.")
+        return inicio, fim
+    hoje = datetime.date.today()
+    return hoje.isoformat(), (hoje + datetime.timedelta(days=30)).isoformat()
+
+
+def _exigir_produto_ativo(conexao, produto_id: int) -> dict:
+    produto = repositorio.obter_produto(conexao, produto_id)
+    if produto is None or not produto["ativo"]:
+        raise NaoEncontrado("Produto nao encontrado.")
+    return produto
+
+
+def obter_estoque(produto_id: int, inicio: str = "", fim: str = "") -> dict:
+    """Retrato do estoque do produto no periodo, com o razao dele."""
+    periodo = _validar_periodo_de_estoque(inicio, fim)
+    with database.conectar() as conexao:
+        produto = _exigir_produto_ativo(conexao, produto_id)
+        situacao = estoque.situacao_do_produto(conexao, produto_id, *periodo)
+        situacao["movimentos"] = estoque.movimentos_do_produto(conexao, produto_id)
+        situacao["produto"] = {
+            "id": produto["id"],
+            "codigo": produto["codigo"],
+            "descricao": produto["descricao"],
+            "unidade": produto["unidade"],
+        }
+    return situacao
+
+
+def resumo_de_estoque() -> list[dict]:
+    """Um retrato por produto ativo, para a lista da aba Produtos."""
+    with database.conectar() as conexao:
+        return estoque.resumo(conexao)
+
+
+def lancar_movimento_de_estoque(produto_id: int, dados: dict) -> dict:
+    """
+    Grava um movimento no razao e devolve o retrato atualizado.
+
+    Aprovar um pedido que a checagem de disponibilidade deixou passar e o
+    unico caminho que faz `disponivel` andar para baixo sem movimento no
+    razao -- e por isso o retrato devolvido aqui e o mesmo da consulta: a
+    tela nao precisa de segunda chamada para conferir o que acabou de
+    lancar.
+    """
+    with database.conectar() as conexao:
+        conexao.execute("BEGIN IMMEDIATE")
+        produto = _exigir_produto_ativo(conexao, produto_id)
+        try:
+            movimento = estoque.lancar_movimento(conexao, produto_id, dados)
+        except estoque.EstoqueInvalido as erro:
+            raise ErroDeNegocio(str(erro)) from erro
+
+        registrar_evento(
+            conexao, acao="comercial.estoque.movimento", entidade="produto",
+            entidade_id=produto_id,
+            valores_novos={
+                **movimento,
+                "produto": produto["codigo"],
+                "total_apos": estoque.total_do_produto(conexao, produto_id),
+            },
+        )
+        situacao = estoque.situacao_do_produto(conexao, produto_id)
+        situacao["movimentos"] = estoque.movimentos_do_produto(conexao, produto_id)
+        situacao["produto"] = {
+            "id": produto["id"],
+            "codigo": produto["codigo"],
+            "descricao": produto["descricao"],
+            "unidade": produto["unidade"],
+        }
+    return situacao

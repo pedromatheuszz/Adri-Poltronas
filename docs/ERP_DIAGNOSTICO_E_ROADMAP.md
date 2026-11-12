@@ -4,6 +4,15 @@
 **Escopo:** todo o repositorio, schema SQLite instalado, APIs, interfaces, testes, build e CI.  
 **Decisao principal:** evoluir por um **monolito modular**, mantendo o aplicativo funcional e os contratos atuais. Nao ha justificativa para reescrever ou criar microsservicos neste momento.
 
+> **Nota de envelhecimento (1.5.2, 15/09/2026):** este documento e um retrato da
+> auditoria, e partes dele ja nao descrevem o presente. O catalogo de produtos e
+> o pedido de venda chegaram na 1.5.0; a 1.5.2 acrescentou o **estoque como
+> ledger** (`estoque_movimentos`, com reserva derivada dos pedidos aprovados), o
+> **relatorio financeiro** de parcelas (aba Relatorios) e a **assinatura de
+> codigo** com comando pronto (`build.py assinar`). O estado atual de verdade e o
+> CHANGELOG e o README; leia o resto como o diagnostico de um momento, nao como
+> inventario.
+
 ## Resumo executivo
 
 O produto em uso e um aplicativo desktop Electron que inicia um backend Flask em loopback. O Flask serve uma interface HTML/CSS/JavaScript e concentra APIs, integracoes e acesso SQLite. Existem ainda duas interfaces alternativas: uma C++/Qt, parcial, e uma C#/.NET 8 com Avalonia, mais estruturada e com boa cobertura, mas que escreve diretamente no mesmo SQLite. A coexistencia de tres pilhas e o maior risco estrutural do repositorio.

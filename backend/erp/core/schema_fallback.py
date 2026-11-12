@@ -51,6 +51,10 @@ def _criar_indices(conexao: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS ix_operacoes_idempotentes_criado_em "
         "ON operacoes_idempotentes(criado_em)",
         "CREATE INDEX IF NOT EXISTS ix_auditoria_usuario_criado_em ON auditoria_eventos(usuario_id, criado_em)",
+        "CREATE INDEX IF NOT EXISTS ix_estoque_movimentos_produto_id "
+        "ON estoque_movimentos(produto_id)",
+        "CREATE INDEX IF NOT EXISTS ix_estoque_movimentos_criado_em "
+        "ON estoque_movimentos(criado_em)",
     ]
     for comando in comandos:
         conexao.execute(comando)
@@ -275,6 +279,22 @@ def garantir_schema_fallback(conexao: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS ix_usuarios_username ON usuarios(username);
         CREATE INDEX IF NOT EXISTS ix_usuarios_email ON usuarios(email);
+
+        -- Livro-razao do estoque: o total de cada produto e a SOMA dos
+        -- movimentos, nunca uma coluna a parte. A migration correspondente e
+        -- e8b3f7a2c1d4; o formato aqui precisa mantar o dela.
+        CREATE TABLE IF NOT EXISTS estoque_movimentos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            produto_id INTEGER NOT NULL,
+            delta INTEGER NOT NULL,
+            tipo TEXT NOT NULL DEFAULT 'ajuste',
+            motivo TEXT NOT NULL DEFAULT '',
+            criado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+            CONSTRAINT fk_estoque_movimentos_produto_id_produtos
+                FOREIGN KEY (produto_id) REFERENCES produtos(id) ON DELETE RESTRICT,
+            CHECK (delta != 0),
+            CHECK (tipo IN ('aquisicao', 'baixa', 'ajuste'))
+        );
         """
     )
 
@@ -300,6 +320,7 @@ def garantir_schema_fallback(conexao: sqlite3.Connection) -> None:
         "licenca_remota_expira_em": "TEXT NOT NULL DEFAULT ''",
         "licenca_remota_verificada_em": "TEXT NOT NULL DEFAULT ''",
         "licenca_remota_offline_ate": "TEXT NOT NULL DEFAULT ''",
+        "licenca_remota_prova": "TEXT NOT NULL DEFAULT ''",
     }
     for coluna, declaracao in colunas_usuarios.items():
         _garantir_coluna(conexao, "usuarios", coluna, declaracao)

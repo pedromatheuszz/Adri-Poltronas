@@ -1,5 +1,4 @@
 """Testes unitários do cliente da API central de licenças (licenca_remota.py)."""
-import json
 import os
 import sys
 from datetime import datetime, timedelta

@@ -2,11 +2,17 @@
 """Blueprint de autenticação local (username/senha)."""
 import logging
 import hmac
+import ipaddress
 import sqlite3
+import threading
+import time
 from flask import Blueprint, jsonify, request
+from urllib.request import Request, urlopen
 
 import database
 import licenca
+import licenca_remota
+import segredos
 import security
 from limites import limiter
 
@@ -15,6 +21,13 @@ log = logging.getLogger("adri.auth_local")
 auth_local_bp = Blueprint('auth_local', __name__, url_prefix='/api/auth/local')
 DURACAO_SESSAO_LOCAL_SEGUNDOS = 60 * 60 * 24 * 30
 TAMANHO_MAXIMO_EMAIL = 254
+CHAVE_ATIVACAO_DESENVOLVEDOR = 'ADRI_LICENCA_ADMIN_TOKEN'
+CHAVE_DISPOSITIVO_DESENVOLVEDOR = 'ADRI_DESENVOLVEDOR_DISPOSITIVO'
+CHAVE_IPS_DESENVOLVEDOR = 'ADRI_DESENVOLVEDOR_IPS'
+_CACHE_DISPOSITIVO_TTL = 30
+_dispositivo_lock = threading.Lock()
+_dispositivo_validado_ate = 0.0
+_dispositivo_validado = False
 
 
 def _dados_json() -> dict | None:
@@ -39,6 +52,137 @@ def _email_valido(email: str) -> bool:
     return isinstance(email, str) and len(email) <= TAMANHO_MAXIMO_EMAIL
 
 
+def _ip_publico_atual() -> str:
+    """Consulta o IP público por HTTPS; o servidor local só vê loopback."""
+    for url in ('https://api.ipify.org', 'https://api64.ipify.org'):
+        try:
+            req = Request(url, headers={'Accept': 'text/plain'})  # noqa: S310
+            with urlopen(req, timeout=5) as resposta:  # noqa: S310
+                ip = ipaddress.ip_address(resposta.read(80).decode('ascii').strip())
+                return str(ip)
+        except (OSError, UnicodeError, ValueError):
+            continue
+    return ''
+
+
+def _autorizar_dispositivo_desenvolvedor(
+    chave_ativacao: str = '', ativacao_validada: bool = False,
+) -> bool:
+    """Exige a identidade deste Windows e um IP público já autorizado.
+
+    A lista de IPs é mantida no cofre DPAPI. Um IP novo só é associado depois
+    que a identidade Windows confere e a API central valida a chave privada do
+    fornecedor; um IP compartilhado sozinho nunca concede acesso.
+    """
+    global _dispositivo_validado_ate, _dispositivo_validado
+    agora = time.monotonic()
+    if not chave_ativacao and agora < _dispositivo_validado_ate:
+        return _dispositivo_validado
+
+    with _dispositivo_lock:
+        agora = time.monotonic()
+        if not chave_ativacao and agora < _dispositivo_validado_ate:
+            return _dispositivo_validado
+
+        ip_atual = _ip_publico_atual()
+        if not ip_atual:
+            _dispositivo_validado = False
+            _dispositivo_validado_ate = agora + 5
+            log.warning('[AUTH_LOCAL] IP público do dispositivo desenvolvedor não pôde ser confirmado.')
+            return False
+
+        # Estes valores são lidos exclusivamente do cofre DPAPI. Variáveis de
+        # ambiente não podem simular um vínculo existente nem habilitar o setup.
+        identidade = licenca_remota.identidade_instalacao()
+        if not identidade:
+            _dispositivo_validado = False
+            _dispositivo_validado_ate = agora + 5
+            log.warning('[AUTH_LOCAL] Identidade estável deste computador indisponível.')
+            return False
+
+        marcador = segredos.obter_do_cofre(CHAVE_DISPOSITIVO_DESENVOLVEDOR).strip()
+        alterado = False
+        validacao_central_confirmada = ativacao_validada
+
+        ips = [parte.strip() for parte in
+               segredos.obter_do_cofre(CHAVE_IPS_DESENVOLVEDOR).split(',') if parte.strip()]
+        ips_validos = []
+        for parte in ips:
+            try:
+                ips_validos.append(str(ipaddress.ip_address(parte)))
+            except ValueError:
+                alterado = True
+
+        if not marcador:
+            # Só a chave administrativa real do serviço central pode vincular
+            # uma instalação nova. A central está fixada no código para evitar
+            # que um .env redirecione essa credencial a outro host.
+            apresentado = (chave_ativacao.strip() or
+                           segredos.obter_do_cofre(CHAVE_ATIVACAO_DESENVOLVEDOR).strip())
+            if len(apresentado) < 40:
+                _dispositivo_validado = False
+                _dispositivo_validado_ate = agora + 5
+                return False
+            if not validacao_central_confirmada:
+                validacao_central_confirmada = licenca_remota.validar_token_admin(apresentado)
+            if not validacao_central_confirmada:
+                _dispositivo_validado = False
+                _dispositivo_validado_ate = agora + 5
+                return False
+            # O hash da MachineGuid (ou a identidade DPAPI alternativa) fica
+            # cifrado no cofre. Isso evita que um perfil Windows com DPAPI
+            # itinerante leve o acesso de desenvolvedor para outro computador.
+            marcador = identidade
+            alterado = True
+        elif not hmac.compare_digest(marcador, identidade):
+            # Migra o marcador aleatório da versão anterior sem bloquear o
+            # computador já autorizado: exige IP previamente registrado e
+            # valida de novo a chave do fornecedor antes de gravar a identidade
+            # Windows neste formato.
+            token_admin = (
+                chave_ativacao.strip()
+                or segredos.obter_do_cofre(CHAVE_ATIVACAO_DESENVOLVEDOR).strip()
+            )
+            if (ip_atual not in ips_validos or len(token_admin) < 40
+                    or not licenca_remota.validar_token_admin(token_admin)):
+                _dispositivo_validado = False
+                _dispositivo_validado_ate = agora + 5
+                log.warning('[AUTH_LOCAL] Marcador legado recusado fora do IP autorizado ou sem chave válida.')
+                return False
+            marcador = identidade
+            alterado = True
+            validacao_central_confirmada = True
+
+        if ip_atual not in ips_validos:
+            # IP dinâmico novo precisa revalidar a chave privada no serviço
+            # central. A identidade Windows já foi conferida acima; isso evita
+            # que um IP compartilhado ou uma cópia do banco autorize outro PC.
+            token_admin = (
+                chave_ativacao.strip()
+                or segredos.obter_do_cofre(CHAVE_ATIVACAO_DESENVOLVEDOR).strip()
+            )
+            if (not validacao_central_confirmada
+                    and not licenca_remota.validar_token_admin(token_admin)):
+                _dispositivo_validado = False
+                _dispositivo_validado_ate = agora + 5
+                log.warning('[AUTH_LOCAL] IP novo recusado sem validação da chave privada do fornecedor.')
+                return False
+            ips_validos = (ips_validos + [ip_atual])[-8:]
+            alterado = True
+
+        if alterado and not segredos.gravar({
+            CHAVE_DISPOSITIVO_DESENVOLVEDOR: marcador,
+            CHAVE_IPS_DESENVOLVEDOR: ','.join(ips_validos),
+        }):
+            _dispositivo_validado = False
+            _dispositivo_validado_ate = agora + 5
+            return False
+
+        _dispositivo_validado = True
+        _dispositivo_validado_ate = agora + _CACHE_DISPOSITIVO_TTL
+        return True
+
+
 def _sessao_local_valida() -> dict | None:
     """Exige o token de sessão guardado em cookie HttpOnly e no banco."""
     sessao = database.obter_sessao_local()
@@ -47,6 +191,9 @@ def _sessao_local_valida() -> dict | None:
     if cookie and token and hmac.compare_digest(cookie, token):
         usuario = database.obter_usuario_por_id(sessao['user_id'])
         if usuario and usuario['ativo']:
+            if (usuario['role'] == 'desenvolvedor'
+                    and not _autorizar_dispositivo_desenvolvedor()):
+                return None
             return sessao
         database.excluir_sessao_local()
     return None
@@ -97,6 +244,13 @@ def local_login():
         log.warning("[AUTH_LOCAL] Falha de autenticação local.")
         return jsonify({"erro": "Usuário ou senha inválidos."}), 401
 
+    if (usuario['role'] == 'desenvolvedor'
+            and not _autorizar_dispositivo_desenvolvedor()):
+        log.warning("[AUTH_LOCAL] Login de desenvolvedor recusado fora do dispositivo autorizado.")
+        return jsonify({
+            "erro": "O acesso de desenvolvedor exige o computador autorizado e conexão com a internet."
+        }), 403
+
     # Cria sessão local (usa a mesma tabela sessao, mas com tipo 'local')
     token_local = security.gerar_token_seguro(32)
     database.salvar_sessao_local(token_local, usuario['id'], usuario['username'], usuario['role'])
@@ -119,10 +273,16 @@ def local_status():
     """Verifica se existem usuários cadastrados no sistema."""
     tem_usuarios = database.existe_algum_usuario()
     tem_desenvolvedor = database.existe_desenvolvedor()
+    ativacao_configurada = len(
+        segredos.obter_do_cofre(CHAVE_ATIVACAO_DESENVOLVEDOR).strip()
+    ) >= 40
     return jsonify({
         "tem_usuarios": tem_usuarios,
         "tem_desenvolvedor": tem_desenvolvedor,
-        "setup_required": not tem_usuarios and not tem_desenvolvedor,
+        # Instalações de clientes começam com cadastro de usuário comum. Só
+        # a máquina do fornecedor, com credencial privada, oferece bootstrap
+        # de uma conta desenvolvedora.
+        "setup_required": not tem_usuarios and ativacao_configurada,
     }), 200
 
 
@@ -136,7 +296,9 @@ def local_configurar_desenvolvedor_inicial():
     username_recebido = _texto(dados, 'username')
     senha = _texto(dados, 'senha')
     email_recebido = _texto(dados, 'email')
-    if username_recebido is None or senha is None or email_recebido is None:
+    chave_ativacao = _texto(dados, 'chave_ativacao')
+    if any(valor is None for valor in
+           (username_recebido, senha, email_recebido, chave_ativacao)):
         return jsonify({"erro": "Os campos devem ser texto."}), 400
     username = username_recebido.strip()
     email = email_recebido.strip()
@@ -149,6 +311,14 @@ def local_configurar_desenvolvedor_inicial():
         return jsonify({"erro": "Use uma senha com pelo menos 12 caracteres e até 72 bytes em UTF-8."}), 400
     if not _email_valido(email):
         return jsonify({"erro": "O e-mail deve ter até 254 caracteres."}), 400
+
+    if not licenca_remota.validar_token_admin(chave_ativacao.strip()):
+        return jsonify({"erro": "Chave de ativação do fornecedor inválida."}), 403
+    if not _autorizar_dispositivo_desenvolvedor(
+            chave_ativacao, ativacao_validada=True):
+        return jsonify({
+            "erro": "Não foi possível autorizar este computador como dispositivo desenvolvedor."
+        }), 403
 
     try:
         user_id = database.criar_desenvolvedor_inicial(username, senha, email)
@@ -198,8 +368,6 @@ def local_register():
         return jsonify({"erro": "Use uma senha com pelo menos 12 caracteres e até 72 bytes em UTF-8."}), 400
     if not _email_valido(email):
         return jsonify({"erro": "O e-mail deve ter até 254 caracteres."}), 400
-    if not database.existe_desenvolvedor():
-        return jsonify({"erro": "Configure a conta de desenvolvedor antes de criar usuários."}), 409
     if role not in ('desenvolvedor', 'administrador', 'usuario'):
         return jsonify({"erro": "Role inválida."}), 400
 

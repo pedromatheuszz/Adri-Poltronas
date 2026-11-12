@@ -29,9 +29,11 @@ A tabela `clientes_asaas`, que guardava o identificador do cliente no gateway
 de cobrança, foi apagada do banco pela migração `e5c94a17b3d8` junto com a
 integração, na versão 1.5.0. Ela não existe mais em instalação nenhuma.
 
-**IP não é guardado em texto.** A auditoria registra um hash derivado do IP com
-o segredo da instalação (`anonimizar_ip`), o que permite correlacionar sessões
-sem preservar o endereço.
+**IPs são minimizados e protegidos.** A auditoria local guarda um hash derivado
+do IP (`anonimizar_ip`). A API central também conserva somente um HMAC do IP
+para limitar testes. No computador do desenvolvedor, até oito IPs públicos
+recentes ficam cifrados por DPAPI no cofre local para validar o acesso de
+desenvolvedor; um IP novo só é associado após validar a chave do fornecedor.
 
 ## Onde os dados ficam
 
@@ -59,7 +61,7 @@ de licença também sincroniza automaticamente enquanto o aplicativo está abert
 | **Nominatim (OpenStreetMap)** | Rua, bairro, cidade, CEP | Depois que o usuário autoriza o mapa para sua conta |
 | **Google Gemini** | Cidade e CEP | Ao pedir sugestão de bairro (opcional) |
 | **Mercado Pago** | Valor e referência da instalação — **nenhum dado de cliente** | Ao pagar a licença de uso do aplicativo |
-| **API central de licenças** | ID aleatório da conta, nome de usuário, e-mail e estado do teste/licença | Ao entrar no sistema e, enquanto aberto, a cada 30 segundos |
+| **API central de licenças** | ID aleatório da conta, hash da identidade da instalação, nome de usuário, e-mail, estado do teste/licença e HMAC do IP de origem | Ao entrar no sistema e, enquanto aberto, a cada 30 segundos |
 | **Arquivo local** | O que o operador escolher | Exportar CSV/XLSX, backup |
 
 Nenhum dado de cliente vai ao Mercado Pago: a cobrança ali é da licença do
@@ -116,9 +118,10 @@ exclusão precisa ser tratado manualmente, incluindo as cópias de backup.
 
 O software cuida de parte; o resto depende de como a máquina é usada.
 
-- **Cifre o disco.** O banco e os backups não são cifrados. Sem BitLocker (ou
-  equivalente), qualquer pessoa com acesso físico ao computador lê a base
-  inteira.
+- **Cifre o disco.** O SQLite não usa SQLCipher. O app bloqueia a inicialização
+  quando o Windows confirma que BitLocker está desligado; se o sistema não
+  consegue consultar o estado, a abertura continua e o risco permanece. As
+  cópias automáticas são cifradas, mas exportações manuais podem ficar em claro.
 - **Backups saem da máquina em claro.** O arquivo baixado por "Backup do banco"
   e a cópia em `ADRI_BACKUP_EXTRA` contêm todos os dados. Guarde em local
   controlado.

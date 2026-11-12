@@ -20,6 +20,7 @@ log = logging.getLogger("adri.comercial")
 
 produtos_bp = Blueprint("produtos", __name__, url_prefix="/api/produtos")
 pedidos_bp = Blueprint("pedidos", __name__, url_prefix="/api/pedidos")
+estoque_bp = Blueprint("estoque", __name__, url_prefix="/api/estoque")
 
 
 def traduzir_erros(funcao):
@@ -80,6 +81,36 @@ def atualizar_produto(produto_id):
 def inativar_produto(produto_id):
     servico.inativar_produto(produto_id)
     return jsonify({"mensagem": "Produto inativado."})
+
+
+# =============================================================================
+# Estoque
+# =============================================================================
+# O razao existe para responder "quantas existem"; a reserva e derivada dos
+# pedidos aprovados. Ver erp/comercial/estoque.py para o desenho.
+@estoque_bp.route("/resumo", methods=["GET"])
+@exigir_permissao("produtos.ver")
+def resumo_de_estoque():
+    """Total, locado e disponivel por produto ativo, no dia de hoje."""
+    return jsonify(servico.resumo_de_estoque())
+
+
+@produtos_bp.route("/<int:produto_id>/estoque", methods=["GET"])
+@exigir_permissao("produtos.ver")
+@traduzir_erros
+def obter_estoque(produto_id):
+    return jsonify(servico.obter_estoque(
+        produto_id,
+        inicio=request.args.get("inicio", ""),
+        fim=request.args.get("fim", ""),
+    ))
+
+
+@produtos_bp.route("/<int:produto_id>/estoque/movimentos", methods=["POST"])
+@exigir_permissao("produtos.editar")
+@traduzir_erros
+def lancar_movimento_de_estoque(produto_id):
+    return jsonify(servico.lancar_movimento_de_estoque(produto_id, _corpo())), 201
 
 
 # =============================================================================

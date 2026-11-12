@@ -254,10 +254,16 @@ def cliente_com_guardas(monkeypatch, tmp_path):
     monkeypatch.setenv('ADRI_DB_PATH', banco)
     monkeypatch.setenv(capacidade.VARIAVEL_DE_AMBIENTE, TOKEN_DE_CAPACIDADE)
     monkeypatch.delenv(capacidade.VARIAVEL_DE_DESLIGAMENTO, raising=False)
+    # Estes casos exercitam a licença local por usuário. A URL eventualmente
+    # configurada no .env do desenvolvedor não pode enviar o teste à central.
+    monkeypatch.setenv('ADRI_LICENCA_API_URL', '')
 
     import app as modulo_app
+    import licenca_remota
 
     monkeypatch.setattr(database, 'DB_PATH', banco)
+    # O fallback local só deve ser testado sem depender da URL padrão remota.
+    monkeypatch.setattr(licenca_remota, 'api_configurada', lambda: False)
     database.criar_tabela()
     user_id = database.criar_usuario('operador', 'senha-de-teste', 'usuario', 'operador@exemplo.local')
     token = 'token-local-licenca'
