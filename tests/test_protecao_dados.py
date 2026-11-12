@@ -81,7 +81,7 @@ def _consulta(status):
 
 
 def test_bitlocker_protegido_e_desprotegido_sao_lidos(tmp_path, monkeypatch):
-    monkeypatch.setattr(os, "name", "nt")
+    monkeypatch.setattr(protecao_dados, "_e_windows", lambda: True)
     caminho = str(tmp_path / "base.db")
 
     assert protecao_dados.volume_com_bitlocker(caminho, consultar=_consulta(1)) is True
@@ -93,7 +93,7 @@ def test_bitlocker_indeterminavel_e_none_nao_aviso(tmp_path, monkeypatch):
     Consulta que falhou, cmdlet ausente, saida ilegivel, status desconhecido:
     tudo e "nao sei", e "nao sei" nao gera aviso nenhum.
     """
-    monkeypatch.setattr(os, "name", "nt")
+    monkeypatch.setattr(protecao_dados, "_e_windows", lambda: True)
     caminho = str(tmp_path / "base.db")
 
     assert protecao_dados.volume_com_bitlocker(caminho, consultar=_consulta(None)) is None
@@ -102,7 +102,9 @@ def test_bitlocker_indeterminavel_e_none_nao_aviso(tmp_path, monkeypatch):
 
 
 def test_bitlocker_fora_do_windows_e_none(tmp_path, monkeypatch):
-    monkeypatch.setattr(os, "name", "posix")
+    # Substitui a pergunta, e nao `os.name`: trocar o valor global quebra o
+    # `pathlib` (e com ele o proprio pytest) no Python 3.10 e 3.11.
+    monkeypatch.setattr(protecao_dados, "_e_windows", lambda: False)
     assert protecao_dados.volume_com_bitlocker(str(tmp_path / "base.db")) is None
 
 

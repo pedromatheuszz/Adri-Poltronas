@@ -136,6 +136,20 @@ def _consultar_bitlocker(mount_point: str) -> object:
     return resultado.stdout.decode("utf-8", errors="replace")
 
 
+def _e_windows() -> bool:
+    """
+    Este processo roda no Windows?
+
+    Existe como funcao para os testes terem o que substituir. Trocar `os.name`
+    em si, que era o que eles faziam, muda o mundo para todo o processo: no
+    Python 3.10 e 3.11 o `pathlib` consulta esse valor a cada `Path(...)`, e o
+    proprio pytest quebrava ao relatar o teste ("cannot instantiate
+    'PosixPath' on your system"). No 3.12 o `pathlib` mudou e o problema
+    ficava escondido -- a suite passava numa versao e caia nas outras duas.
+    """
+    return os.name == "nt"
+
+
 def volume_com_bitlocker(caminho: str, consultar=_consultar_bitlocker) -> bool | None:
     """
     True/False quando consegue provar; None quando nao ha como saber.
@@ -145,7 +159,7 @@ def volume_com_bitlocker(caminho: str, consultar=_consultar_bitlocker) -> bool |
     None nao gera aviso: acusar quem nao se pode examinar e o caminho mais
     curto para que o proximo aviso verdadeiro seja ignorado.
     """
-    if not os.name == "nt" or not caminho:
+    if not _e_windows() or not caminho:
         return None
 
     unidade, _ = os.path.splitdrive(os.path.abspath(caminho))

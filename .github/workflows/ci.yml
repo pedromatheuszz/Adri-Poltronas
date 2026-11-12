@@ -559,20 +559,32 @@ jobs:
           if ($semSessao -ne 401) { throw "com token e sem sessao: esperava 401, veio $semSessao" }
           Write-Host 'Com token e sem sessao: 401, como esperado'
 
-          # Semeia a sessao Microsoft no banco do app instalado, que e o mesmo
-          # que tests/test_e2e_interface.py faz e pelo mesmo motivo: a
-          # autenticacao deste ERP e o OAuth da Microsoft (limitacao conhecida,
-          # registrada no CONTRIBUTING.md), entao sem uma sessao gravada nao ha
-          # como exercitar a leitura -- nem aqui, nem no uso real.
+          # Semeia uma conta LOCAL e a sessao dela no banco do app instalado.
           #
-          # O `cifrar` do repositorio nao esta congelado, entao grava com
-          # prefixo DPAPI1:. O backend instalado, esse sim congelado, decifra
-          # pelo mesmo caminho -- mesmo usuario, mesma maquina.
-          python -c "import os,sys; sys.path.insert(0,'backend'); import database; database.DB_PATH=os.environ['ADRI_DB_PATH']; database.salvar_sessao('token-de-fumaca','operador@exemplo.local')"
-          if ($LASTEXITCODE -ne 0) { throw 'nao foi possivel semear a sessao no banco do app instalado' }
+          # Ate a 1.5.1 este passo semeava a sessao Microsoft e lia
+          # /api/clientes. Desde que o acesso passou a exigir login local, a
+          # sessao Microsoft nao abre mais nada e a leitura devolvia 401 --
+          # o job reprovava por um teste que ficou para tras, nao pelo
+          # instalador.
+          #
+          # A rota conferida e /api/auth/local/me, e nao /api/clientes, de
+          # proposito: as rotas de negocio passam pelo guarda de licenca, que
+          # sincroniza com a API central pela internet. Um teste de fumaca do
+          # instalador nao pode depender do servico de producao, nem registrar
+          # la uma conta a cada execucao. `me` prova o que interessa aqui: o
+          # backend CONGELADO le o banco, decifra a sessao gravada pelo
+          # `cifrar` do repositorio (DPAPI, mesmo usuario, mesma maquina) e
+          # reconhece o cookie.
+          python -c "import os,sys; sys.path.insert(0,'backend'); import database; database.DB_PATH=os.environ['ADRI_DB_PATH']; uid=database.criar_usuario('operador','senha-de-fumaca-comprida','usuario'); database.salvar_sessao_local('sessao-de-fumaca',uid,'operador','usuario')"
+          if ($LASTEXITCODE -ne 0) { throw 'nao foi possivel semear a conta local no banco do app instalado' }
 
-          $clientes = Invoke-RestMethod -Uri 'http://127.0.0.1:5051/api/clientes' -TimeoutSec 5 -Headers $comToken
-          Write-Host "Com token e sessao: $(@($clientes).Count) cliente(s)"
+          $sessao = [Microsoft.PowerShell.Commands.WebRequestSession]::new()
+          $sessao.Cookies.Add([System.Net.Cookie]::new('adri_sessao_local', 'sessao-de-fumaca', '/', '127.0.0.1'))
+
+          $eu = Invoke-RestMethod -Uri 'http://127.0.0.1:5051/api/auth/local/me' -TimeoutSec 5 -Headers $comToken -WebSession $sessao
+          if (-not $eu.logado) { throw 'com token e sessao local: o backend instalado nao reconheceu a sessao' }
+          if ($eu.usuario.username -ne 'operador') { throw "sessao de outra conta: $($eu.usuario.username)" }
+          Write-Host "Com token e sessao local: conta '$($eu.usuario.username)' reconhecida"
         }
         finally {
           if ($servidor -and -not $servidor.HasExited) { Stop-Process -Id $servidor.Id -Force }
