@@ -7,9 +7,13 @@ from pathlib import Path
 def test_chave_render_da_raiz_prevalece_sobre_copia_legada(monkeypatch):
     raiz = Path(__file__).resolve().parents[1]
     caminho = raiz / "render-api" / "config.py"
-    monkeypatch.setenv("KEY_RENDER", "chave-canonica-ficticia-comprida-123456")
-    monkeypatch.setenv("RENDER_API_KEY", "chave-legada-ficticia-comprida-654321")
-    monkeypatch.setenv("JWT_SECRET", "segredo-ficticio-de-teste-com-mais-de-32-caracteres")
+    # Valores montados por repeticao, de proposito: o teste so precisa de
+    # textos com o comprimento minimo e diferentes entre si. Um literal com
+    # cara de credencial reprova a varredura de segredos do CI -- foi o que
+    # aconteceu com a primeira versao deste arquivo.
+    monkeypatch.setenv("KEY_RENDER", "c" * 40)
+    monkeypatch.setenv("RENDER_API_KEY", "l" * 40)
+    monkeypatch.setenv("JWT_SECRET", "s" * 48)
 
     spec = importlib.util.spec_from_file_location("adri_render_api_config_test", caminho)
     assert spec and spec.loader
