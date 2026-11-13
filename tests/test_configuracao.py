@@ -82,7 +82,8 @@ def test_o_modelo_nao_carrega_valor_de_credencial():
     formato conhecido; este teste pega o caso generico -- qualquer credencial
     com valor preenchido.
     """
-    credenciais = {'GEMINI_API_KEY', 'MP_ACCESS_TOKEN', 'ADRI_FLASK_SECRET', 'FERNET_KEY'}
+    credenciais = {'GEMINI_API_KEY', 'MP_ACCESS_TOKEN', 'ADRI_FLASK_SECRET', 'FERNET_KEY',
+                   'ADRI_LICENCA_ADMIN_TOKEN'}
     preenchidas = []
 
     with open(MODELO, encoding='utf-8') as arquivo:
@@ -103,7 +104,8 @@ def test_as_variaveis_essenciais_continuam_documentadas():
     """
     documentadas = _nomes_documentados()
     essenciais = {'ADRI_FLASK_SECRET', 'ADRI_MICROSOFT_CLIENT_ID',
-                  'GEMINI_API_KEY', 'MP_ACCESS_TOKEN', 'ADRI_DB_PATH'}
+                  'GEMINI_API_KEY', 'MP_ACCESS_TOKEN', 'ADRI_DB_PATH',
+                  'ADRI_LICENCA_API_URL', 'ADRI_LICENCA_ADMIN_TOKEN'}
 
     assert essenciais <= documentadas, (
         f"sumiram do .env.example: {sorted(essenciais - documentadas)}")
@@ -124,8 +126,12 @@ CONFIGURAVEIS_NA_INSTALACAO = {
     'ADRI_FLASK_SECRET',
     'ADRI_CONTAS_AUTORIZADAS',
     'ADRI_BACKUP_EXTRA',
+    'ADRI_BACKUP_SENHA',
     'GEMINI_API_KEY',
     'MP_ACCESS_TOKEN',
+    'ADRI_LICENCA_API_URL',
+    'ADRI_LICENCA_ADMIN_TOKEN',
+    'ADRI_PERMITIR_BANCO_SEM_BITLOCKER',
 }
 
 # Variaveis que existem so para desenvolvimento ou teste e nao fazem sentido no
@@ -133,6 +139,7 @@ CONFIGURAVEIS_NA_INSTALACAO = {
 # esquecimento.
 SO_PARA_DESENVOLVIMENTO = {
     'ADRI_DB_PATH',            # aponta o banco para outro lugar
+    'ADRI_PERMITIR_BANCO_EM_REDE',  # assume, por escrito, o banco em SMB
     'MP_API_URL',              # duble local do Mercado Pago
     'ADRI_MICROSOFT_CLIENT_ID',  # troca a aplicacao Azure
     'ADRI_API_SEM_TOKEN',      # desliga a capacidade, para o `make dev`
@@ -183,3 +190,42 @@ def test_toda_variavel_do_env_example_esta_classificada():
         f"{sorted(documentadas - classificadas)} nao foi classificada. Decida se vai "
         "para o modelo da instalacao e acrescente ao conjunto correspondente."
     )
+
+
+# =============================================================================
+# O lock precisa conter tudo o que requirements.txt declara
+# =============================================================================
+# Sao dois arquivos com dois consumidores: os jobs de teste instalam de
+# `requirements.txt`; o INSTALADOR e construido de `requirements.lock`. O
+# `bcrypt` entrou no primeiro junto com o login local e nunca chegou ao
+# segundo. A suite passava inteira e o instalador gerado morria no boot com
+# "No module named 'bcrypt'" -- em toda maquina onde fosse instalado.
+def _pinos(nome_do_arquivo) -> dict:
+    import re
+
+    caminho = os.path.join(os.path.dirname(__file__), '..', 'backend', nome_do_arquivo)
+    pinos = {}
+    with open(caminho, encoding='utf-8') as arquivo:
+        for linha in arquivo:
+            linha = linha.split('#', 1)[0].split(';', 1)[0].strip()
+            achado = re.match(r'^([A-Za-z0-9_.\-]+)(?:\[[^\]]*\])?==(\S+)$', linha)
+            if achado:
+                # PEP 503: maiusculas, '_' e '.' nao distinguem pacote.
+                pinos[re.sub(r'[-_.]+', '-', achado.group(1)).lower()] = achado.group(2)
+    return pinos
+
+
+def test_o_lock_contem_toda_dependencia_declarada_na_mesma_versao():
+    declaradas = _pinos('requirements.txt')
+    travadas = _pinos('requirements.lock')
+    assert declaradas, 'nao consegui ler requirements.txt'
+
+    ausentes = sorted(set(declaradas) - set(travadas))
+    assert not ausentes, (
+        f"{ausentes} esta(o) em requirements.txt e nao em requirements.lock. "
+        "O instalador e construido do lock: sem o pacote la, o aplicativo "
+        "instalado nao abre.")
+
+    divergentes = {nome: (declaradas[nome], travadas[nome])
+                   for nome in declaradas if declaradas[nome] != travadas[nome]}
+    assert not divergentes, f"versoes diferentes entre os dois arquivos: {divergentes}"

@@ -19,12 +19,11 @@ _MODELO_ENV = """# Configuracao do Adri Poltronas.
 # Gere com: python -c "import secrets; print(secrets.token_hex(32))"
 ADRI_FLASK_SECRET=
 
-# Contas autorizadas a usar o sistema, separadas por virgula.
+# Contas Microsoft autorizadas a conectar o OneDrive, separadas por virgula.
 #
-# VAZIO = qualquer conta Microsoft entra, que e o comportamento historico. O
-# fluxo OAuth usa o endpoint /common e aceita conta pessoal ou de qualquer
-# tenant, entao sem esta lista um colaborador que conecte a conta dele passa a
-# ser, para o sistema, o mesmo que o dono.
+# VAZIO = qualquer conta Microsoft pode ser vinculada para exportacao. Isso
+# nao cria login local nem concede perfil no sistema; o acesso ao ERP depende
+# de uma conta local e das permissoes gravadas no banco.
 #
 # Preencha com o e-mail de quem realmente opera. A comparacao ignora
 # maiusculas e espacos sobrando.
@@ -38,9 +37,31 @@ GEMINI_API_KEY=
 # LICENCA_E_PAGAMENTO.md para como grava-lo sem passar por arquivo de texto.
 MP_ACCESS_TOKEN=
 
-# Pasta extra para onde copiar os backups (opcional). Um pendrive ou uma pasta
-# sincronizada resolve o caso em que a maquina inteira se perde.
+# Pasta extra para onde copiar os backups (opcional): um pendrive ou uma pasta
+# sincronizada, para o caso em que a maquina inteira se perde.
 ADRI_BACKUP_EXTRA=
+
+# Senha das copias que vao para a pasta extra (12 caracteres ou mais).
+#
+# SEM ELA a copia externa so abre nesta conta do Windows -- se o computador
+# for roubado ou o disco parar, ela nao recupera nada. COM ELA a copia abre em
+# qualquer computador: instale o aplicativo, defina a MESMA senha aqui, copie
+# o arquivo para a pasta "backups" ao lado do banco e use Restaurar.
+#
+# Anote a senha FORA deste computador. Ao abrir o aplicativo ela sai deste
+# arquivo e vai para o cofre cifrado; sem a anotacao, perde-se junto com a
+# maquina, e a copia fica fechada para sempre.
+ADRI_BACKUP_SENHA=
+
+# O banco contém dados pessoais e exige criptografia do disco. O sistema se
+# recusa a iniciar quando consegue confirmar que o BitLocker está desligado.
+# Use 1 apenas se você assumir explicitamente o risco.
+ADRI_PERMITIR_BANCO_SEM_BITLOCKER=0
+
+# Licença central. Configure ADRI_LICENCA_API_URL também nas instalações dos
+# clientes. ADRI_LICENCA_ADMIN_TOKEN existe somente no computador do vendedor.
+ADRI_LICENCA_API_URL=https://adri-poltronas-licenses.onrender.com
+ADRI_LICENCA_ADMIN_TOKEN=
 """
 
 
@@ -58,6 +79,12 @@ def caminho_env_do_usuario() -> str:
     if not appdata:
         return ''
     return os.path.join(appdata, 'AdriPoltronas', '.env')
+
+
+def caminho_env_do_projeto() -> str:
+    """`.env` da raiz do checkout, usado em desenvolvimento local."""
+    raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(raiz, '.env')
 
 
 def garantir_modelo_env() -> str:
@@ -153,6 +180,35 @@ CONTAS_AUTORIZADAS = frozenset(
 )
 
 
+# Roles gravados na sessao Microsoft por compatibilidade. A autorizacao do ERP
+# usa exclusivamente o perfil da conta local.
+ROLE_DESENVOLVEDOR = "desenvolvedor"
+ROLE_ADMINISTRADOR = "administrador"
+ROLE_USUARIO = "usuario"
+ROLES_VALIDOS = frozenset({ROLE_DESENVOLVEDOR, ROLE_ADMINISTRADOR, ROLE_USUARIO})
+
+# Mapeamento de e-mail -> role (configuravel via ADRI_ROLES no .env)
+# Formato: "email1@exemplo.com:desenvolvedor,email2@exemplo.com:administrador"
+_ROLES_BRUTO = os.environ.get('ADRI_ROLES', '')
+
+ROLES_POR_CONTA = frozenset(
+    (parte.split(':')[0].strip().casefold(), parte.split(':')[1].strip().lower())
+    for parte in _ROLES_BRUTO.replace(';', ',').split(',')
+    if ':' in parte and parte.strip()
+)
+
+
+def _role_da_conta(conta: str) -> str:
+    """Retorna o role da conta, ou 'usuario' como padrao."""
+    if not conta:
+        return ROLE_USUARIO
+    conta_lower = conta.strip().casefold()
+    for email, role in ROLES_POR_CONTA:
+        if email == conta_lower and role in ROLES_VALIDOS:
+            return role
+    return ROLE_USUARIO
+
+
 def conta_autorizada(conta: str) -> bool:
     """
     A conta pode usar o sistema?
@@ -164,6 +220,11 @@ def conta_autorizada(conta: str) -> bool:
     if not CONTAS_AUTORIZADAS:
         return True
     return (conta or '').strip().casefold() in CONTAS_AUTORIZADAS
+
+
+def obter_role(conta: str) -> str:
+    """Retorna o role da conta (desenvolvedor, administrador, usuario)."""
+    return _role_da_conta(conta)
 # Credenciais de integracao. Vem do cofre cifrado quando ele as tem; do
 # ambiente ou do .env quando nao. Ver `segredos.py` para a precedencia e para
 # o limite honesto do que o DPAPI protege.

@@ -347,7 +347,11 @@ def test_apenas_credenciais_de_integracao_sao_protegidas():
     mente tornaria a recuperacao de uma instalacao mais dificil sem ganho.
     """
     assert set(segredos.CHAVES_PROTEGIDAS) == {
-        'MP_ACCESS_TOKEN', 'GEMINI_API_KEY', }
+        'MP_ACCESS_TOKEN', 'GEMINI_API_KEY', 'ADRI_LICENCA_ADMIN_TOKEN',
+        # Abre o banco inteiro gravado no pendrive: e credencial.
+        'ADRI_BACKUP_SENHA',
+        'ADRI_DESENVOLVEDOR_DISPOSITIVO', 'ADRI_DESENVOLVEDOR_IPS',
+        'ADRI_LICENCA_INSTALLATION_ID', }
     assert 'ADRI_FLASK_SECRET' not in segredos.CHAVES_PROTEGIDAS
 
 

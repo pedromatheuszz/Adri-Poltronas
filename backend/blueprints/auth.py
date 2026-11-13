@@ -9,6 +9,7 @@ import urllib.request
 import webbrowser
 import logging
 from flask import Blueprint, jsonify
+from limites import limiter
 
 import database
 import config
@@ -29,6 +30,7 @@ def _derivar_code_challenge(verifier: str) -> str:
 
 
 @auth_bp.route('/login')
+@limiter.limit('5 per 10 minutes')
 def auth_login():
     agora = time.time()
     chaves_antigas = [k for k, v in config._oauth_pending.items() if agora - v.get('ts', 0) > 300]
@@ -39,7 +41,7 @@ def auth_login():
     code_challenge = _derivar_code_challenge(code_verifier)
     state = secrets.token_urlsafe(16)
     config._oauth_pending[state] = {'verifier': code_verifier, 'ts': agora}
-    log.info("[LOGIN] state=%s", state)
+    log.info("[LOGIN] Fluxo OAuth iniciado.")
 
     url = (
         f"{config.URL_AUTORIZACAO_MICROSOFT}"
@@ -80,7 +82,7 @@ def auth_status():
     if microsoft.obter_token_valido() is None:
         return jsonify({"logado": False, "motivo": "sessao_expirada"})
 
-    return jsonify({"logado": True, "conta": sessao["conta"]})
+    return jsonify({"logado": True, "conta": sessao["conta"], "role": sessao.get("role", "usuario")})
 
 
 @auth_bp.route('/logout', methods=['POST'])

@@ -84,12 +84,43 @@ jobs:
     # A cobertura minima e um piso, nao uma meta. Ela existe para impedir que
     # codigo novo entre sem teste nenhum -- sem o `--cov-fail-under`, o job
     # ficava verde com a cobertura caindo a cada PR e ninguem via.
+    #
+    # O RESUMO DAS FALHAS SAI COMO ANOTACAO
+    # O log de um job so abre para quem esta logado e tem acesso ao repositorio;
+    # a anotacao aparece no topo da pagina do PR e na API publica. Sem ela, um
+    # job que reprova so em uma versao do Python -- como aconteceu com 3.10 e
+    # 3.11 -- e uma linha vermelha sem motivo para quem nao abre o log inteiro.
+    # Mesma tecnica do passo do electron-builder, mais abaixo.
     - name: Run tests with coverage
       working-directory: backend
-      run: >-
-        python -m pytest ../tests -v --tb=short
-        --cov=. --cov-report=term-missing --cov-report=xml:../coverage.xml
-        --cov-fail-under=80
+      shell: bash
+      env:
+        # Com a saida num pipe o Python usa a codepage do Windows e estoura ao
+        # imprimir um caractere fora dela. Vale so para stdin/stdout/stderr:
+        # nao muda o encoding padrao de `open()`, que os testes exercitam.
+        PYTHONIOENCODING: utf-8
+        COLUMNS: '200'
+      run: |
+        set +e
+        python -m pytest ../tests -v --tb=short \
+          --cov=. --cov-report=term-missing --cov-report=xml:../coverage.xml \
+          --cov-fail-under=80 2>&1 | tee ../pytest.log
+        CODIGO=${PIPESTATUS[0]}
+        set -e
+        if [ "$CODIGO" -eq 0 ]; then
+          exit 0
+        fi
+        # Do "short test summary info" em diante: um FAILED por linha, com o
+        # motivo, e a linha da cobertura quando e ela que reprova.
+        RESUMO=$(sed -n '/short test summary info/,$p' ../pytest.log | head -n 60)
+        if [ -z "$RESUMO" ]; then
+          RESUMO=$(tail -n 40 ../pytest.log)
+        fi
+        MENSAGEM=$(printf '%s\n' "$RESUMO" \
+          | sed 's/%/%25/g; s/\r/ /g' \
+          | awk '{ printf "%s%%0A", $0 }')
+        echo "::error title=pytest reprovou no Python ${{ matrix.python-version }} (codigo $CODIGO)::$MENSAGEM"
+        exit 1
 
     - name: Upload coverage reports
       if: matrix.python-version == '3.12'
@@ -463,6 +494,25 @@ jobs:
       shell: pwsh
       run: |
         $ErrorActionPreference = 'Stop'
+
+        # O MOTIVO DA FALHA SAI COMO ANOTACAO, junto com o fim do stderr do
+        # backend. Este passo tem uma duzia de verificacoes e, sem isto, uma
+        # reprovacao aparece so como "exit code 1" para quem nao abre o log
+        # (que exige login). O stderr importa porque e nele que o backend
+        # explica por que se recusou a subir.
+        $saidaBackend = Join-Path $env:RUNNER_TEMP 'backend-fumaca.out.log'
+        $erroBackend = Join-Path $env:RUNNER_TEMP 'backend-fumaca.err.log'
+        trap {
+          $linhas = @("$_")
+          if (Test-Path $erroBackend) {
+            $linhas += '--- stderr do backend instalado (final) ---'
+            $linhas += @(Get-Content $erroBackend -Tail 25 -ErrorAction SilentlyContinue)
+          }
+          $mensagem = ($linhas -join "`n") -replace '%', '%25' -replace "`r", '' -replace "`n", '%0A'
+          Write-Host "::error title=Teste de fumaca do instalador::$mensagem"
+          break
+        }
+
         $instalador = (Get-ChildItem dist-instalador/*.exe | Select-Object -First 1).FullName
         $destino = Join-Path $env:RUNNER_TEMP 'AdriInstalado'
 
@@ -484,7 +534,8 @@ jobs:
         $env:ADRI_DB_PATH = $banco
         $env:ADRI_API_TOKEN = 'token-de-fumaca'
         $env:ADRI_PORTA = '5051'
-        $servidor = Start-Process -FilePath $backend -PassThru -WindowStyle Hidden
+        $servidor = Start-Process -FilePath $backend -PassThru -WindowStyle Hidden `
+          -RedirectStandardOutput $saidaBackend -RedirectStandardError $erroBackend
 
         try {
           $saude = $null
@@ -528,20 +579,32 @@ jobs:
           if ($semSessao -ne 401) { throw "com token e sem sessao: esperava 401, veio $semSessao" }
           Write-Host 'Com token e sem sessao: 401, como esperado'
 
-          # Semeia a sessao Microsoft no banco do app instalado, que e o mesmo
-          # que tests/test_e2e_interface.py faz e pelo mesmo motivo: a
-          # autenticacao deste ERP e o OAuth da Microsoft (limitacao conhecida,
-          # registrada no CONTRIBUTING.md), entao sem uma sessao gravada nao ha
-          # como exercitar a leitura -- nem aqui, nem no uso real.
+          # Semeia uma conta LOCAL e a sessao dela no banco do app instalado.
           #
-          # O `cifrar` do repositorio nao esta congelado, entao grava com
-          # prefixo DPAPI1:. O backend instalado, esse sim congelado, decifra
-          # pelo mesmo caminho -- mesmo usuario, mesma maquina.
-          python -c "import os,sys; sys.path.insert(0,'backend'); import database; database.DB_PATH=os.environ['ADRI_DB_PATH']; database.salvar_sessao('token-de-fumaca','operador@exemplo.local')"
-          if ($LASTEXITCODE -ne 0) { throw 'nao foi possivel semear a sessao no banco do app instalado' }
+          # Ate a 1.5.1 este passo semeava a sessao Microsoft e lia
+          # /api/clientes. Desde que o acesso passou a exigir login local, a
+          # sessao Microsoft nao abre mais nada e a leitura devolvia 401 --
+          # o job reprovava por um teste que ficou para tras, nao pelo
+          # instalador.
+          #
+          # A rota conferida e /api/auth/local/me, e nao /api/clientes, de
+          # proposito: as rotas de negocio passam pelo guarda de licenca, que
+          # sincroniza com a API central pela internet. Um teste de fumaca do
+          # instalador nao pode depender do servico de producao, nem registrar
+          # la uma conta a cada execucao. `me` prova o que interessa aqui: o
+          # backend CONGELADO le o banco, decifra a sessao gravada pelo
+          # `cifrar` do repositorio (DPAPI, mesmo usuario, mesma maquina) e
+          # reconhece o cookie.
+          python -c "import os,sys; sys.path.insert(0,'backend'); import database; database.DB_PATH=os.environ['ADRI_DB_PATH']; uid=database.criar_usuario('operador','senha-de-fumaca-comprida','usuario'); database.salvar_sessao_local('sessao-de-fumaca',uid,'operador','usuario')"
+          if ($LASTEXITCODE -ne 0) { throw 'nao foi possivel semear a conta local no banco do app instalado' }
 
-          $clientes = Invoke-RestMethod -Uri 'http://127.0.0.1:5051/api/clientes' -TimeoutSec 5 -Headers $comToken
-          Write-Host "Com token e sessao: $(@($clientes).Count) cliente(s)"
+          $sessao = [Microsoft.PowerShell.Commands.WebRequestSession]::new()
+          $sessao.Cookies.Add([System.Net.Cookie]::new('adri_sessao_local', 'sessao-de-fumaca', '/', '127.0.0.1'))
+
+          $eu = Invoke-RestMethod -Uri 'http://127.0.0.1:5051/api/auth/local/me' -TimeoutSec 5 -Headers $comToken -WebSession $sessao
+          if (-not $eu.logado) { throw 'com token e sessao local: o backend instalado nao reconheceu a sessao' }
+          if ($eu.usuario.username -ne 'operador') { throw "sessao de outra conta: $($eu.usuario.username)" }
+          Write-Host "Com token e sessao local: conta '$($eu.usuario.username)' reconhecida"
         }
         finally {
           if ($servidor -and -not $servidor.HasExited) { Stop-Process -Id $servidor.Id -Force }

@@ -5,6 +5,185 @@ Versionamento [semântico](https://semver.org/lang/pt-BR/).
 
 ---
 
+## [Não lançado]
+
+Correções de segurança da revisão de 2026-11-12.
+
+### Segurança
+
+- **A resposta da API central de licenças passa a ser assinada.** O serviço
+  assina (Ed25519) estado, validade, conta, instalação e instante; o
+  aplicativo confere com a chave pública em `backend/licenca_remota.py` e lê
+  o estado de dentro da prova, na resposta e no cache (nova coluna
+  `usuarios.licenca_remota_prova`). Fecha os dois contornos de uma linha:
+  redirecionar `ADRI_LICENCA_API_URL` e editar o cache no SQLite. **Desligado
+  até a chave pública ser configurada** — ordem de ativação em
+  `licensing-service/README.md`.
+- **A sonda do Electron não envia mais o token de capacidade.** Ele ia no
+  cabeçalho de `/api/health` antes de se saber quem estava na porta 5000;
+  quem a ocupasse primeiro recebia o segredo e herdava a janela. Agora vai um
+  desafio aleatório e a resposta é conferida por HMAC. Um backend de versão
+  anterior ainda em execução é recusado até ser encerrado.
+- **A chave das cópias de segurança nunca é sobrescrita.** Quando
+  `.fernet_key` deixava de abrir, uma chave nova era gravada por cima e as
+  cópias anteriores ficavam irrecuperáveis. A antiga agora é renomeada para
+  `.fernet_key.ilegivel-<data>`.
+
+### Adicionado
+
+- **Cópia externa portátil.** Com `ADRI_BACKUP_SENHA` (12+ caracteres), a
+  cópia enviada a `ADRI_BACKUP_EXTRA` é cifrada com uma chave derivada da
+  senha (scrypt) e restaura em qualquer computador. Sem a senha o
+  comportamento anterior é mantido e o log avisa que a cópia só abre nesta
+  conta do Windows.
+
+### Testes
+
+- A suíte usa um `APPDATA` temporário, ignora o `.env` do checkout e bloqueia
+  conexões fora de loopback. Antes ela escrevia no log real, lia o cofre
+  `.segredos` e três testes de autenticação chamavam a API de licenças de
+  produção a cada execução.
+
+---
+
+## [1.5.2-beta] — 2026-09-15
+
+Fecha os riscos apontados na análise da 1.5.1: dados em repouso, pasta de
+rede, assinatura de código, estoque, relatórios financeiros e o app.js de
+3.300 linhas. Nenhuma remoção de funcionalidade.
+
+### Adicionado — proteção dos dados em repouso
+
+- **As cópias de segurança agora saem cifradas da máquina.** Backup diário,
+  de pré-migração e a cópia extra de `ADRI_BACKUP_EXTRA` são gravados com
+  Fernet, e a chave vive protegida pelo DPAPI da conta do Windows. O motivo
+  é o destino desses arquivos: são as cópias que SAEM da pasta do banco —
+  pendrive, pasta sincronizada — e um pendrive com o banco inteiro dos
+  clientes dentro era o vazamento que nenhuma outra camada desfazia. O preço
+  é documentado e deliberado: a cópia só restaura na mesma conta do Windows
+  que a gravou. O download explícito (`/api/backup/sqlite`) segue em claro,
+  por ser uma exportação do operador.
+- **A lista de cópias diz quais são cifradas** (`cifrada: true` em
+  `/api/backup/copias`), para a diferença aparecer antes de a escolha ser
+  feita.
+- **Aviso de disco sem BitLocker no boot.** Quando o Windows permite
+  consultar e a resposta é "desprotegido", o log de segurança registra —
+  quem defende o banco contra a máquina sair de casa é a cifra de disco. A
+  consulta é melhor esforço: sem privilégio para perguntar, o sistema cala,
+  porque acusar sem poder examinar ensina a ignorar o próximo aviso.
+- **Acesso de desenvolvedor vinculado ao computador e ao IP.** A primeira
+  ativação exige a chave privada do fornecedor; o backend confere a identidade
+  Windows e mantém os IPs recentes no cofre DPAPI. Um IP novo só entra depois
+  da validação central da chave. Sessões copiadas para outro computador não
+  abrem a área de desenvolvedor.
+- **O primeiro teste não pode ser renovado criando contas locais.** A API
+  central vincula as licenças à instalação Windows, limita novos testes por IP
+  e a decisão central falha fechada quando não há validação inicial. O painel
+  mantém a liberação manual de teste e pagamento.
+- **Assinatura de código tem caminho pronto: `python build.py assinar`.**
+  Assina instalador e o backend que ele transporta com `signtool`
+  (carimbo RFC 3161 incluso), valida cada assinatura no fim e explica as
+  duas formas de credenciar (thumbprint no repositório do usuário ou PFX).
+  Enquanto não houver certificado, o comando diz exatamente o que falta —
+  o mesmo espírito do SECURITY.md: o estado atual continua sendo "não
+  assinado", agora com o caminho para mudar escrito em código e teste.
+
+### Alterado — integridade e recusas honestas
+
+- **Banco em pasta de rede passa a ser recusa de boot**, não aposta. O
+  SQLite sobre SMB perde escritas e corrompe; abrir "para ver no que dá"
+  transformava a base de clientes em experimento. UNC e unidade mapeada são
+  detectados; a saída é a variável explícita
+  `ADRI_PERMITIR_BANCO_EM_REDE=1`, feia de escrever de propósito. Backup
+  restaurável em outro lugar continua existindo: é o download, que sai em
+  claro por ser exportação.
+- Restauração trata as duas espécies de cópia: a cifrada é decifrada para
+  um temporário, verificada e o claro é apagado no fim; as cópias legadas
+  em claro continuam válidas. Cópia gravada por outra conta do Windows é
+  recusada com mensagem que diz ISSO — chamar de "corrompida" mandaria o
+  operador procurar outro arquivo, quando o problema é outro.
+
+### Adicionado — estoque
+
+- **Controle de estoque opcional por produto.** O primeiro movimento
+  (aquisição) ativa o controle; produto sem razão continua sendo catálogo
+  puro, e nenhum pedido é conferido por ele — preservando o comportamento
+  das instalações que só usam Produtos como catálogo.
+- **Livro-razão `estoque_movimentos`**: o total é sempre a soma dos
+  lançamentos (aquisição entra, baixa sai, ajuste corrige), nunca uma
+  coluna à parte — corrigir contagem é lançar, não reescrever o presente.
+  Ajuste que deixaria o estoque negativo é recusado.
+- **Reserva derivada dos pedidos**: itens de pedidos aprovados e faturados
+  reservam as unidades na janela de aluguel do item. Ao lançar um item, a
+  disponibilidade no período é conferida e a falta vira 409 com o número
+  disponível na mensagem. Pedidos em aberto não reservam, mas aparecem como
+  "em negociação". Item sem datas ocupa qualquer período consultado — sem
+  data de devolução, o sistema não sabe devolver, e prometer duas vezes a
+  mesma poltrona é o erro que o controle existe para impedir. A aprovação é
+  serializada no banco, e baixas não reduzem o saldo abaixo das reservas.
+- Endpoints: `GET /api/estoque/resumo` e
+  `GET/POST /api/produtos/<id>/estoque(/movimentos)`. A aba Produtos ganha a
+  coluna Estoque e o modal com razão, consulta por período e lançamento.
+
+### Adicionado — relatórios financeiros
+
+- **Aba Relatórios: as parcelas de todos os pedidos numa tabela só**, com
+  filtros de período de vencimento e situação (inclusive o derivado "em
+  atraso") e totais calculados pelo backend SOBRE AS MESMAS LINHAS
+  FILTRADAS — resumo e tabela que divergem é o defeito que faz o operador
+  parar de confiar em ambos.
+- **Exportação XLSX direta**, sem depender da conexão Microsoft: valor como
+  texto formatado (número de moeda em célula é o caminho clássico de
+  centavo sumir em somas) e neutralização de fórmula, como manda
+  `planilha.py`.
+- Endpoints: `GET /api/relatorios/financeiro` e `/exportar`, protegidos
+  pela permissão `financeiro.relatorios`.
+
+### Adicionado — prova de ponta a ponta da liberação remota
+
+- **`tests/test_fluxo_liberacao_remota.py`: o ciclo inteiro que o vendedor
+  executa no telefone, virou teste.** Cliente sincroniza e aparece no
+  painel → teste vence no servidor central → cliente recebe 402 →
+  desenvolvedor confirma pagamento na aba de Desenvolvedor → o próximo
+  contato do cliente (a enquete de 30 segundos) devolve `paga` e a API
+  volta a responder — sem nenhuma etapa manual no computador do cliente.
+  Também cobertos: liberar mais 30 dias, suspender, e o cliente offline
+  que recebe a liberação na primeira janela de rede. O dublê da API
+  central substitui **só a rede** (`urlopen`), mantendo no circuito o
+  código real de Bearer, HTTPS e cache — o que permite ao teste afirmar
+  que o token administrativo **viaja** na chamada do painel e **não
+  viaja** na sincronização do cliente. O fluxo em si já existia
+  (`licenca_remota.py` + `licensing-service/` + aba de Desenvolvedor);
+  o que faltava era a garantia de que ele funciona emendado, e de que
+  nenhuma das pontas o quebre em silêncio.
+
+### Alterado — interface
+
+- **app.js perde 250 linhas:** o subsistema de licença (painel de
+  bloqueio, aviso de teste, Pix e verificação de pagamento) passa a viver
+  em `licenca.js`, e o relatório em `relatorios.js`. Arquivos continuam no
+  nível de `frontend/js/`, que os testes de contrato leem inteiros. A
+  regra da extração está no cabeçalho do arquivo: chamadas cruzadas apenas
+  em tempo de execução.
+- A entrada morta `pagamentos` de `PAGINAS` saiu: a aba não existia desde a
+  1.5.0.
+- Service worker: precache dos arquivos novos e `CACHE_NAME` v37.
+
+### Corrigido — mantenibilidade
+
+- `licenca_remota.py`: leitura do corpo do erro da API central, engolida em
+  silêncio (`except: pass`), agora registra no log de debug.
+- Imports não usados em `test_licenca_remota.py` e
+  `test_licensing_service.py` — o `ruff check` volta a passar limpo na
+  árvore inteira.
+- Wrapper da Render exige segredo JWT forte e Bearer administrativo válido
+  em todas as rotas; o token não tem mais valor padrão e expira em até uma hora.
+- Dependências Node foram atualizadas até `npm audit` apontar zero
+  vulnerabilidades. O cliente aguarda até 90 segundos pela API central, para
+  acomodar o despertar de instâncias gratuitas da Render.
+
+---
+
 ## [1.5.1-beta] — 2026-09-12
 
 Correções da auditoria técnica da 1.5.0 (41 achados: 2 altos, 18 médios,

@@ -8,6 +8,24 @@
 Esse aviso é o principal motivo de usuários desistirem da instalação de apps
 pequenos e desconhecidos. Assinar digitalmente o `.exe` resolve isso.
 
+> **Desde a 1.5.2 existe um comando pronto**:
+> ```cmd
+> python build.py assinar
+> ```
+> Ele assina o instalador **e** o `AdriPoltronasBackend.exe` (o processo que
+> escuta em `127.0.0.1` — o que o antivírus mais desconfia), com carimbo
+> RFC 3161, e roda `signtool verify /pa /all` no fim. Credenciais:
+>
+> | Variável | O que é |
+> |---|---|
+> | `ADRI_CERT_THUMBPRINT` | SHA-1 do certificado no repositório do usuário (o comando normaliza espaços) |
+> | `ADRI_CERT_ARQUIVO` + `ADRI_CERT_SENHA` | arquivo `.pfx` e senha |
+> | `ADRI_CARIMBO` | servidor de carimbo RFC 3161 (padrão: `http://timestamp.digicert.com`) |
+>
+> O restante deste documento explica o contexto (tipos de certificado, custos,
+> alternativas) e o caminho de assinar via electron-builder, que continua
+> válido para quem preferir que o `installer` assine durante o próprio build.
+
 ---
 
 ## O que é code signing?
@@ -54,10 +72,13 @@ Desde a migração para o Electron, o build gera três artefatos:
 |----------|------|----------|
 | `dist-instalador/AdriPoltronasSetup-<versão>.exe` | electron-builder (NSIS) | **Sim** — é o que o usuário baixa |
 | `dist-instalador/win-unpacked/Adri Poltronas.exe` | electron-builder | Sim (o electron-builder assina junto) |
-| `dist/AdriPoltronasBackend/AdriPoltronasBackend.exe` | PyInstaller | Opcional — não é executado diretamente pelo usuário |
+| `dist/AdriPoltronasBackend/AdriPoltronasBackend.exe` | PyInstaller | **Recomendado** — viaja em `extraResources` e é o servidor local; `python build.py assinar` cobre os dois de uma vez |
 
-O caminho mais simples é deixar o **electron-builder** assinar tudo: ele chama o
-`signtool` sozinho quando encontra as variáveis `CSC_LINK` e `CSC_KEY_PASSWORD`.
+O caminho com menos passos manuais é `python build.py assinar` (ver o
+quadro no topo). A alternativa abaixo deixa o próprio **electron-builder**
+assinar durante o `installer`: ele chama o `signtool` sozinho quando
+encontra as variáveis `CSC_LINK` e `CSC_KEY_PASSWORD` — mas atenção: nesse
+modo o backend do PyInstaller fica de fora.
 
 ```cmd
 set CSC_LINK=C:\caminho\certificado.pfx

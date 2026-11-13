@@ -4,6 +4,7 @@ import logging
 from flask import Blueprint, jsonify
 
 import database
+from permissoes import exigir_permissao
 
 log = logging.getLogger("adri.dashboard")
 
@@ -11,12 +12,14 @@ dashboard_bp = Blueprint('dashboard', __name__, url_prefix='/api/dashboard')
 
 
 @dashboard_bp.route('')
+@exigir_permissao("dashboard.ver")
 def dashboard_metricas():
     """Retorna métricas do dashboard."""
     return jsonify(database.obter_metricas_dashboard())
 
 
 @dashboard_bp.route('/dados')
+@exigir_permissao("dashboard.ver")
 def dashboard_dados_graficos():
     """Retorna dados para os gráficos do dashboard."""
     por_tipo = database.obter_dados_grafico_por_tipo()

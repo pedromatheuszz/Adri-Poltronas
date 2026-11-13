@@ -12,14 +12,14 @@ precisa ser configurado antes de entregar o aplicativo a um cliente.
 semana.
 
 **Depois dos 30 dias**, a tela é substituída por um painel com o valor
-(R$ 1.500,00) e o botão *Pagar com Pix*. Nenhum dado aparece: os números do
+(R$ 2.000,00) e a instrução para entrar em contato com o fornecedor. Nenhum dado aparece: os números do
 Dashboard sem dados carregados são os zeros escritos no HTML, e mostrá-los
 seria informar errado com ar de informação certa.
 
-**Ao clicar em Pagar**, o app gera uma cobrança Pix no Mercado Pago e mostra o
-QR Code e o copia-e-cola. A cada 5 segundos ele pergunta ao Mercado Pago se o
-pagamento entrou. Assim que entra, o painel some sozinho e os dados carregam —
-sem reabrir o app, sem digitar código nenhum.
+O fornecedor confirma o recebimento e, no painel de desenvolvedor, escolhe
+**Confirmar pagamento** para a conta correspondente. A licença é enviada à API
+central e o computador do cliente a recebe na próxima sincronização (até 30
+segundos com o aplicativo aberto).
 
 Se o app for fechado com o Pix na tela, a cobrança fica lembrada: a próxima
 abertura retoma a espera sem pedir para gerar outra.
@@ -28,8 +28,15 @@ abertura retoma a espera sem pedir para gerar outra.
 
 ## O que você precisa configurar
 
-O aplicativo só consegue cobrar se souber falar com a **sua** conta do Mercado
-Pago. Uma variável, guardada cifrada:
+Para liberar clientes em computadores diferentes, publique primeiro a API
+central descrita em [`licensing-service/README.md`](licensing-service/README.md).
+Configure a URL pública nas instalações e mantenha o token administrativo
+somente no computador do desenvolvedor. A API central sincroniza nome, e-mail e
+estado da licença, não os dados comerciais do ERP. Ela oferece uma tolerância
+offline de 72 horas depois da última validação.
+
+O fluxo Pix legado só funciona se o backend souber falar com a conta do
+Mercado Pago. Uma variável:
 
 | Nome | O que é |
 |---|---|
@@ -116,7 +123,7 @@ a revogação não derruba mais nada.
 ## Mudando o preço
 
 Um lugar só: `VALOR_DA_LICENCA_CENTAVOS`, em `backend/licenca.py`. Em centavos,
-mesma convenção do resto do financeiro (`erp/core/dinheiro.py`). R$ 1.500,00 é
-`150000`.
+mesma convenção do resto do financeiro (`erp/core/dinheiro.py`). R$ 2.000,00 é
+`200000`.
 
 O prazo do teste fica ao lado, em `DIAS_DE_TESTE`.

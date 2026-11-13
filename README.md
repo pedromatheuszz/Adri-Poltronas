@@ -13,7 +13,7 @@ parcelas a receber geradas pelo faturamento;
 indicadores operacionais;
 localização dos clientes;
 alertas importantes.
-Importante: na versão atual, a aba Produtos funciona como catálogo de itens usados nos pedidos. O controle físico de estoque — quantidade total, disponível, locada, movimentações e reservas automáticas — ainda não está completo.
+Importante: a aba Produtos funciona como catálogo de itens usados nos pedidos e, desde a versão 1.5.2, também controla estoque de forma opcional: ao lançar o primeiro movimento de um produto, o sistema passa a conferir a disponibilidade dele nas locações. Produtos sem movimento seguem como catálogo puro.
 Sumário
 Primeiros passos
 Como navegar pelo aplicativo
@@ -24,6 +24,7 @@ Clientes
 Produtos
 Entregas
 Mapa
+Relatórios
 Notificações
 Importação, exportação e backup
 Atalhos de teclado
@@ -41,11 +42,24 @@ Aguarde alguns segundos até que o Dashboard seja exibido.
 Use somente instaladores obtidos pelo repositório oficial ou fornecidos diretamente pelo responsável pelo sistema.
 Preparação inicial
 Antes de registrar a primeira locação, recomenda-se:
+na primeira abertura, criar uma conta de usuário com uma senha forte;
 cadastrar os modelos de poltronas na aba Produtos;
 cadastrar ou importar os clientes existentes;
 conferir endereços, cidades e tipos de atendimento;
 criar um backup inicial;
 configurar, com o responsável pelo sistema, a integração opcional de Microsoft/Excel.
+
+O acesso ao sistema exige login local. Usuários podem criar a própria conta na
+tela de login; o desenvolvedor cria contas administrativas e gerencia o acesso
+e os períodos de teste. O perfil de desenvolvedor exige a chave privada do
+fornecedor e fica vinculado à identidade Windows, protegida no cofre DPAPI,
+e ao IP público autorizado. Um IP novo exige validação da chave privada na
+API central. A conexão Microsoft é opcional e serve apenas à integração com
+o OneDrive.
+
+O período de teste e a confirmação manual do pagamento entre computadores
+usam uma API central. Para publicar o serviço e configurar as
+instalações, consulte [`licensing-service/README.md`](licensing-service/README.md).
 Como navegar pelo aplicativo
 As áreas principais ficam no menu lateral esquerdo, organizadas por assunto:
 Grupo
@@ -60,7 +74,7 @@ O menu pode ser recolhido para aumentar a área de trabalho. Na parte superior f
 Fluxo recomendado de trabalho
 Para manter todas as informações relacionadas, utilize esta sequência:
 Localize ou cadastre o cliente.
-Confira o produto que será incluído na locação.
+Confira o produto que será incluído na locação e, se ele controlar estoque, a disponibilidade no período.
 Crie o pedido e informe data prevista, desconto, frete e observações.
 Salve o pedido antes de adicionar os itens.
 Adicione a poltrona, quantidade, descrição personalizada e preço.
@@ -148,7 +162,17 @@ observações.
 O preço cadastrado serve como referência ao adicionar o produto a um pedido. Se a negociação exigir um valor ou uma configuração diferente, os detalhes podem ser informados no próprio item do pedido.
 Adote códigos e nomes padronizados. Por exemplo, evite cadastrar o mesmo modelo com grafias diferentes, pois isso dificulta pesquisas e análises.
 Sobre o estoque
-Esta área ainda não controla automaticamente quantidade disponível, equipamentos locados, entradas, saídas ou reservas por período. Para não confundir catálogo com disponibilidade real, confirme a disponibilidade física da poltrona antes de aprovar a locação.
+Desde a 1.5.2, cada produto pode controlar estoque. O controle é opcional e começa no primeiro movimento: um produto sem movimentos continua sendo somente catálogo, e nenhum pedido é conferido por ele.
+
+como funciona:
+o total existente é a soma dos movimentos (aquisição entra, baixa por avaria sai, ajuste corrige contagem);
+a locação de um pedido aprovado ou faturado reserva as unidades no período de aluguel do item;
+ao lançar um item em um pedido, o sistema recusa quando não há unidades disponíveis no período informado;
+a coluna Estoque da aba mostra o disponível hoje; o botão Estoque abre o razão completo, com consulta por período;
+pedidos em aberto não reservam, mas aparecem como "em negociação", para você ver a disputa antes de aprovar;
+um item sem datas de aluguel é tratado como ocupando qualquer período consultado — sem data de devolução, o sistema não sabe quando devolver.
+
+O estoque diz o que está no papel. Confirme a disponibilidade física antes de aprovar a locação em casos de dúvida.
 5. Entregas
 A aba Entregas funciona como agenda operacional. Ela organiza compromissos por data e destaca itens atrasados, de hoje, de amanhã e dos próximos dias.
 Agendar uma entrega
@@ -179,8 +203,17 @@ planejar uma sequência de deslocamentos;
 identificar cidades com maior concentração de clientes;
 reduzir trajetos desnecessários.
 O mapa e a localização dos endereços dependem de acesso à internet. Se um cliente não aparecer, revise CEP, rua, bairro e cidade no cadastro. O carregamento inicial de muitos endereços pode levar alguns instantes.
+7. Relatórios
+A aba Relatórios reúne, numa tabela só, as parcelas a receber de todos os pedidos — o que antes exigia abrir pedido por pedido. Acima da tabela, três totais respondem de imediato: a receber, em atraso e recebido.
+O que você pode fazer:
+filtrar por período de vencimento (as duas datas ou nenhuma; uma data sozinha mostra o dia inteiro);
+filtrar por situação: pendentes, em atraso, recebidas ou canceladas;
+exportar a mesma tabela para Excel, com um clique, sem depender da conexão Microsoft;
+localizar o pedido de origem de cada parcela pelo número na própria linha.
+
+O atraso aparece calculado pelo vencimento, como dentro do pedido. Os totais são sempre calculados sobre as mesmas linhas da tabela: o resumo e a lista não podem contar coisas diferentes.
 Parcelas a receber
-As parcelas nascem do faturamento de um pedido e ficam dentro dele — não há aba financeira separada. Abra o pedido faturado e a tabela Parcelas a receber aparece abaixo dos itens, com o total já recebido e o total em aberto.
+As parcelas nascem do faturamento de um pedido e ficam dentro dele — a baixa e o recebimento continuam acontecendo ali. Abra o pedido faturado e a tabela Parcelas a receber aparece abaixo dos itens, com o total já recebido e o total em aberto. A aba Relatórios é a visão de todas elas juntas; o pedido continua sendo o lugar de dar baixa.
 Situações da parcela
 Situação
 Significado
@@ -193,7 +226,7 @@ Parcela encerrada sem recebimento.
 Uma parcela pendente com vencimento já passado aparece sinalizada como em atraso. Isso é calculado a partir da data, e não registrado: assim que ela é recebida, a marcação some sozinha.
 Confira o valor antes de dar baixa. A ação fica registrada no histórico de auditoria, e desfazer uma baixa também.
 O que esta versão não faz
-A versão 1.5.0 removeu o módulo financeiro e a integração com gateway de cobrança. Não há, hoje, geração de Pix ou boleto pelo aplicativo, conciliação bancária, recebimento avulso desvinculado de pedido, nem relatórios financeiros. O acompanhamento de recebimento existe no escopo acima: parcela do pedido, baixa manual.
+A versão 1.5.0 removeu o módulo financeiro e a integração com gateway de cobrança. Não há, hoje, geração de Pix ou boleto pelo aplicativo, conciliação bancária, nem recebimento avulso desvinculado de pedido. O acompanhamento de recebimento existe no escopo acima: parcela do pedido, baixa manual e relatório.
 Notificações
 O sino no canto superior da tela abre o painel de notificações. O número exibido representa os alertas ainda não lidos.
 O sistema pode avisar sobre:
@@ -221,6 +254,7 @@ Exportar para Excel
 A exportação pela Microsoft permite enviar clientes selecionados ou os resultados da pesquisa atual para um arquivo do Excel. Essa função depende da conexão da conta Microsoft configurada pelo responsável pelo sistema.
 Backup e restauração
 O backup do banco inclui clientes, pedidos, parcelas, entregas e histórico. Faça uma cópia antes de importações, restaurações ou alterações em grande quantidade.
+Desde a 1.5.2, as cópias automáticas são gravadas cifradas, ligadas à sua conta do Windows: um pendrive com uma cópia dentro não abre em outro computador nem em outra conta. Restaurar continua sendo um clique, nesta máquina. A cópia explícita para levar a outro computador é o download do banco, que sai em formato legível por ser uma exportação sua. Para ter uma cópia automática que sobreviva à perda do computador, configure no arquivo .env do aplicativo a pasta ADRI_BACKUP_EXTRA (um pendrive ou pasta sincronizada) e a senha ADRI_BACKUP_SENHA, com 12 caracteres ou mais: a cópia enviada para essa pasta passa a ser cifrada com a senha e abre em qualquer computador. Anote a senha fora da máquina. Para recuperar em outro computador, instale o aplicativo, defina a mesma senha, copie o arquivo para a pasta backups ao lado do banco e use Restaurar. Sem a senha, a cópia da pasta extra só abre nesta conta do Windows.
 Guarde o arquivo em local seguro, pois ele contém informações pessoais e financeiras. Ao restaurar uma cópia, o banco atual é substituído; o sistema cria antes uma cópia de segurança do estado atual para permitir recuperação.
 Funcionamento offline
 O indicador no topo informa o estado da conexão. Parte dos dados de clientes já carregados pode continuar disponível no computador, e algumas alterações podem ficar pendentes para envio quando o serviço voltar a responder.
@@ -277,30 +311,29 @@ Não use o campo de observações para informações pessoais que não sejam nec
 O funcionamento correto depende da qualidade dos dados. Se uma entrega concluída continuar como pendente ou uma parcela recebida não receber baixa, os alertas e indicadores também ficarão incorretos.
 Limitações atuais
 A versão atual ainda não possui controle completo de:
-quantidade física total, disponível e locada;
-reservas automáticas por período;
-entradas e saídas de estoque;
-manutenção e avarias de cada poltrona;
+manutenção e avarias de cada poltrona individual;
 compras, fornecedores e contas a pagar;
-geração de Pix ou boleto, conciliação bancária e relatórios financeiros;
+geração de Pix ou boleto e conciliação bancária;
 contratos e assinaturas digitais;
 emissão de nota fiscal;
 vários usuários com permissões diferentes;
 vários computadores trabalhando simultaneamente em uma base centralizada.
-Essas limitações não impedem o uso do sistema para cadastro, pedidos, agenda e acompanhamento das parcelas, mas devem ser consideradas na organização da operação.
+Essas limitações não impedem o uso do sistema para cadastro, pedidos, agenda, estoque e acompanhamento das parcelas, mas devem ser consideradas na organização da operação.
 Dúvidas comuns
 O cliente não aparece no pedido
 Confirme se o cadastro foi salvo e pesquise o nome na aba Clientes. Depois feche e abra novamente o formulário do pedido para atualizar a lista.
 O produto não aparece na lista de itens
 Confira se ele foi salvo na aba Produtos. Reabra o pedido para atualizar o catálogo disponível.
+O sistema recusou um item por falta de estoque
+Isso só acontece para produtos com controle ativado. Abra o botão Estoque do produto e confira a disponibilidade no período desejado: locações aprovadas reservam unidades, e um item sem datas ocupa qualquer período.
 Um cliente não aparece no mapa
 Revise CEP, rua, bairro e cidade. Confirme também se o computador possui acesso à internet e aguarde o processamento dos endereços.
 Não encontro a aba Pagamentos
-Ela foi removida na versão 1.5.0. As parcelas geradas pelo faturamento ficam dentro do próprio pedido: abra o pedido faturado e role até Parcelas a receber.
+Ela foi removida na versão 1.5.0. As parcelas geradas pelo faturamento ficam dentro do próprio pedido: abra o pedido faturado e role até Parcelas a receber. Para ver todas juntas, use a aba Relatórios.
 Não consigo exportar para Excel
 Use Conectar Microsoft antes da exportação. Se a sessão tiver expirado, faça a conexão novamente.
 O aplicativo pediu uma licença
-O período de teste é de 30 dias a partir da primeira abertura. Depois disso o aplicativo pede a licença de uso e mostra um Pix para pagamento; a liberação é automática assim que o pagamento é confirmado. Fale com o responsável pelo sistema.
+O primeiro usuário de cada instalação recebe 30 dias. Contas adicionais ficam aguardando liberação pelo desenvolvedor; a central limita a três novas instalações em teste por IP a cada 30 dias. Depois que o teste termina, o aplicativo pede a licença. A liberação manual feita pelo desenvolvedor chega quando o computador do cliente voltar a sincronizar com a API central.
 Os indicadores parecem desatualizados
 Confira se as alterações foram salvas e se não existem operações offline pendentes. Navegue novamente até o Dashboard ou reinicie o aplicativo, se necessário.
 O aplicativo informa que está sem conexão
@@ -309,4 +342,4 @@ Privacidade e uso responsável
 O Adri Poltronas armazena informações de clientes e dados financeiros necessários à operação. Utilize esses dados somente para finalidades relacionadas ao atendimento e ao gerenciamento do negócio.
 Para mais informações, consulte a Política de Privacidade.
 Adri Poltronas — mais organização, controle e clareza para acompanhar o que já aconteceu, o que está acontecendo e o que ainda precisa ser feito.
-Versão documentada: 1.5.1-beta.
+Versão documentada: 1.5.2-beta.

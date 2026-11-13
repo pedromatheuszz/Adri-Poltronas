@@ -18,6 +18,7 @@ valiosos num projeto que REMOVE escopo com alguma frequencia.
 """
 import os
 import re
+import unicodedata
 
 RAIZ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 INDEX = os.path.join(RAIZ, 'backend', 'templates', 'index.html')
@@ -27,6 +28,16 @@ PASTA_JS = os.path.join(RAIZ, 'frontend', 'js')
 def _ler(caminho: str) -> str:
     with open(caminho, encoding='utf-8') as arquivo:
         return arquivo.read()
+
+
+def _nome_de_aba_normalizado(nome: str) -> str:
+    """
+    "Relatórios" -> "relatorios": o id da aba nao carrega acento, e a prosa
+    da interface e portugues de verdade. Normalizar aqui e o que permite ao
+    teste aceitar nome acentuado sem deixar de conferir contra o id real.
+    """
+    sem_acento = unicodedata.normalize('NFKD', nome).encode('ascii', 'ignore').decode()
+    return sem_acento.lower()
 
 
 def _fontes_da_interface() -> dict:
@@ -52,7 +63,16 @@ def _abas_existentes() -> set:
 def test_index_declara_as_abas_esperadas():
     """Guarda de sanidade: se este falhar, os outros testes leem lixo."""
     assert _abas_existentes() == {
-        'dashboard', 'pedidos', 'clientes', 'produtos', 'entregas', 'mapa'}
+        'dashboard', 'pedidos', 'clientes', 'produtos', 'entregas', 'mapa',
+        'relatorios', 'desenvolvedor'}
+
+
+def test_consentimento_do_mapa_e_separado_por_conta_e_interrompe_envios():
+    codigo = _ler(os.path.join(RAIZ, 'frontend', 'js', 'app.js'))
+    assert "CHAVE_CONSENTIMENTO_MAPA + ':' + id" in codigo
+    assert "localStorage.getItem(chave) === 'sim'" in codigo
+    assert "localStorage.setItem(chave, 'sim')" in codigo
+    assert "if (_controladorMapa) _controladorMapa.abort()" in codigo
 
 
 def test_nenhum_texto_manda_o_operador_para_aba_inexistente():
@@ -61,13 +81,17 @@ def test_nenhum_texto_manda_o_operador_para_aba_inexistente():
 
     Procura por "aba <Nome>" em qualquer texto da interface e exige que <Nome>
     seja uma aba que existe.
+
+    O nome pode vir acentuado ("aba Relatórios"): a comparacao remove o
+    acento em vez de exigir que a prosa portuguesa seja escrita sem ele --
+    a aba e "relatorios", e o texto da interface e portugues.
     """
     abas = _abas_existentes()
     orfas = []
 
     for caminho, fonte in _fontes_da_interface().items():
-        for encontrado in re.finditer(r'\baba\s+([A-Z][a-zA-Z]+)', fonte):
-            nome = encontrado.group(1).lower()
+        for encontrado in re.finditer(r'\baba\s+([A-ZÀ-ÖØ-Þ][a-zA-Zà-öø-ÿ]*)', fonte):
+            nome = _nome_de_aba_normalizado(encontrado.group(1))
             if nome not in abas:
                 linha = fonte[:encontrado.start()].count('\n') + 1
                 orfas.append(f"{caminho}:{linha} cita a aba '{encontrado.group(1)}'")
@@ -226,8 +250,10 @@ def test_a_documentacao_nao_manda_procurar_aba_removida():
             baixa = linha.lower()
             if 'aba ' not in baixa:
                 continue
-            for encontrado in re.finditer(r'\baba\s+([A-Z][a-zA-Zç]+)', linha):
-                citada = encontrado.group(1).lower().replace('ç', 'c')
+            # Mesma classe de regex do teste da interface: nome de aba pode
+            # vir acentuado na prosa, e a comparacao normaliza o acento.
+            for encontrado in re.finditer(r'\baba\s+([A-ZÀ-ÖØ-Þ][a-zA-Zà-öø-ÿçÇ]*)', linha):
+                citada = _nome_de_aba_normalizado(encontrado.group(1))
                 if citada in abas:
                     continue
                 # "a aba Pagamentos foi removida" e informacao util, nao erro.

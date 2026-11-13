@@ -1,4 +1,4 @@
-.PHONY: help test lint install-deps clean build installer qt dotnet run run-qt run-dotnet dev
+.PHONY: help test lint install-deps clean build installer assinar qt dotnet run run-qt run-dotnet dev
 
 PYTHON := python
 NPM := npm
@@ -16,6 +16,7 @@ help:
 	@echo "  make clean           Remove arquivos gerados"
 	@echo "  make build           Empacota o backend (testes → lint → PyInstaller)"
 	@echo "  make installer       Build + electron-builder (instalador completo)"
+	@echo "  make assinar         Assina instalador e backend (signtool; ver docs/code-signing.md)"
 	@echo "  make qt              Compila e testa a janela Qt (QT_PREFIX_PATH)"
 	@echo "  make run-qt          Executa a janela Qt"
 	@echo "  make dotnet          Compila e testa a solution .NET/Avalonia"
@@ -60,6 +61,13 @@ installer: build
 	@echo "Gerando instalador..."
 	$(NPM) run dist
 	@echo "OK: instalador em dist-instalador/"
+
+# Assinatura de codigo sobre os artefatos do installer. As credenciais vem do
+# ambiente (ADRI_CERT_THUMBPRINT ou ADRI_CERT_ARQUIVO+ADRI_CERT_SENHA); o
+# contexto completo -- tipos de certificado, custos, SmartScreen -- vive em
+# docs/code-signing.md.
+assinar:
+	$(PYTHON) build.py assinar
 
 # Janela alternativa em C++/Qt. QT_PREFIX_PATH aponta a instalacao do Qt;
 # nao fica fixo no repositorio porque varia por maquina.

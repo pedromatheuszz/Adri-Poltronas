@@ -14,11 +14,13 @@ from functools import wraps
 from flask import Blueprint, jsonify, request
 
 from erp.comercial import servico
+from permissoes import exigir_permissao
 
 log = logging.getLogger("adri.comercial")
 
 produtos_bp = Blueprint("produtos", __name__, url_prefix="/api/produtos")
 pedidos_bp = Blueprint("pedidos", __name__, url_prefix="/api/pedidos")
+estoque_bp = Blueprint("estoque", __name__, url_prefix="/api/estoque")
 
 
 def traduzir_erros(funcao):
@@ -51,6 +53,7 @@ def _corpo() -> dict:
 # Produtos
 # =============================================================================
 @produtos_bp.route("", methods=["GET"])
+@exigir_permissao("produtos.ver")
 def listar_produtos():
     return jsonify(servico.listar_produtos(
         busca=request.args.get("busca", ""),
@@ -59,18 +62,21 @@ def listar_produtos():
 
 
 @produtos_bp.route("", methods=["POST"])
+@exigir_permissao("produtos.criar")
 @traduzir_erros
 def criar_produto():
     return jsonify(servico.criar_produto(_corpo())), 201
 
 
 @produtos_bp.route("/<int:produto_id>", methods=["PUT"])
+@exigir_permissao("produtos.editar")
 @traduzir_erros
 def atualizar_produto(produto_id):
     return jsonify(servico.atualizar_produto(produto_id, _corpo()))
 
 
 @produtos_bp.route("/<int:produto_id>", methods=["DELETE"])
+@exigir_permissao("produtos.excluir")
 @traduzir_erros
 def inativar_produto(produto_id):
     servico.inativar_produto(produto_id)
@@ -78,9 +84,40 @@ def inativar_produto(produto_id):
 
 
 # =============================================================================
+# Estoque
+# =============================================================================
+# O razao existe para responder "quantas existem"; a reserva e derivada dos
+# pedidos aprovados. Ver erp/comercial/estoque.py para o desenho.
+@estoque_bp.route("/resumo", methods=["GET"])
+@exigir_permissao("produtos.ver")
+def resumo_de_estoque():
+    """Total, locado e disponivel por produto ativo, no dia de hoje."""
+    return jsonify(servico.resumo_de_estoque())
+
+
+@produtos_bp.route("/<int:produto_id>/estoque", methods=["GET"])
+@exigir_permissao("produtos.ver")
+@traduzir_erros
+def obter_estoque(produto_id):
+    return jsonify(servico.obter_estoque(
+        produto_id,
+        inicio=request.args.get("inicio", ""),
+        fim=request.args.get("fim", ""),
+    ))
+
+
+@produtos_bp.route("/<int:produto_id>/estoque/movimentos", methods=["POST"])
+@exigir_permissao("produtos.editar")
+@traduzir_erros
+def lancar_movimento_de_estoque(produto_id):
+    return jsonify(servico.lancar_movimento_de_estoque(produto_id, _corpo())), 201
+
+
+# =============================================================================
 # Pedidos
 # =============================================================================
 @pedidos_bp.route("", methods=["GET"])
+@exigir_permissao("pedidos.ver_todos")
 def listar_pedidos():
     return jsonify(servico.listar_pedidos(
         situacao=request.args.get("situacao", ""),
@@ -89,30 +126,35 @@ def listar_pedidos():
 
 
 @pedidos_bp.route("/<int:pedido_id>", methods=["GET"])
+@exigir_permissao("pedidos.ver_todos")
 @traduzir_erros
 def obter_pedido(pedido_id):
     return jsonify(servico.obter_pedido(pedido_id))
 
 
 @pedidos_bp.route("", methods=["POST"])
+@exigir_permissao("pedidos.criar")
 @traduzir_erros
 def criar_pedido():
     return jsonify(servico.criar_pedido(_corpo())), 201
 
 
 @pedidos_bp.route("/<int:pedido_id>", methods=["PUT"])
+@exigir_permissao("pedidos.editar")
 @traduzir_erros
 def atualizar_pedido(pedido_id):
     return jsonify(servico.atualizar_pedido(pedido_id, _corpo()))
 
 
 @pedidos_bp.route("/<int:pedido_id>/itens", methods=["POST"])
+@exigir_permissao("pedidos.editar")
 @traduzir_erros
 def adicionar_item(pedido_id):
     return jsonify(servico.adicionar_item(pedido_id, _corpo())), 201
 
 
 @pedidos_bp.route("/<int:pedido_id>/itens/<int:item_id>", methods=["DELETE"])
+@exigir_permissao("pedidos.editar")
 @traduzir_erros
 def remover_item(pedido_id, item_id):
     return jsonify(servico.remover_item(pedido_id, item_id))
@@ -123,24 +165,28 @@ def remover_item(pedido_id, item_id):
 # uma tem pre-condicoes proprias, e um endpoint unico esconderia isso atras de
 # um campo de texto.
 @pedidos_bp.route("/<int:pedido_id>/abertura", methods=["POST"])
+@exigir_permissao("pedidos.editar")
 @traduzir_erros
 def abrir_pedido(pedido_id):
     return jsonify(servico.abrir_pedido(pedido_id))
 
 
 @pedidos_bp.route("/<int:pedido_id>/aprovacao", methods=["POST"])
+@exigir_permissao("pedidos.editar")
 @traduzir_erros
 def aprovar_pedido(pedido_id):
     return jsonify(servico.aprovar_pedido(pedido_id))
 
 
 @pedidos_bp.route("/<int:pedido_id>/faturamento", methods=["POST"])
+@exigir_permissao("pedidos.faturar")
 @traduzir_erros
 def faturar_pedido(pedido_id):
     return jsonify(servico.faturar_pedido(pedido_id, _corpo()))
 
 
 @pedidos_bp.route("/<int:pedido_id>/cancelamento", methods=["POST"])
+@exigir_permissao("pedidos.cancelar")
 @traduzir_erros
 def cancelar_pedido(pedido_id):
     return jsonify(servico.cancelar_pedido(pedido_id, _corpo().get("motivo", "")))
@@ -150,6 +196,7 @@ def cancelar_pedido(pedido_id):
 # PATCH e nao POST: nao ha recurso novo, so um campo mudando de valor numa
 # parcela que ja existe desde o faturamento.
 @pedidos_bp.route("/<int:pedido_id>/parcelas/<int:parcela>", methods=["PATCH"])
+@exigir_permissao("financeiro.parcelas.baixar")
 @traduzir_erros
 def baixar_parcela(pedido_id, parcela):
     return jsonify(servico.baixar_parcela(pedido_id, parcela, _corpo()))

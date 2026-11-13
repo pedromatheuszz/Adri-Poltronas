@@ -28,3 +28,16 @@
 # a ele -- mas a chave estava num arquivo-MODELO, que e justamente o que se
 # copia e compartilha, e teria ido junto se o repositorio virasse publico.
 d6f56ce52540c52e0d525cb8f80ba467354a1f2f:.env.example:generic-api-key:26
+
+# Valor FICTICIO em `tests/test_render_api_config.py`, no commit 543a5ec.
+#
+# Nao e credencial revogada: nunca foi credencial. Era o texto
+# "segredo-ficticio-de-teste-..." passado como JWT_SECRET a um teste, e a
+# regra generica do gitleaks o tomou por chave. Esta linha e a excecao a regra
+# do topo deste arquivo, e por isso diz o que e: falso positivo, conferido
+# lendo o valor.
+#
+# O arquivo foi corrigido no commit seguinte (os valores passaram a ser
+# montados por repeticao de caractere). A linha abaixo existe so porque a
+# varredura percorre o HISTORICO, e o commit antigo continua la.
+543a5ec80857cfc0a1ec15d12796adac0944fe45:tests/test_render_api_config.py:generic-api-key:12

@@ -67,9 +67,9 @@ def test_primeira_abertura_da_trinta_dias(instalacao):
 
 
 def test_o_preco_e_o_de_venda(instalacao):
-    """R$ 1.500,00 em centavos, na mesma convencao do resto do financeiro."""
-    assert licenca.VALOR_DA_LICENCA_CENTAVOS == 150000
-    assert licenca.situacao()['valor_centavos'] == 150000
+    """R$ 2.000,00 em centavos, na mesma convencao do resto do financeiro."""
+    assert licenca.VALOR_DA_LICENCA_CENTAVOS == 200000
+    assert licenca.situacao()['valor_centavos'] == 200000
 
 
 def test_a_contagem_anda_com_o_calendario(instalacao, relogio):
@@ -225,13 +225,14 @@ def test_cobranca_pendente_e_lembrada_entre_aberturas(instalacao):
     assert licenca.situacao()['estado'] == licenca.ESTADO_TESTE
 
 
-def test_isencoes_sao_apenas_as_tres_rotas_da_propria_licenca():
-    """Uma isencao a mais e uma porta aberta no bloqueio. As tres que existem
+def test_isencoes_sao_apenas_as_rotas_da_propria_licenca():
+    """Uma isencao a mais e uma porta aberta no bloqueio. As rotas existentes
     sao as que permitem sair dele."""
     assert licenca.ROTAS_ISENTAS == frozenset({
         '/api/licenca/status',
         '/api/licenca/cobranca',
         '/api/licenca/verificar',
+        '/api/licenca/teste',
     })
 
 
@@ -253,16 +254,25 @@ def cliente_com_guardas(monkeypatch, tmp_path):
     monkeypatch.setenv('ADRI_DB_PATH', banco)
     monkeypatch.setenv(capacidade.VARIAVEL_DE_AMBIENTE, TOKEN_DE_CAPACIDADE)
     monkeypatch.delenv(capacidade.VARIAVEL_DE_DESLIGAMENTO, raising=False)
+    # Estes casos exercitam a licença local por usuário. A URL eventualmente
+    # configurada no .env do desenvolvedor não pode enviar o teste à central.
+    monkeypatch.setenv('ADRI_LICENCA_API_URL', '')
 
     import app as modulo_app
+    import licenca_remota
 
     monkeypatch.setattr(database, 'DB_PATH', banco)
+    # O fallback local só deve ser testado sem depender da URL padrão remota.
+    monkeypatch.setattr(licenca_remota, 'api_configurada', lambda: False)
     database.criar_tabela()
-    database.salvar_sessao('token-de-teste', 'operador@exemplo.local')
+    user_id = database.criar_usuario('operador', 'senha-de-teste', 'usuario', 'operador@exemplo.local')
+    token = 'token-local-licenca'
+    database.salvar_sessao_local(token, user_id, 'operador', 'usuario')
 
     modulo_app.app.config['TESTING'] = False
     try:
         with modulo_app.app.test_client() as cliente:
+            cliente.set_cookie(database.NOME_COOKIE_SESSAO_LOCAL, token)
             yield cliente
     finally:
         modulo_app.app.config['TESTING'] = True

@@ -8,6 +8,7 @@ from flask import Blueprint, request, jsonify
 
 import config
 from limites import LIMITE_IA, limiter
+from permissoes import exigir_permissao
 
 log = logging.getLogger("adri.ia")
 
@@ -15,11 +16,17 @@ ia_bp = Blueprint('ia', __name__, url_prefix='/api/ia')
 
 
 @ia_bp.route('/sugestao-bairro', methods=['POST'])
+@exigir_permissao("clientes.criar")
 # Cota do Gemini: a sugestao e disparada por digitacao no formulario.
 @limiter.limit(LIMITE_IA)
 def ia_sugestao_bairro():
-    dados = request.get_json(silent=True) or {}
-    cep = (dados.get('cep') or '').replace('-', '').strip()
+    dados = request.get_json(silent=True)
+    if not isinstance(dados, dict):
+        return jsonify({"erro": "Informe um CEP válido."}), 400
+    cep_recebido = dados.get('cep', '')
+    if not isinstance(cep_recebido, str):
+        return jsonify({"erro": "Informe um CEP válido."}), 400
+    cep = cep_recebido.replace('-', '').strip()
     if len(cep) != 8 or not cep.isdigit():
         return jsonify({"erro": "CEP invalido."}), 400
     try:
@@ -30,7 +37,7 @@ def ia_sugestao_bairro():
                 return jsonify({"bairro": dados_cep.get('bairro', ''), "cidade": dados_cep.get('localidade', ''),
                     "rua": dados_cep.get('logradouro', ''), "uf": dados_cep.get('uf', ''), "fonte": "ViaCEP"})
     except Exception as e:
-        log.warning("ViaCEP falhou: %s", e)
+        log.warning("ViaCEP falhou (%s).", type(e).__name__)
     if not config.GEMINI_API_KEY:
         return jsonify({"erro": "Nao foi possivel buscar dados para este CEP."}), 502
     try:
@@ -45,5 +52,7 @@ def ia_sugestao_bairro():
             if match:
                 return jsonify({"bairro": json.loads(match.group()).get('bairro', ''), "fonte": "Gemini AI"})
     except Exception as e:
-        log.warning("Gemini falhou: %s", e)
+        # A chave Gemini fica na URL do pedido; nunca registrar o erro bruto,
+        # que pode incluir a URL completa e a própria chave.
+        log.warning("Gemini falhou (%s).", type(e).__name__)
     return jsonify({"erro": "Nao foi possivel buscar dados para este CEP."}), 502

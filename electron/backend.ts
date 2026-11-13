@@ -6,10 +6,11 @@
  * de exibicao -- antes o WebView2 embutido pelo pywebview.
  */
 import { spawn, ChildProcess } from 'node:child_process';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as esperar } from 'node:timers/promises';
-import { NOME_DO_HEADER, VARIAVEL_DE_AMBIENTE } from './capacidade';
+import { VARIAVEL_DE_AMBIENTE } from './capacidade';
 
 /** A porta e fixa porque o redirect_uri do OAuth Microsoft esta registrado
  *  no Azure como http://localhost:5000/callback. Sortear porta quebraria o
@@ -39,7 +40,12 @@ type RespostaDaSonda = {
   servico?: string;
   capacidade_exigida?: boolean;
   capacidade_aceita?: boolean;
+  prova?: unknown;
 };
+
+/** Mesmo prefixo de `capacidade.PREFIXO_DA_PROVA`, no backend. */
+const PREFIXO_DA_PROVA = 'adri-health-v1:';
+const BYTES_DO_DESAFIO = 32;
 
 /** O que a sonda encontrou na porta. */
 export type EstadoDaPorta =
@@ -80,10 +86,16 @@ function comandoDoBackend(raizProjeto: string, empacotado: boolean): {
  * herdava o aplicativo -- e tudo o que ele mandasse.
  */
 export async function sondarPorta(token: string): Promise<EstadoDaPorta> {
+  // O token NAO viaja na sonda. Ate a 1.5.2 ele ia no cabecalho, antes de se
+  // saber quem estava na porta: um processo que ocupasse 127.0.0.1:5000
+  // primeiro -- inclusive o de outro usuario do Windows, que nao le o arquivo
+  // do perfil -- recebia o segredo, respondia "aceito", era adotado como
+  // backend e passava a receber o login. Agora vai um numero aleatorio, e so
+  // quem ja conhece o token consegue devolver o HMAC dele.
+  const desafio = randomBytes(BYTES_DO_DESAFIO).toString('hex');
   let resposta: Response;
   try {
-    resposta = await fetch(URL_SONDA, {
-      headers: { [NOME_DO_HEADER]: token },
+    resposta = await fetch(`${URL_SONDA}?desafio=${desafio}`, {
       signal: AbortSignal.timeout(1_000),
     });
   } catch {
@@ -99,12 +111,24 @@ export async function sondarPorta(token: string): Promise<EstadoDaPorta> {
   }
 
   if (corpo.servico !== 'adri-poltronas') return { situacao: 'estranho' };
-  if (corpo.capacidade_exigida && !corpo.capacidade_aceita) {
-    // E um backend nosso, mas de uma instalacao com outro token. Adotar seria
-    // abrir uma janela em que nenhuma chamada de API funciona.
+  if (!provaConfere(token, desafio, corpo.prova)) {
+    // Diz ser o nosso backend, mas nao prova conhecer o token: e de outra
+    // instalacao, de uma versao anterior a prova por desafio, ou alguem se
+    // passando por ele. Em nenhum dos casos a janela pode confiar -- nem
+    // quando a resposta alega que a capacidade nao e exigida, porque a
+    // janela carimba o token em toda requisicao que manda para esta origem.
     return { situacao: 'recusou-capacidade' };
   }
   return { situacao: 'nosso' };
+}
+
+/** A resposta e o HMAC-SHA256 do desafio com o token? Mesmo calculo de
+ *  `capacidade.prova_do_desafio`, no backend. Comparacao em tempo constante. */
+export function provaConfere(token: string, desafio: string, prova: unknown): boolean {
+  if (typeof prova !== 'string' || !/^[0-9a-f]{64}$/.test(prova)) return false;
+  const esperada = createHmac('sha256', token).update(PREFIXO_DA_PROVA + desafio).digest();
+  const recebida = Buffer.from(prova, 'hex');
+  return recebida.length === esperada.length && timingSafeEqual(recebida, esperada);
 }
 
 export async function iniciarBackend(

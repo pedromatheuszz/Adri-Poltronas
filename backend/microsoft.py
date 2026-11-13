@@ -108,10 +108,9 @@ def renovar_token(refresh_token: str):
         with urllib.request.urlopen(requisicao, timeout=TIMEOUT_S) as resposta:  # noqa: S310 - URL montada de constante do proprio codigo, sempre https
             return json.loads(resposta.read().decode('utf-8')), RENOVADO
     except urllib.error.HTTPError as erro:
-        corpo = erro.read().decode('utf-8', errors='replace')
-        # O corpo traz o motivo (invalid_grant, consent_required...). Vai para
-        # o log, nunca para a resposta HTTP: ele cita identificadores da conta.
-        log.warning("[RENOVACAO] Microsoft recusou (HTTP %s): %s", erro.code, corpo[:400])
+        # O corpo pode carregar identificadores de conta; o status basta para
+        # distinguir uma recusa da falha de rede tratada abaixo.
+        log.warning("[RENOVACAO] Microsoft recusou a renovação (HTTP %s).", erro.code)
         # HTTPError e subclasse de URLError, entao precisa vir ANTES dela.
         # A Microsoft respondeu: a recusa e definitiva.
         return None, RECUSADO
@@ -178,5 +177,5 @@ def obter_token_valido():
         # vem um novo, ele substitui o anterior.
         renovado.get('refresh_token'),
     )
-    log.info("[RENOVACAO] Token renovado em silencio para %s", sessao.get('conta'))
+    log.info("[RENOVACAO] Token Microsoft renovado em silêncio.")
     return novo_token

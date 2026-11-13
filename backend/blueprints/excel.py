@@ -14,12 +14,14 @@ import database
 import microsoft
 import planilha
 from limites import LIMITE_ONEDRIVE, limiter
+from permissoes import exigir_permissao
 
 log = logging.getLogger("adri.excel")
 
 excel_bp = Blueprint('excel', __name__, url_prefix='/api/excel')
 
 NOME_ARQUIVO_PADRAO = "Clientes_AdriPoltronas"
+TIMEOUT_ONEDRIVE_S = 30
 
 # Caracteres proibidos em nome de arquivo no Windows e no OneDrive.
 _RE_CARACTERES_PROIBIDOS = re.compile(r'[\\/:*?"<>|]')
@@ -56,6 +58,7 @@ CAMPOS = ['nome', 'cep', 'rua', 'bairro', 'cidade', 'entrega_retirada', 'observa
 
 
 @excel_bp.route('/enviar', methods=['POST'])
+@exigir_permissao("config.integracao.microsoft")
 # Cota do Microsoft Graph, e o arquivo enviado e grande.
 @limiter.limit(LIMITE_ONEDRIVE)
 def enviar_excel_onedrive():
@@ -86,19 +89,18 @@ def enviar_excel_onedrive():
         headers={"Authorization": f"Bearer {token}", "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
         method='PUT')
     try:
-        with urllib.request.urlopen(req_upload) as resp:  # noqa: S310 - URL montada de constante do proprio codigo, sempre https
+        with urllib.request.urlopen(req_upload, timeout=TIMEOUT_ONEDRIVE_S) as resp:  # noqa: S310 - URL montada de constante do proprio codigo, sempre https
             retorno = json.loads(resp.read().decode('utf-8'))
             web_url = retorno.get('webUrl')
         if web_url:
             webbrowser.open(web_url)
         return jsonify({"mensagem": "Planilha enviada!", "url": web_url}), 200
     except urllib.error.HTTPError as e:
-        erro_corpo = e.read().decode('utf-8', errors='replace')
-        log.error("Graph HTTP %s: %s", e.code, erro_corpo)
+        log.error("Graph recusou o envio (HTTP %s).", e.code)
         if e.code == 401:
             database.excluir_sessao()
             return jsonify({"erro": "Sessao expirada. Reconecte."}), 401
         return jsonify({"erro": f"Erro {e.code} ao enviar para Excel."}), 502
     except urllib.error.URLError as e:
-        log.error("Conexao com Graph: %s", e.reason)
+        log.error("Falha de conexão com o Graph (%s).", type(e.reason).__name__)
         return jsonify({"erro": "Falha de conexao com a Microsoft."}), 502

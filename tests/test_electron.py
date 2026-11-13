@@ -164,6 +164,37 @@ def test_electron_usa_a_mesma_porta_do_backend():
     assert "HOST = '127.0.0.1'" in fonte
 
 
+def test_sonda_do_electron_nao_envia_o_token():
+    """
+    A sonda roda ANTES de se saber quem esta na porta 5000. Enviar o token
+    nela entregava o segredo a qualquer processo que tivesse chegado primeiro
+    -- que respondia "aceito" e herdava a janela, com o login junto.
+
+    O que vai agora e um desafio aleatorio; a resposta e conferida por HMAC.
+    """
+    fonte = _ler(os.path.join(RAIZ, 'electron', 'backend.ts'))
+    sonda = fonte.split('export async function sondarPorta')[1].split('\nexport ')[0]
+
+    assert 'headers' not in sonda, 'a sonda voltou a mandar cabecalho'
+    assert 'NOME_DO_HEADER' not in fonte, 'o cabecalho de capacidade nao pertence a sonda'
+    assert 'randomBytes' in sonda and 'desafio=' in sonda
+    assert 'provaConfere(token, desafio, corpo.prova)' in sonda
+    # Um backend que alega nao exigir capacidade tambem precisa provar quem e:
+    # a janela carimba o token em toda requisicao que manda para essa origem.
+    assert 'capacidade_aceita' not in sonda
+    assert 'timingSafeEqual' in fonte
+
+
+def test_prefixo_da_prova_e_o_mesmo_nas_duas_pontas():
+    """Electron e backend calculam o mesmo HMAC; prefixo diferente e janela
+    que nunca reconhece o proprio servidor."""
+    sys.path.insert(0, BACKEND)
+    import capacidade
+
+    fonte = _ler(os.path.join(RAIZ, 'electron', 'backend.ts'))
+    assert f"PREFIXO_DA_PROVA = '{capacidade.PREFIXO_DA_PROVA}'" in fonte
+
+
 def test_typescript_em_modo_estrito():
     config = _ler(os.path.join(RAIZ, 'tsconfig.json'))
     assert '"strict": true' in config

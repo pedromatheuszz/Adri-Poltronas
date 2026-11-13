@@ -3,7 +3,8 @@ Cofre das credenciais de integracao.
 
 O problema
 ----------
-`MP_ACCESS_TOKEN` e `GEMINI_API_KEY` viviam em texto puro em
+`MP_ACCESS_TOKEN`, `GEMINI_API_KEY` e o token administrativo da licença
+viviam em texto puro em
 `%APPDATA%\\AdriPoltronas\\.env`. Qualquer processo rodando como o mesmo
 usuario -- e qualquer pessoa que abrisse a pasta -- lia as chaves. A do
 Mercado Pago da acesso total a conta do vendedor: criar cobranca, ler
@@ -59,7 +60,29 @@ NOME_DO_COFRE = ".segredos"
 # Chaves que o cofre guarda. Sao as credenciais de integracao; `ADRI_FLASK_SECRET`
 # fica de fora de proposito -- ele e um segredo de sessao, regeneravel, e
 # perde-lo custa apenas relogin.
-CHAVES_PROTEGIDAS = ("MP_ACCESS_TOKEN", "GEMINI_API_KEY")
+CHAVES_PROTEGIDAS = (
+    "MP_ACCESS_TOKEN",
+    "GEMINI_API_KEY",
+    "ADRI_LICENCA_ADMIN_TOKEN",
+    # Senha das cópias de segurança portáteis: quem a lê abre o banco inteiro
+    # gravado no pendrive.
+    "ADRI_BACKUP_SENHA",
+    # Chaves locais de vínculo: não são credenciais de serviço, mas precisam
+    # continuar protegidas pela DPAPI para sobreviver a cópia/reinstalação.
+    "ADRI_DESENVOLVEDOR_DISPOSITIVO",
+    "ADRI_DESENVOLVEDOR_IPS",
+    "ADRI_LICENCA_INSTALLATION_ID",
+)
+
+# Chaves que podem ser importadas de arquivos `.env`. Os marcadores DPAPI de
+# dispositivo só podem ser criados pelo fluxo autenticado, nunca pela edição
+# de configuração do usuário.
+CHAVES_MIGRAVEIS = frozenset({
+    "MP_ACCESS_TOKEN",
+    "GEMINI_API_KEY",
+    "ADRI_LICENCA_ADMIN_TOKEN",
+    "ADRI_BACKUP_SENHA",
+})
 
 _cache: dict | None = None
 
@@ -125,6 +148,15 @@ def obter(nome: str, padrao: str = "") -> str:
         return do_cofre
 
     return do_ambiente_real or padrao
+
+
+def obter_do_cofre(nome: str, padrao: str = "") -> str:
+    """Lê exclusivamente um valor DPAPI, ignorando variáveis de ambiente.
+
+    Use para vínculos de dispositivo e autorizações que não podem ser
+    substituídos por um valor que o próprio usuário colocou no ambiente.
+    """
+    return _ler_cofre().get(nome, padrao)
 
 
 _origem_env: set = set()
@@ -221,7 +253,7 @@ def migrar_do_env(caminho_env: str) -> list:
             continue
         nome, _, valor = despida.partition("=")
         nome, valor = nome.strip(), valor.strip()
-        if nome in CHAVES_PROTEGIDAS and valor:
+        if nome in CHAVES_MIGRAVEIS and valor:
             em_texto[nome] = valor
 
     if not em_texto:
@@ -270,7 +302,8 @@ def _descartar_copia_em_claro(caminho_bak: str, migradas: dict) -> None:
     `.env`. Cumprida essa funcao, ela vira o oposto do que o cofre faz: um
     arquivo permanente, em texto puro, na mesma pasta do banco, contendo o
     `MP_ACCESS_TOKEN` (que da acesso total a conta do vendedor no Mercado Pago
-    -- criar cobranca, ler movimentacao, estornar) e a `GEMINI_API_KEY`. O
+    -- criar cobranca, ler movimentacao, estornar), `GEMINI_API_KEY` e o token
+    administrativo da API central de licencas. O
     trabalho de cifrar ficava metade desfeito, e para sempre.
 
     A conferencia por releitura e o que torna seguro apagar. O risco oposto e
@@ -292,7 +325,8 @@ def _descartar_copia_em_claro(caminho_bak: str, migradas: dict) -> None:
         #
         # `obter()` percorre a precedencia inteira e termina em
         # `return do_ambiente_real or padrao`. Em producao o `load_dotenv()` ja
-        # colocou MP_ACCESS_TOKEN e GEMINI_API_KEY em `os.environ` -- com
+        # colocou MP_ACCESS_TOKEN, GEMINI_API_KEY e o token administrativo em
+        # `os.environ` -- com
         # exatamente o valor que esta sendo migrado. Entao, se o DPAPI cifrasse
         # e NAO conseguisse decifrar de volta, o cofre devolvia vazio, a funcao
         # caia nesse ultimo degrau, entregava o valor do ambiente e a

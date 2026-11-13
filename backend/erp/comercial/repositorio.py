@@ -157,15 +157,18 @@ def obter_pedido_com_itens(conexao, pedido_id: int) -> dict | None:
 def inserir_pedido(conexao, dados: dict) -> int:
     conexao.execute(
         """INSERT INTO pedidos (numero, cliente_id, cliente_nome, data_emissao,
-                                data_entrega_prevista, desconto_centavos, frete_centavos,
+                                data_entrega_prevista, data_inicio_aluguel,
+                                data_fim_aluguel, desconto_centavos, frete_centavos,
                                 observacoes)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             dados["numero"],
             dados["cliente_id"],
             dados["cliente_nome"],
             dados["data_emissao"],
             dados.get("data_entrega_prevista", ""),
+            dados.get("data_inicio_aluguel", ""),
+            dados.get("data_fim_aluguel", ""),
             dados.get("desconto_centavos", 0),
             dados.get("frete_centavos", 0),
             dados.get("observacoes", ""),
@@ -178,6 +181,7 @@ def atualizar_cabecalho(conexao, pedido_id: int, dados: dict) -> None:
     conexao.execute(
         """UPDATE pedidos
               SET cliente_id = ?, cliente_nome = ?, data_entrega_prevista = ?,
+                  data_inicio_aluguel = ?, data_fim_aluguel = ?,
                   desconto_centavos = ?, frete_centavos = ?, observacoes = ?,
                   atualizado_em = datetime('now', 'localtime')
             WHERE id = ?""",
@@ -185,6 +189,8 @@ def atualizar_cabecalho(conexao, pedido_id: int, dados: dict) -> None:
             dados["cliente_id"],
             dados["cliente_nome"],
             dados.get("data_entrega_prevista", ""),
+            dados.get("data_inicio_aluguel", ""),
+            dados.get("data_fim_aluguel", ""),
             dados.get("desconto_centavos", 0),
             dados.get("frete_centavos", 0),
             dados.get("observacoes", ""),
@@ -265,6 +271,19 @@ def listar_itens(conexao, pedido_id: int) -> list[dict]:
     )
 
 
+def obter_item(conexao, item_id: int) -> dict | None:
+    """Retorna um item pelo ID (inclui datas de aluguel)."""
+    return _dict(
+        conexao.execute(
+            """SELECT i.*, pr.codigo AS produto_codigo, pr.unidade AS produto_unidade
+                 FROM pedido_itens i
+                 JOIN produtos pr ON pr.id = i.produto_id
+                WHERE i.id = ?""",
+            (item_id,),
+        )
+    )
+
+
 def inserir_item(conexao, pedido_id: int, dados: dict) -> int:
     proxima = conexao.execute(
         "SELECT COALESCE(MAX(sequencia), 0) + 1 FROM pedido_itens WHERE pedido_id = ?",
@@ -273,8 +292,9 @@ def inserir_item(conexao, pedido_id: int, dados: dict) -> int:
     conexao.execute(
         """INSERT INTO pedido_itens (pedido_id, produto_id, descricao, quantidade,
                                      preco_unitario_centavos, desconto_centavos,
-                                     total_centavos, sequencia)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                                     total_centavos, sequencia,
+                                     data_inicio_aluguel, data_fim_aluguel)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             pedido_id,
             dados["produto_id"],
@@ -284,6 +304,8 @@ def inserir_item(conexao, pedido_id: int, dados: dict) -> int:
             dados.get("desconto_centavos", 0),
             dados["total_centavos"],
             proxima,
+            dados.get("data_inicio_aluguel", ""),
+            dados.get("data_fim_aluguel", ""),
         ),
     )
     return conexao.execute("SELECT last_insert_rowid()").fetchone()[0]

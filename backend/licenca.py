@@ -53,8 +53,8 @@ log = logging.getLogger("adri.licenca")
 DIAS_DE_TESTE = 30
 
 # Preco de venda, em centavos -- a mesma convencao que o resto do financeiro
-# usa (ver `erp/core/dinheiro.py`). R$ 1.500,00.
-VALOR_DA_LICENCA_CENTAVOS = 150000
+# usa (ver `erp/core/dinheiro.py`). R$ 2.000,00.
+VALOR_DA_LICENCA_CENTAVOS = 200000
 
 NOME_DO_ARQUIVO = ".licenca"
 
@@ -70,11 +70,13 @@ ROTAS_ISENTAS = frozenset({
     "/api/licenca/status",
     "/api/licenca/cobranca",
     "/api/licenca/verificar",
+    "/api/licenca/teste",
 })
 
 ESTADO_TESTE = "teste"
 ESTADO_PAGA = "paga"
 ESTADO_EXPIRADA = "expirada"
+ESTADO_DESATIVADA = "desativada"
 
 # Formato ISO sem fuso: o app e de uso local, numa maquina so, e gravar fuso
 # aqui daria a impressao de uma precisao que a contagem em DIAS nao tem.
@@ -161,7 +163,8 @@ def _ler_banco() -> dict:
         with database.conectar() as conexao:
             linha = conexao.execute(
                 "SELECT instalado_em, visto_em, estado, pagamento_id, pago_em, "
-                "referencia FROM licenca LIMIT 1"
+                "referencia, teste_modo, teste_ate, teste_controle_em "
+                "FROM licenca LIMIT 1"
             ).fetchone()
     except Exception as erro:
         # Banco novo antes da migration, ou schema de emergencia sem a tabela.
@@ -177,10 +180,13 @@ def _gravar_banco(dados: dict) -> None:
             conexao.execute("DELETE FROM licenca")
             conexao.execute(
                 "INSERT INTO licenca (instalado_em, visto_em, estado, "
-                "pagamento_id, pago_em, referencia) VALUES (?,?,?,?,?,?)",
+                "pagamento_id, pago_em, referencia, teste_modo, teste_ate, "
+                "teste_controle_em) VALUES (?,?,?,?,?,?,?,?,?)",
                 (dados.get("instalado_em", ""), dados.get("visto_em", ""),
                  dados.get("estado", ""), dados.get("pagamento_id", ""),
-                 dados.get("pago_em", ""), dados.get("referencia", "")),
+                 dados.get("pago_em", ""), dados.get("referencia", ""),
+                 dados.get("teste_modo", ""), dados.get("teste_ate", ""),
+                 dados.get("teste_controle_em", "")),
             )
     except Exception as erro:
         log.warning("[LICENCA] Nao foi possivel gravar no banco: %s", erro)
@@ -216,7 +222,19 @@ def _reconciliar(do_arquivo: dict, do_banco: dict) -> dict:
         "pago_em": (pago or {}).get("pago_em", "") or "",
         "referencia": (do_arquivo.get("referencia")
                        or do_banco.get("referencia") or ""),
+        "teste_modo": "",
+        "teste_ate": "",
+        "teste_controle_em": "",
     }
+    # Um comando explícito do desenvolvedor é mais novo que o conteúdo de um
+    # backup antigo. As duas cópias recebem o mesmo carimbo ao salvar.
+    controles = [lado for lado in (do_arquivo, do_banco)
+                 if _data(lado.get("teste_controle_em"))]
+    if controles:
+        controle = max(controles, key=lambda lado: _data(lado.get("teste_controle_em")))
+        juntado["teste_modo"] = controle.get("teste_modo", "") or ""
+        juntado["teste_ate"] = controle.get("teste_ate", "") or ""
+        juntado["teste_controle_em"] = controle.get("teste_controle_em", "") or ""
     return juntado
 
 
@@ -266,6 +284,7 @@ def situacao() -> dict:
     ja incorporou o avanco, e em nenhum dos casos o teste anda para tras.
     """
     dados = _carregar_e_atualizar_marca()
+    modo_teste = dados.get("teste_modo", "") or "automatico"
 
     if dados["estado"] == ESTADO_PAGA:
         return {
@@ -276,7 +295,38 @@ def situacao() -> dict:
             "pagamento_id": dados["pagamento_id"],
             "referencia": dados["referencia"],
             "valor_centavos": VALOR_DA_LICENCA_CENTAVOS,
+            "teste_modo": modo_teste,
         }
+
+    if modo_teste == "desativado":
+        return {
+            "estado": ESTADO_DESATIVADA,
+            "dias_restantes": None,
+            "instalado_em": dados["instalado_em"],
+            "pago_em": "",
+            "pagamento_id": dados["pagamento_id"],
+            "referencia": dados["referencia"],
+            "valor_centavos": VALOR_DA_LICENCA_CENTAVOS,
+            "teste_modo": modo_teste,
+        }
+
+    if modo_teste == "manual":
+        liberado_ate = _data(dados.get("teste_ate"))
+        marca_manual = _data(dados.get("visto_em")) or _agora()
+        restantes_manuais = ((liberado_ate.date() - marca_manual.date()).days
+                             if liberado_ate else 0)
+        if restantes_manuais > 0:
+            return {
+                "estado": ESTADO_TESTE,
+                "dias_restantes": restantes_manuais,
+                "instalado_em": dados["instalado_em"],
+                "expira_em": _texto(liberado_ate),
+                "pago_em": "",
+                "pagamento_id": dados["pagamento_id"],
+                "referencia": dados["referencia"],
+                "valor_centavos": VALOR_DA_LICENCA_CENTAVOS,
+                "teste_modo": modo_teste,
+            }
 
     instalado = _data(dados["instalado_em"]) or _agora()
     referencia = _data(dados["visto_em"]) or _agora()
@@ -292,12 +342,113 @@ def situacao() -> dict:
         "pagamento_id": dados["pagamento_id"],
         "referencia": dados["referencia"],
         "valor_centavos": VALOR_DA_LICENCA_CENTAVOS,
+        "teste_modo": modo_teste,
     }
 
 
 def esta_liberado() -> bool:
     """Verdadeiro enquanto o app pode ser usado: teste vigente ou licenca paga."""
-    return situacao()["estado"] in (ESTADO_TESTE, ESTADO_PAGA)
+    return situacao()["estado"] in (ESTADO_TESTE, ESTADO_PAGA, ESTADO_DESATIVADA)
+
+
+def situacao_usuario(user_id: int) -> dict:
+    """Retorna o período de teste individual da conta."""
+    import database
+    conta = database.obter_teste_usuario(user_id)
+    if not conta:
+        return {
+            "estado": ESTADO_EXPIRADA,
+            "dias_restantes": 0,
+            "teste_modo": "expirado",
+            "expira_em": "",
+            "valor_centavos": VALOR_DA_LICENCA_CENTAVOS,
+        }
+
+    modo = conta.get("teste_modo") or "automatico"
+    if modo == "desativado":
+        return {
+            "estado": ESTADO_DESATIVADA,
+            "dias_restantes": None,
+            "teste_modo": modo,
+            "inicio_em": conta.get("teste_inicio_em", ""),
+            "expira_em": "",
+            "valor_centavos": VALOR_DA_LICENCA_CENTAVOS,
+        }
+
+    fim = _data(conta.get("teste_ate"))
+    agora = _agora()
+    dias = (fim.date() - agora.date()).days if fim else 0
+    return {
+        "estado": ESTADO_TESTE if dias > 0 else ESTADO_EXPIRADA,
+        "dias_restantes": max(dias, 0),
+        "teste_modo": modo,
+        "inicio_em": conta.get("teste_inicio_em", ""),
+        "expira_em": _texto(fim) if fim else "",
+        "valor_centavos": VALOR_DA_LICENCA_CENTAVOS,
+    }
+
+
+def controlar_teste_usuario(user_id: int, acao: str) -> dict | None:
+    """Libera mais 30 dias ou desativa o limite de uma conta específica."""
+    import database
+
+    conta = database.obter_teste_usuario(user_id)
+    if not conta:
+        return None
+    agora = _agora()
+    controle_anterior = _data(conta.get("teste_controle_em"))
+    if controle_anterior and agora <= controle_anterior:
+        agora = controle_anterior + timedelta(seconds=1)
+
+    if acao == "liberar_30_dias":
+        modo = "manual"
+        inicio = _texto(agora)
+        ate = _texto(agora + timedelta(days=DIAS_DE_TESTE))
+    elif acao == "desativar":
+        modo = "desativado"
+        inicio = conta.get("teste_inicio_em") or _texto(agora)
+        ate = ""
+    else:
+        raise ValueError("Ação de teste inválida.")
+
+    database.gravar_teste_usuario(user_id, modo, inicio, ate, _texto(agora))
+    log.info("[LICENCA] Controle do teste atualizado para usuario %s: %s", user_id, modo)
+    return situacao_usuario(user_id)
+
+
+def _momento_do_controle(dados: dict):
+    agora = _agora()
+    anteriores = [_data(dados.get("visto_em")), _data(dados.get("teste_controle_em"))]
+    anteriores = [momento for momento in anteriores if momento]
+    base = max([agora, *anteriores])
+    controle_anterior = _data(dados.get("teste_controle_em"))
+    if controle_anterior and base <= controle_anterior:
+        base = controle_anterior + timedelta(seconds=1)
+    return base
+
+
+def liberar_teste_30_dias() -> dict:
+    """Reinicia por 30 dias o teste, inclusive depois da expiração automática."""
+    dados = _carregar_e_atualizar_marca()
+    agora = _momento_do_controle(dados)
+    dados["teste_modo"] = "manual"
+    dados["teste_ate"] = _texto(agora + timedelta(days=DIAS_DE_TESTE))
+    dados["teste_controle_em"] = _texto(agora)
+    _persistir(dados)
+    log.info("[LICENCA] Período de teste liberado manualmente por %s dias.", DIAS_DE_TESTE)
+    return situacao()
+
+
+def desativar_teste() -> dict:
+    """Desativa o vencimento do período de teste nesta instalação."""
+    dados = _carregar_e_atualizar_marca()
+    agora = _momento_do_controle(dados)
+    dados["teste_modo"] = "desativado"
+    dados["teste_ate"] = ""
+    dados["teste_controle_em"] = _texto(agora)
+    _persistir(dados)
+    log.info("[LICENCA] Período de teste desativado pelo desenvolvedor.")
+    return situacao()
 
 
 def registrar_pagamento(pagamento_id: str) -> dict:

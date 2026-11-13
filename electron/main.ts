@@ -5,7 +5,7 @@
  * proprio processo Python. Aqui o Electron abre a janela, e o Flask segue
  * como backend em processo separado.
  */
-import { app, BrowserWindow, dialog, session, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, session, shell } from 'electron';
 import { join } from 'node:path';
 import { iniciarBackend, pararBackend, URL_APP } from './backend';
 import { NOME_DO_HEADER, obterToken } from './capacidade';
@@ -19,8 +19,63 @@ const raizProjeto = join(__dirname, '..');
 let janela: BrowserWindow | null = null;
 let encerrando = false;
 
+function pertenceAoApp(url: string): boolean {
+  try {
+    return new URL(url).origin === new URL(URL_APP).origin;
+  } catch {
+    return false;
+  }
+}
+
+function abrirExternoSeguro(url: string): void {
+  try {
+    if (new URL(url).protocol === 'https:') void shell.openExternal(url);
+  } catch {
+    // URLs malformadas e protocolos locais nunca saem do aplicativo.
+  }
+}
+
+function validarOrigemDaJanela(evento: Electron.IpcMainInvokeEvent): BrowserWindow {
+  const frame = evento.senderFrame;
+  const origem = frame?.url;
+  if (!origem || frame !== evento.sender.mainFrame || new URL(origem).origin !== new URL(URL_APP).origin) {
+    throw new Error('Origem da janela invalida.');
+  }
+  const origemJanela = BrowserWindow.fromWebContents(evento.sender);
+  if (!origemJanela || origemJanela !== janela) {
+    throw new Error('Janela nao autorizada.');
+  }
+  return origemJanela;
+}
+
+function registrarControlesDaJanela(): void {
+  ipcMain.handle('janela:minimizar', (evento) => {
+    validarOrigemDaJanela(evento).minimize();
+  });
+  ipcMain.handle('janela:alternar-maximizada', (evento) => {
+    const alvo = validarOrigemDaJanela(evento);
+    if (alvo.isMaximized()) alvo.unmaximize();
+    else alvo.maximize();
+  });
+  ipcMain.handle('janela:fechar', (evento) => {
+    validarOrigemDaJanela(evento).close();
+  });
+}
+
+function publicarEstadoDaJanela(alvo: BrowserWindow): void {
+  const publicar = () => {
+    if (!alvo.isDestroyed() && !alvo.webContents.isDestroyed()) {
+      alvo.webContents.send('janela:estado-maximizada', alvo.isMaximized());
+    }
+  };
+  alvo.on('maximize', publicar);
+  alvo.on('unmaximize', publicar);
+  alvo.webContents.on('did-finish-load', publicar);
+}
+
 function criarJanela(): BrowserWindow {
   const nova = new BrowserWindow({
+    frame: false,
     width: LARGURA_PADRAO,
     height: ALTURA_PADRAO,
     minWidth: LARGURA_MINIMA,
@@ -41,25 +96,27 @@ function criarJanela(): BrowserWindow {
       nodeIntegration: false,
       sandbox: true,
       webSecurity: true,
+      preload: join(__dirname, 'preload.js'),
     },
   });
 
   // Só exibe quando ha conteudo pintado.
   nova.once('ready-to-show', () => nova.show());
+  publicarEstadoDaJanela(nova);
 
   // Links externos (arquivo no OneDrive, cobranca da licenca) abrem no
   // navegador do sistema; dentro do app eles virariam uma janela sem barra de
   // endereco.
   nova.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('https://')) void shell.openExternal(url);
+    abrirExternoSeguro(url);
     return { action: 'deny' };
   });
 
   // Navegacao para fora da origem local tambem vai para o navegador.
   nova.webContents.on('will-navigate', (evento, url) => {
-    if (!url.startsWith(URL_APP)) {
+    if (!pertenceAoApp(url)) {
       evento.preventDefault();
-      if (url.startsWith('https://')) void shell.openExternal(url);
+      abrirExternoSeguro(url);
     }
   });
 
@@ -82,7 +139,7 @@ function injetarCapacidade(token: string): void {
   session.defaultSession.webRequest.onBeforeSendHeaders(
     { urls: ['<all_urls>'] },
     (detalhes, prosseguir) => {
-      if (!detalhes.url.startsWith(URL_APP)) {
+      if (!pertenceAoApp(detalhes.url)) {
         // Nunca para fora: o token nao pode vazar para o Mercado Pago, o
         // ViaCEP ou qualquer outro destino que a pagina consulte.
         prosseguir({ requestHeaders: detalhes.requestHeaders });
@@ -114,6 +171,7 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.whenReady().then(async () => {
+    registrarControlesDaJanela();
     // O token precisa existir ANTES do backend subir (ele o recebe por
     // variavel de ambiente) e antes da primeira navegacao (a propria pagina
     // inicial ja e recusada sem ele).

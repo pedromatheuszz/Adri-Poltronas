@@ -43,16 +43,34 @@ def app_real(monkeypatch, tmp_path):
     """O app com os guardas ligados, sobre um banco descartavel e vazio."""
     banco = str(tmp_path / 'auth.db')
     monkeypatch.setenv('ADRI_DB_PATH', banco)
+    monkeypatch.setenv('APPDATA', str(tmp_path / 'appdata'))
     monkeypatch.setenv(capacidade.VARIAVEL_DE_AMBIENTE, TOKEN_DE_CAPACIDADE)
     monkeypatch.delenv(capacidade.VARIAVEL_DE_DESLIGAMENTO, raising=False)
 
     import app as modulo_app
     import database
+    import licenca_remota
+    import segredos
+
+    # Este arquivo mede o guarda de AUTENTICACAO. O de licenca vem logo depois
+    # dele na fila e, com a API central configurada, sincroniza a conta pela
+    # rede antes de deixar passar -- os testes "com sessao" so ficavam verdes
+    # porque alcancavam o servico de producao e registravam la uma conta nova
+    # a cada execucao. Sem central, vale o periodo de teste local da conta
+    # recem-criada, que e o que estes cenarios precisam.
+    monkeypatch.setattr(licenca_remota, 'api_configurada', lambda: False)
+
+    # Os testes de autenticação não devem ler nem escrever o cofre real do
+    # desenvolvedor; cada caso usa um perfil temporário e cache limpo.
+    monkeypatch.setattr(segredos, '_cache', {})
+    monkeypatch.setattr(segredos, '_origem_env', set())
 
     monkeypatch.setattr(database, 'DB_PATH', banco)
     database.criar_tabela()
 
     modulo_app.app.config['TESTING'] = False
+    limite_original = modulo_app.app.config.get('RATELIMIT_ENABLED', True)
+    modulo_app.app.config['RATELIMIT_ENABLED'] = False
     try:
         yield modulo_app, database
     finally:
@@ -60,6 +78,7 @@ def app_real(monkeypatch, tmp_path):
         # desligado por causa de uma falha aqui derrubaria arquivos inteiros
         # depois, e a causa apareceria longe daqui.
         modulo_app.app.config['TESTING'] = True
+        modulo_app.app.config['RATELIMIT_ENABLED'] = limite_original
 
 
 @pytest.fixture
@@ -72,9 +91,20 @@ def sem_sessao(app_real):
 @pytest.fixture
 def com_sessao(app_real):
     modulo_app, database = app_real
-    database.salvar_sessao('token-de-teste', 'operador@exemplo.local')
     with modulo_app.app.test_client() as cliente:
+        _criar_sessao_local(database, cliente, 'operador', 'administrador')
         yield cliente
+
+
+def _criar_sessao_local(database, cliente, username='operador', role='usuario', ativo=True):
+    """Cria usuário e apresenta o cookie de sessão exigido pelo backend."""
+    user_id = database.criar_usuario(username, 'senha-local-de-teste', role, username + '@exemplo.local')
+    token = 'token-local-de-teste-' + str(user_id)
+    database.salvar_sessao_local(token, user_id, username, role)
+    cliente.set_cookie(database.NOME_COOKIE_SESSAO_LOCAL, token)
+    if not ativo:
+        database.atualizar_usuario_local(user_id, ativo=0)
+    return user_id
 
 
 # =============================================================================
@@ -167,6 +197,80 @@ def test_status_de_login_responde_sem_sessao(sem_sessao):
     assert resposta.get_json()['logado'] is False
 
 
+def test_setup_inicial_cria_desenvolvedor_uma_unica_vez(app_real, monkeypatch):
+    modulo_app, database = app_real
+    from blueprints import auth_local
+    import licenca_remota
+    import segredos
+
+    chave = 'chave-de-fornecedor-falsa-com-comprimento-suficiente-para-testes'
+    monkeypatch.setattr(licenca_remota, 'validar_token_admin', lambda valor: valor == chave)
+    monkeypatch.setattr(auth_local, '_ip_publico_atual', lambda: '203.0.113.10')
+    monkeypatch.setattr(licenca_remota, 'identidade_instalacao', lambda: 'identidade-fixa-de-teste')
+    assert segredos.gravar({auth_local.CHAVE_ATIVACAO_DESENVOLVEDOR: chave})
+
+    cabecalhos_setup = {**CABECALHOS, 'Origin': 'http://localhost'}
+    with modulo_app.app.test_client() as cliente:
+        estado = cliente.get('/api/auth/local/status', headers=CABECALHOS).get_json()
+        assert estado['setup_required'] is True
+
+        resposta = cliente.post(
+            '/api/auth/local/setup',
+            json={
+                'username': 'proprietario',
+                'senha': 'uma-senha-forte-de-teste',
+                'email': 'dev@exemplo.local',
+                'chave_ativacao': chave,
+            },
+            headers=cabecalhos_setup,
+        )
+        assert resposta.status_code == 201
+        cookies = '\n'.join(resposta.headers.getlist('Set-Cookie'))
+        assert 'HttpOnly' in cookies
+        assert 'SameSite=Strict' in cookies
+        assert resposta.get_json()['usuario']['role'] == 'desenvolvedor'
+        assert cliente.get('/api/auth/local/me', headers=CABECALHOS).get_json()['logado'] is True
+
+        novamente = cliente.post(
+            '/api/auth/local/setup',
+            json={'username': 'outro', 'senha': 'mais-uma-senha-longa-e-forte',
+                  'chave_ativacao': chave},
+            headers=cabecalhos_setup,
+        )
+        assert novamente.status_code == 409
+    assert database.contar_usuarios() == 1
+
+
+def test_setup_inicial_exige_senha_forte(app_real):
+    modulo_app, _ = app_real
+    with modulo_app.app.test_client() as cliente:
+        resposta = cliente.post(
+            '/api/auth/local/setup',
+            json={'username': 'proprietario', 'senha': 'curta'},
+            headers={**CABECALHOS, 'Origin': 'http://localhost'},
+        )
+    assert resposta.status_code == 400
+
+
+def test_login_e_cadastro_rejeitam_nome_acima_de_80_caracteres(app_real):
+    modulo_app, _ = app_real
+    cabecalhos = {**CABECALHOS, 'Origin': 'http://localhost'}
+    username = 'u' * 81
+    with modulo_app.app.test_client() as cliente:
+        login = cliente.post(
+            '/api/auth/local/login',
+            json={'username': username, 'senha': 'senha-de-teste'},
+            headers=cabecalhos,
+        )
+        cadastro = cliente.post(
+            '/api/auth/local/register',
+            json={'username': username, 'senha': 'senha-de-teste'},
+            headers=cabecalhos,
+        )
+    assert login.status_code == 400
+    assert cadastro.status_code == 400
+
+
 def test_casca_da_pwa_carrega_sem_sessao(sem_sessao):
     """Sem isto o operador nao teria onde clicar em 'Conectar'."""
     for rota in ('/', '/manifest.json', '/sw.js'):
@@ -193,69 +297,89 @@ def test_exportacao_com_sessao_funciona(com_sessao):
 
 
 # =============================================================================
-# Allowlist de contas (SEG-01, degrau 1)
-#
-# Estes exercitam o guarda em modo real, que e onde a regra vale. O
-# `test_autorizacao.py` cobre a funcao de decisao isolada; aqui interessa que
-# ela esteja LIGADA no caminho da requisicao -- foi exatamente essa a falha
-# original: a regra nao existia em lugar nenhum e a sessao valia por si.
+# Autenticacao local: OAuth Microsoft nao concede acesso ao ERP.
 # =============================================================================
-def test_sessao_de_conta_autorizada_continua_funcionando(app_real, monkeypatch):
+def test_sessao_local_funciona_independente_da_allowlist_microsoft(app_real, monkeypatch):
     modulo_app, database = app_real
     import config
-    monkeypatch.setattr(config, 'CONTAS_AUTORIZADAS', frozenset({'adri@exemplo.local'}))
-    database.salvar_sessao('token-de-teste', 'adri@exemplo.local')
+    monkeypatch.setattr(config, 'CONTAS_AUTORIZADAS', frozenset({'outra@exemplo.local'}))
 
     with modulo_app.app.test_client() as cliente:
+        _criar_sessao_local(database, cliente, 'conta-local', 'usuario')
         assert cliente.get('/api/clientes', headers=CABECALHOS).status_code == 200
 
 
-def test_sessao_de_conta_fora_da_allowlist_e_recusada(app_real, monkeypatch):
-    """
-    O cenario do colaborador: ele conecta a conta pessoal e, sem esta regra,
-    vira o mesmo que o dono -- faturar, restaurar backup e baixar o banco
-    completo tem a mesma permissao que listar clientes.
-    """
+def test_sessao_microsoft_sozinha_nao_autentica_api_local(app_real):
     modulo_app, database = app_real
-    import config
-    monkeypatch.setattr(config, 'CONTAS_AUTORIZADAS', frozenset({'adri@exemplo.local'}))
-    database.salvar_sessao('token-de-teste', 'colaborador@gmail.com')
+    database.salvar_sessao('token-microsoft', 'conta@exemplo.local')
 
     with modulo_app.app.test_client() as cliente:
         resposta = cliente.get('/api/clientes', headers=CABECALHOS)
 
+    assert resposta.status_code == 401
+
+
+def test_cookie_de_sessao_local_e_obrigatorio_mesmo_com_sessao_no_banco(app_real):
+    modulo_app, database = app_real
+    user_id = database.criar_usuario('sem-cookie', 'senha-local-de-teste', 'usuario')
+    database.salvar_sessao_local('token-somente-no-banco', user_id, 'sem-cookie', 'usuario')
+
+    with modulo_app.app.test_client() as cliente:
+        assert cliente.get('/api/clientes', headers=CABECALHOS).status_code == 401
+
+
+def test_controles_de_desenvolvedor_exigem_cookie_de_sessao(app_real):
+    modulo_app, database = app_real
+    user_id = database.criar_usuario('dev-sem-cookie', 'senha-local-de-teste', 'desenvolvedor')
+    database.salvar_sessao_local('token-dev-sem-cookie', user_id, 'dev-sem-cookie', 'desenvolvedor')
+    with modulo_app.app.test_client() as cliente:
+        resposta = cliente.get('/api/auth/local/usuarios', headers=CABECALHOS)
+    assert resposta.status_code == 401
+
+
+def test_desenvolvedor_gerencia_teste_individual(app_real, monkeypatch):
+    modulo_app, database = app_real
+    from blueprints import auth_local
+
+    # Este caso cobre o controle individual; a validação de dispositivo tem
+    # testes próprios e não deve depender de rede ou da máquina de quem roda.
+    monkeypatch.setattr(auth_local, '_autorizar_dispositivo_desenvolvedor', lambda **_kwargs: True)
+    cliente_id = database.criar_usuario('cliente-teste', 'senha-local-de-teste', 'usuario')
+    cabecalhos = {**CABECALHOS, 'Origin': 'http://localhost'}
+    with modulo_app.app.test_client() as cliente:
+        _criar_sessao_local(database, cliente, 'dev-teste', 'desenvolvedor')
+        liberar = cliente.post(
+            f'/api/auth/local/usuarios/{cliente_id}/teste',
+            json={'acao': 'liberar_30_dias'}, headers=cabecalhos,
+        )
+        assert liberar.status_code == 200
+        assert liberar.get_json()['teste']['estado'] == 'teste'
+
+        desativar = cliente.post(
+            f'/api/auth/local/usuarios/{cliente_id}/teste',
+            json={'acao': 'desativar'}, headers=cabecalhos,
+        )
+        assert desativar.status_code == 200
+        assert desativar.get_json()['teste']['estado'] == 'desativada'
+
+
+def test_usuario_comum_nao_gerencia_periodo_de_teste(app_real):
+    modulo_app, database = app_real
+    cliente_id = database.criar_usuario('alvo-teste', 'senha-local-de-teste', 'usuario')
+    cabecalhos = {**CABECALHOS, 'Origin': 'http://localhost'}
+    with modulo_app.app.test_client() as cliente:
+        _criar_sessao_local(database, cliente, 'usuario-teste', 'usuario')
+        resposta = cliente.post(
+            f'/api/auth/local/usuarios/{cliente_id}/teste',
+            json={'acao': 'desativar'}, headers=cabecalhos,
+        )
     assert resposta.status_code == 403
-    # A sessao intrusa e derrubada: deixa-la de pe faria a tela seguir dizendo
-    # "Conectado" para quem o sistema acabou de recusar.
-    assert database.obter_sessao() is None
 
 
-def test_sessao_gravada_antes_da_allowlist_tambem_e_reavaliada(app_real, monkeypatch):
-    """
-    Nada reavalia a linha de `sessao` depois de gravada. Sem a checagem no
-    guarda, uma sessao criada antes de a allowlist existir -- ou antes de a
-    conta sair dela -- valeria para sempre, e a restricao so pegaria quem
-    fizesse login DEPOIS.
-    """
+def test_conta_local_desativada_perde_a_sessao_ativa(app_real):
     modulo_app, database = app_real
-    database.salvar_sessao('token-de-teste', 'antigo@exemplo.local')
-
-    import config
-    monkeypatch.setattr(config, 'CONTAS_AUTORIZADAS', frozenset({'adri@exemplo.local'}))
-
     with modulo_app.app.test_client() as cliente:
-        assert cliente.get('/api/clientes', headers=CABECALHOS).status_code == 403
-
-
-def test_sem_allowlist_a_sessao_vale_como_antes(app_real, monkeypatch):
-    """
-    A garantia de compatibilidade: quem atualiza sem configurar nada nao pode
-    ser trancado fora do proprio aplicativo.
-    """
-    modulo_app, database = app_real
-    import config
-    monkeypatch.setattr(config, 'CONTAS_AUTORIZADAS', frozenset())
-    database.salvar_sessao('token-de-teste', 'quem-quer-que-seja@exemplo.local')
-
-    with modulo_app.app.test_client() as cliente:
-        assert cliente.get('/api/clientes', headers=CABECALHOS).status_code == 200
+        _criar_sessao_local(database, cliente, 'inativo', 'usuario', ativo=False)
+        resposta = cliente.get('/api/clientes', headers=CABECALHOS)
+    assert resposta.status_code == 401
+    assert database.obter_sessao_local() is None
